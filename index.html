@@ -3,49 +3,58 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Luna – WhatsApp Supervisor</title>
+  <title>Luna – Supervisor WhatsApp</title>
   <link rel="stylesheet" href="styles.css"/>
   <script defer src="config.js"></script>
   <script defer src="app.js"></script>
+  <style>
+    /* garante que uma view esconda a outra */
+    .hidden{display:none}
+    body{margin:0}
+  </style>
 </head>
 <body>
-  <div id="login-view" class="center">
-    <div class="card">
-      <h1>Entrar</h1>
-      <label>Token da Instância</label>
-      <input id="token" placeholder="cole aqui seu token"/>
-      <label>Nome (opcional)</label>
-      <input id="label" placeholder="identificação"/>
-      <label>Número (opcional)</label>
-      <input id="number" placeholder="5531999999999"/>
-      <button id="btn-login">Entrar</button>
-      <div id="msg" class="muted"></div>
+  <!-- VIEW: LOGIN -->
+  <main id="login-view">
+    <div class="center" style="height:100vh;display:grid;place-items:center;background:#0b141a;color:#e9edef">
+      <div class="card" style="width:360px;background:#111b21;border:1px solid #2a3942;border-radius:10px;padding:24px;display:grid;gap:10px">
+        <h1 style="margin:0 0 8px 0">Entrar</h1>
+        <label>Token da Instância</label>
+        <input id="token" placeholder="cole aqui seu token" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
+        <label>Nome (opcional)</label>
+        <input id="label" placeholder="identificação" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
+        <label>Número (opcional)</label>
+        <input id="number" placeholder="55319..." style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
+        <button id="btn-login" style="background:#00a884;color:white;border:none;border-radius:8px;padding:10px;cursor:pointer">Entrar</button>
+        <div id="msg" style="color:#f88;font-size:13px;min-height:18px"></div>
+      </div>
     </div>
-  </div>
+  </main>
 
-  <div id="app-view" class="hidden">
-    <header class="header">
+  <!-- VIEW: APP (aparece só DEPOIS do login) -->
+  <section id="app-view" class="hidden">
+    <header class="header" style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2a3942;padding:12px;background:#111b21;color:#e9edef">
       <div><strong>Luna</strong> <small id="profile" style="color:#8696a0;margin-left:8px"></small></div>
       <div>
-        <button id="btn-sse">Conectar SSE</button>
-        <button id="btn-logout">Sair</button>
+        <button id="btn-refresh" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:8px 10px;cursor:pointer">🔄</button>
+        <button id="btn-logout" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:8px 10px;cursor:pointer">Sair</button>
       </div>
     </header>
 
-    <div class="layout">
-      <aside class="sidebar">
-        <div class="chat-list" id="chat-list"></div>
+    <div class="layout" style="display:grid;grid-template-columns:360px 1fr;height:calc(100vh - 56px)">
+      <aside class="sidebar" style="background:#111b21;border-right:1px solid #2a3942">
+        <div id="chat-list" class="chat-list" style="overflow:auto"></div>
       </aside>
-      <main class="main">
-        <div style="padding:12px;border-bottom:1px solid var(--border)" id="chat-header">Selecione um chat</div>
-        <div class="messages" id="messages"></div>
-        <div class="send">
-          <input id="send-number" placeholder="Número (55319...)"/>
-          <input id="send-text" placeholder="Mensagem"/>
-          <button id="btn-send">Enviar</button>
+      <main class="main" style="display:grid;grid-template-rows:auto 1fr auto;background:#0b141a;color:#e9edef">
+        <div id="chat-header" class="chat-header" style="padding:12px;border-bottom:1px solid #2a3942;background:#111b21">Selecione um chat</div>
+        <div id="messages" class="messages" style="padding:16px;overflow:auto;background:url('data:image/svg+xml;utf8,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot;><text x=&quot;10&quot; y=&quot;20&quot; fill=&quot;%232a3942&quot; font-size=&quot;12&quot;>Luna</text></svg>') repeat"></div>
+        <div class="send" style="display:grid;grid-template-columns:240px 1fr auto;gap:8px;padding:12px;border-top:1px solid #2a3942;background:#111b21">
+          <input id="send-number" placeholder="Número (55319...)" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:6px;padding:10px"/>
+          <input id="send-text" placeholder="Mensagem" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:6px;padding:10px"/>
+          <button id="btn-send" style="background:#00a884;border:none;color:white;border-radius:6px;padding:10px;cursor:pointer">Enviar</button>
         </div>
       </main>
     </div>
-  </div>
+  </section>
 </body>
 </html>
