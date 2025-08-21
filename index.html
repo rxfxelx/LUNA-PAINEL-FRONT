@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Luna – WhatsApp Supervisor</title>
+  <link rel="stylesheet" href="styles.css"/>
+  <script defer src="config.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div id="login-view" class="center">
+    <div class="card">
+      <h1>Entrar</h1>
+      <label>Token da Instância</label>
+      <input id="token" placeholder="cole aqui seu token"/>
+      <label>Nome (opcional)</label>
+      <input id="label" placeholder="identificação"/>
+      <label>Número (opcional)</label>
+      <input id="number" placeholder="5531999999999"/>
+      <button id="btn-login">Entrar</button>
+      <div id="msg" class="muted"></div>
+    </div>
+  </div>
+
+  <div id="app-view" class="hidden">
+    <header class="header">
+      <div><strong>Luna</strong> <small id="profile" style="color:#8696a0;margin-left:8px"></small></div>
+      <div>
+        <button id="btn-sse">Conectar SSE</button>
+        <button id="btn-logout">Sair</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="chat-list" id="chat-list"></div>
+      </aside>
+      <main class="main">
+        <div style="padding:12px;border-bottom:1px solid var(--border)" id="chat-header">Selecione um chat</div>
+        <div class="messages" id="messages"></div>
+        <div class="send">
+          <input id="send-number" placeholder="Número (55319...)"/>
+          <input id="send-text" placeholder="Mensagem"/>
+          <button id="btn-send">Enviar</button>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
