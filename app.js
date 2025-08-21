@@ -18,15 +18,12 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-/* ---------- LOGIN FLOW ---------- */
+/* ---------- LOGIN ---------- */
 async function doLogin() {
   const token  = $("#token").value.trim();
   const label  = $("#label").value.trim();
   const number = $("#number").value.trim();
-  if (!token) {
-    $("#msg").textContent = "Informe o token da instância";
-    return;
-  }
+  if (!token) { $("#msg").textContent = "Informe o token da instância"; return; }
   try {
     const r = await fetch(BACKEND() + "/api/auth/login", {
       method: "POST",
@@ -39,30 +36,18 @@ async function doLogin() {
     localStorage.setItem("luna_profile", JSON.stringify(data.profile || { label, number_hint: number }));
     switchToApp();
   } catch (e) {
-    console.error(e);
-    $("#msg").textContent = e.message || "Falha no login";
+    console.error(e); $("#msg").textContent = e.message || "Falha no login";
   }
 }
 
 function switchToApp() {
-  // esconde login, mostra app
-  hide("#login-view");
-  show("#app-view");
-
-  // header do perfil
-  try {
-    const p = JSON.parse(localStorage.getItem("luna_profile") || "{}");
-    $("#profile").textContent = p.label ? `• ${p.label}` : "";
-  } catch {}
-
-  // carrega chats
+  hide("#login-view"); show("#app-view");
+  try { const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
+        $("#profile").textContent = p.label ? `• ${p.label}` : ""; } catch {}
   loadChats();
 }
 
-function ensureRoute() {
-  if (jwt()) switchToApp();
-  else { show("#login-view"); hide("#app-view"); }
-}
+function ensureRoute() { if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
 
 /* ---------- CHATS/MESSAGES ---------- */
 async function loadChats() {
@@ -73,7 +58,13 @@ async function loadChats() {
       method: "POST",
       body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 50, offset: 0 })
     });
-    renderChats(data.chats || data.items || []);
+    console.log("DEBUG /api/chats ->", data);
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (items.length === 0) {
+      list.innerHTML = "<div style='padding:12px;color:#8696a0'>Nenhum chat encontrado</div>";
+      return;
+    }
+    renderChats(items);
   } catch (e) {
     console.error(e);
     list.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar chats: ${e.message}</div>`;
@@ -82,10 +73,6 @@ async function loadChats() {
 
 function renderChats(chats) {
   const list = $("#chat-list"); list.innerHTML = "";
-  if (!Array.isArray(chats) || chats.length === 0) {
-    list.innerHTML = "<div style='padding:12px;color:#8696a0'>Nenhum chat encontrado</div>";
-    return;
-  }
   chats.forEach(ch => {
     const el = document.createElement("div");
     el.className = "chat-item";
@@ -117,7 +104,9 @@ async function loadMessages(chatid) {
       method: "POST",
       body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" })
     });
-    renderMessages(data.messages || data.items || []);
+    console.log("DEBUG /api/messages ->", data);
+    const items = Array.isArray(data?.items) ? data.items : [];
+    renderMessages(items);
   } catch (e) {
     console.error(e);
     pane.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar mensagens: ${e.message}</div>`;
@@ -139,21 +128,16 @@ function renderMessages(msgs) {
   pane.scrollTop = pane.scrollHeight;
 }
 
-function escapeHtml(s){
-  return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'' : '&#39;'}[m]));
-}
+function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'' : '&#39;'}[m])); }
 
 /* ---------- SEND ---------- */
 async function sendNow() {
   const number = $("#send-number").value.trim();
   const text   = $("#send-text").value.trim();
   if (!number || !text) return;
-  try {
-    await api("/api/send-text", { method:"POST", body: JSON.stringify({ number, text }) });
-    $("#send-text").value = "";
-  } catch (e) {
-    alert(e.message || "Falha ao enviar");
-  }
+  try { await api("/api/send-text", { method:"POST", body: JSON.stringify({ number, text }) });
+        $("#send-text").value = ""; }
+  catch (e) { alert(e.message || "Falha ao enviar"); }
 }
 
 /* ---------- BOOT ---------- */
@@ -165,5 +149,5 @@ document.addEventListener("DOMContentLoaded", () => {
     if (window.__CURRENT_CHAT__) loadMessages(window.__CURRENT_CHAT__.wa_chatid);
     else loadChats();
   };
-  ensureRoute(); // decide qual view mostrar
+  ensureRoute();
 });
