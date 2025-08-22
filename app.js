@@ -18,12 +18,25 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-const NAME_CACHE = new Map();
+/* ---------- Caches ---------- */
+const NAME_CACHE = new Map(); // chatid -> { name, imageUrl }
 let LABELS = [];
 
-function getChatId(ch) { return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
+/* ---------- Utils ---------- */
+function getChatId(ch){ return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
+function getLastText(ch){ return ch?.wa_lastMessageText || ch?.wa_lastMessage?.text || ch?.lastText || ""; }
+function getUnread(ch){ return ch?.wa_unreadCount || ch?.unread || 0; }
+function formatTime(ts){
+  if (!ts) return "";
+  let n = Number(ts);
+  if (!Number.isFinite(n)) return String(ts);
+  if (n > 1e12) n = Math.floor(n/1000); // ms -> s
+  const d = new Date(n*1000);
+  return d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+}
+function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'' : '&#39;'}[m])); }
 
-/* LOGIN (host fixo no backend) */
+/* ---------- LOGIN (host fixo no backend) ---------- */
 async function doLogin() {
   const token  = $("#token").value.trim();
   const label  = $("#label").value.trim();
@@ -55,58 +68,62 @@ function switchToApp() {
   api("/api/instance/status").then(st => console.log("STATUS:", st)).catch(()=>{});
 }
 
-function ensureRoute() { if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
+function ensureRoute(){ if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
 
-/* CHATS */
+/* ---------- CHATS ---------- */
 async function loadChats() {
   const list = $("#chat-list");
-  list.innerHTML = "<div style='padding:12px;color:#8696a0'>Carregando...</div>";
+  list.innerHTML = "<div class='hint'>Carregando...</div>";
   try {
     const data = await api("/api/chats", {
       method: "POST",
       body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 50, offset: 0 })
     });
-    console.log("DEBUG /api/chats ->", data);
     const items = Array.isArray(data?.items) ? data.items : [];
-    if (items.length === 0) {
-      list.innerHTML = "<div style='padding:12px;color:#8696a0'>Nenhum chat encontrado</div>";
-      return;
-    }
+    if (items.length === 0) { list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>"; return; }
     renderChats(items);
-    enrichChats(items.slice(0, 30));
+    enrichChats(items.slice(0, 50));
   } catch (e) {
     console.error(e);
-    list.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar chats: ${e.message}</div>`;
+    list.innerHTML = `<div class='error'>Falha ao carregar chats: ${e.message}</div>`;
   }
 }
 
-function renderChats(chats) {
+function renderChats(chats){
   const list = $("#chat-list"); list.innerHTML = "";
   chats.forEach(ch => {
-    const chatid = getChatId(ch);
-    const name0 = ch.wa_contactName || ch.name || chatid || "Contato";
-    const initials = (name0 || "?").slice(0,2).toUpperCase();
+    const chatid  = getChatId(ch);
+    const name0   = ch.wa_contactName || ch.name || chatid || "Contato";
+    const preview = getLastText(ch);
+    const time    = formatTime(ch.wa_lastMsgTimestamp || ch.lastTs || ch.lastTimestamp);
+    const unread  = getUnread(ch);
 
     const el = document.createElement("div");
     el.className = "chat-item";
     el.dataset.chatid = chatid;
     el.onclick = () => openChat(ch);
     el.innerHTML = `
-      <div class="avatar" style="width:36px;height:36px;border-radius:50%;background:#2a3942;display:inline-flex;align-items:center;justify-content:center;color:#8696a0;overflow:hidden">
-        <span>${initials}</span>
+      <div class="avatar">
+        <span>${(name0||"?").slice(0,2).toUpperCase()}</span>
       </div>
-      <div class="meta">
-        <div class="name">${name0}</div>
-        <div class="time">${ch.wa_lastMsgTimestamp || ""}</div>
-        <div class="preview">${(ch.wa_lastMessageText || "").slice(0, 60)}</div>
-      </div>`;
+      <div class="chat-main">
+        <div class="row1">
+          <div class="name">${escapeHtml(name0)}</div>
+          <div class="time">${escapeHtml(time)}</div>
+        </div>
+        <div class="row2">
+          <div class="preview">${escapeHtml(preview)}</div>
+          ${unread ? `<div class="badge">${unread}</div>` : `<div class="badge badge--empty"></div>`}
+        </div>
+      </div>
+    `;
     list.appendChild(el);
 
     if (NAME_CACHE.has(chatid)) applyNameImage(el, NAME_CACHE.get(chatid));
   });
 }
 
-async function enrichChats(chats) {
+async function enrichChats(chats){
   const jobs = chats.map(async ch => {
     const chatid = getChatId(ch);
     if (!chatid || NAME_CACHE.has(chatid)) return;
@@ -115,26 +132,25 @@ async function enrichChats(chats) {
       NAME_CACHE.set(chatid, info || {});
       const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
       if (row) applyNameImage(row, info || {});
-    } catch (_) {}
+    } catch {}
   });
   await Promise.allSettled(jobs);
 }
 
-function applyNameImage(rowEl, info) {
+function applyNameImage(rowEl, info){
   if (!rowEl || !info) return;
-  if (info.name) rowEl.querySelector(".name").textContent = info.name;
-  if (info.imageUrl) {
-    const av = rowEl.querySelector(".avatar");
-    av.innerHTML = "";
+  if (info.name)  rowEl.querySelector(".name").textContent = info.name;
+  if (info.imageUrl){
+    const a = rowEl.querySelector(".avatar");
+    a.innerHTML = "";
     const img = document.createElement("img");
     img.src = info.imageUrl; img.alt = "avatar";
-    img.style.width="36px"; img.style.height="36px"; img.style.borderRadius="50%";
-    av.appendChild(img);
+    a.appendChild(img);
   }
 }
 
-/* MESSAGES */
-async function openChat(ch) {
+/* ---------- MESSAGES ---------- */
+async function openChat(ch){
   window.__CURRENT_CHAT__ = ch;
   const chatid = getChatId(ch);
   $("#chat-header").textContent = ch.wa_contactName || ch.name || chatid || "Chat";
@@ -142,24 +158,23 @@ async function openChat(ch) {
   await loadMessages(chatid);
 }
 
-async function loadMessages(chatid) {
+async function loadMessages(chatid){
   const pane = $("#messages");
-  pane.innerHTML = "<div style='padding:12px;color:#8696a0'>Carregando...</div>";
+  pane.innerHTML = "<div class='hint'>Carregando...</div>";
   try {
     const data = await api("/api/messages", {
       method: "POST",
       body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" })
     });
-    console.log("DEBUG /api/messages ->", data);
     const items = Array.isArray(data?.items) ? data.items : [];
     renderMessages(items);
   } catch (e) {
     console.error(e);
-    pane.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar mensagens: ${e.message}</div>`;
+    pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${e.message}</div>`;
   }
 }
 
-function renderMessages(msgs) {
+function renderMessages(msgs){
   const pane = $("#messages"); pane.innerHTML = "";
   msgs.forEach(m => {
     const me = m.fromMe || m.fromme || m.from_me || false;
@@ -174,10 +189,8 @@ function renderMessages(msgs) {
   pane.scrollTop = pane.scrollHeight;
 }
 
-function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'' : '&#39;'}[m])); }
-
-/* SEND */
-async function sendNow() {
+/* ---------- SEND ---------- */
+async function sendNow(){
   const number = $("#send-number").value.trim();
   const text   = $("#send-text").value.trim();
   if (!number || !text) return;
@@ -186,7 +199,7 @@ async function sendNow() {
   catch (e) { alert(e.message || "Falha ao enviar"); }
 }
 
-/* BOOT */
+/* ---------- BOOT ---------- */
 document.addEventListener("DOMContentLoaded", () => {
   $("#btn-login").onclick  = doLogin;
   $("#btn-logout").onclick = () => { localStorage.clear(); location.reload(); };
