@@ -1,104 +1,57 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Luna Painel - WhatsApp Clone</title>
-    <link rel="stylesheet" href="styles.css">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+  <title>Luna Painel</title>
+  <link rel="stylesheet" href="styles.css"/>
 </head>
-<body>
-    <div id="app">
-        <!-- Login Screen -->
-        <div id="login-screen" class="login-container">
-            <div class="login-box">
-                <div class="login-header">
-                    <!-- Added moon icon and made login box larger -->
-                    <div class="login-icon">
-                        <i class="fas fa-moon"></i>
-                    </div>
-                    <h1>Luna Painel</h1>
-                    <p>Entre com seu Instance Token</p>
-                </div>
-                <form id="login-form" class="login-form">
-                    <div class="input-group">
-                        <input 
-                            type="text" 
-                            id="instance-token" 
-                            placeholder="Instance Token" 
-                            required
-                        >
-                    </div>
-                    <button type="submit" class="login-btn">
-                        <span class="btn-text">Entrar</span>
-                        <div class="loading-spinner" style="display: none;">
-                            <i class="fas fa-spinner fa-spin"></i>
-                        </div>
-                    </button>
-                </form>
-                <div id="login-error" class="error-message" style="display: none;"></div>
-            </div>
-        </div>
+<body class="is-mobile-list">
 
-        <!-- Main App Screen -->
-        <div id="main-screen" class="main-container" style="display: none;">
-            <div class="app-layout">
-                <!-- Sidebar -->
-                <div class="sidebar">
-                    <div class="sidebar-header">
-                        <div class="user-info">
-                            <div class="user-avatar">
-                                <i class="fas fa-user"></i>
-                            </div>
-                            <span class="user-name">Luna Painel</span>
-                        </div>
-                        <div class="header-actions">
-                            <button class="action-btn" id="refresh-btn" title="Atualizar">
-                                <i class="fas fa-sync-alt"></i>
-                            </button>
-                            <button class="action-btn" id="logout-btn" title="Sair">
-                                <i class="fas fa-sign-out-alt"></i>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <div class="search-container">
-                        <div class="search-box">
-                            <i class="fas fa-search"></i>
-                            <input type="text" placeholder="Pesquisar conversas..." id="search-input">
-                        </div>
-                    </div>
-
-                    <div class="chats-container">
-                        <div id="loading-chats" class="loading-container">
-                            <div class="loading-spinner">
-                                <i class="fas fa-spinner fa-spin"></i>
-                            </div>
-                            <p>Carregando conversas...</p>
-                        </div>
-                        <div id="chats-list" class="chats-list"></div>
-                        <div id="no-chats" class="no-chats" style="display: none;">
-                            <i class="fas fa-comments"></i>
-                            <p>Nenhuma conversa encontrada</p>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Main Content -->
-                <div class="main-content">
-                    <div class="chat-placeholder">
-                        <div class="placeholder-content">
-                            <i class="fab fa-whatsapp"></i>
-                            <h2>Luna Painel Web</h2>
-                            <p>Selecione um chat para começar a conversar</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+  <!-- LOGIN -->
+  <main id="login-view" class="login">
+    <div class="login-card">
+      <div class="login-icon">☏</div>
+      <h1>Luna Painel</h1>
+      <p class="login-sub">Entre com seu Instance Token</p>
+      <input id="token" class="inp" placeholder="cole o token aqui" autocomplete="off"/>
+      <button id="btn-login" class="btn btn-primary">Entrar</button>
+      <div id="msg" class="msg-err"></div>
     </div>
+  </main>
 
-    <script src="config.js"></script>
-    <script src="app.js"></script>
+  <!-- APP -->
+  <section id="app-view" class="hidden app">
+    <header class="topbar">
+      <div class="brand">Luna <small id="profile"></small></div>
+      <div class="actions">
+        <button id="btn-refresh" class="btn ghost" aria-label="Atualizar">🔄</button>
+        <button id="btn-logout"  class="btn ghost" aria-label="Sair">Sair</button>
+      </div>
+    </header>
+
+    <div class="shell">
+      <!-- LISTA -->
+      <aside class="sidebar">
+        <div class="sidebar-head">Conversas</div>
+        <div id="chat-list" class="chat-list"></div>
+      </aside>
+
+      <!-- MENSAGENS -->
+      <main class="main">
+        <header class="chatbar">
+          <button id="btn-back-mobile" class="btn back" aria-label="Voltar">←</button>
+          <div id="chat-header" class="chat-title">Selecione um chat</div>
+        </header>
+        <div id="messages" class="messages">
+          <div class="hint">Nada selecionado</div>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ORDEM IMPORTANTE -->
+  <script src="config.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>
