@@ -2,17 +2,21 @@
   --bg:#0b141a; --card:#111b21; --muted:#2a3942;
   --text:#e9edef; --sub:#aebac1; --sub2:#8696a0;
   --violet:#7c3aed; --violet2:#a78bfa; --green:#25d366;
+
+  /* scrollbars */
+  --scroll-bg:#0f171c;
+  --scroll-thumb:#1f2a32;
+  --scroll-thumb-hover:#27343d;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
   margin:0;background:var(--bg);color:var(--text);
   font:14px/1.4 system-ui,Segoe UI,Roboto,Arial;
-  /* impede scroll da página; só os painéis internos rolam */
-  overflow:hidden;
+  overflow:hidden; /* página não rola; só painéis internos */
 }
 
-/* garante que elementos escondidos não ocupem espaço */
+/* escondido de verdade */
 .hidden{display:none !important}
 
 /* LOGIN */
@@ -28,35 +32,18 @@ body{
 .msg-err{min-height:18px;color:#ff6161;font-size:13px}
 
 /* APP */
-.app{
-  height:100vh;              /* ocupa a viewport inteira */
-  display:flex; flex-direction:column;
-}
-.app .topbar{
-  flex:0 0 auto;
-  background:var(--card);display:flex;align-items:center;justify-content:space-between;
-  border-bottom:1px solid var(--muted);padding:10px 12px
-}
+.app{height:100vh;display:flex;flex-direction:column}
+.app .topbar{flex:0 0 auto;background:var(--card);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--muted);padding:10px 12px}
 .brand{font-weight:700}
 .brand small{color:var(--sub2);margin-left:8px}
 
-/* grade: sidebar + main, com altura fixada e rolagem interna */
-.shell{
-  flex:1 1 auto; height:calc(100vh - 48px); /* 48px ~= topbar */
-  display:grid; grid-template-columns:340px 1fr;
-  min-height:0; /* permite que filhos usem overflow:auto */
-}
+/* grade: sidebar + main */
+.shell{flex:1 1 auto;height:calc(100vh - 48px);display:grid;grid-template-columns:340px 1fr;min-height:0}
 
-/* --- SIDEBAR (rolagem própria) --- */
-.sidebar{
-  min-height:0; /* essencial p/ overflow funcionar no grid */
-  border-right:1px solid var(--muted);background:var(--card);
-  display:flex;flex-direction:column;overflow:hidden;
-}
+/* --- SIDEBAR (scroll próprio) --- */
+.sidebar{min-height:0;border-right:1px solid var(--muted);background:var(--card);display:flex;flex-direction:column;overflow:hidden}
 .sidebar-head{padding:10px 12px;border-bottom:1px solid var(--muted);color:var(--sub2);flex:0 0 auto}
-.chat-list{
-  flex:1 1 auto; min-height:0; overflow:auto; /* rolagem só aqui */
-}
+.chat-list{flex:1 1 auto;min-height:0;overflow:auto}
 .hint{padding:12px;color:var(--sub2)}
 .error{padding:12px;color:#ff7070}
 
@@ -72,22 +59,13 @@ body{
 .preview{flex:1;min-width:0;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{background:var(--green);color:#0b141a;border-radius:999px;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;font-size:12px;font-weight:700}
 
-/* --- MAIN (rolagem própria) --- */
-.main{
-  min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden;
-}
-.chatbar{
-  flex:0 0 auto; display:flex;align-items:center;gap:8px;
-  padding:10px 12px;border-bottom:1px solid var(--muted);background:var(--card)
-}
+/* --- MAIN (scroll próprio) --- */
+.main{min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.chatbar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--muted);background:var(--card)}
 .btn.back{display:none}
 .chat-title{font-weight:600}
-.messages{
-  flex:1 1 auto; min-height:0; overflow:auto; /* rolagem só aqui */
-  padding:16px;background:
-    radial-gradient(1200px 600px at -10% -20%,#1c1437 0%,transparent 50%),
-    var(--bg)
-}
+.messages{flex:1 1 auto;min-height:0;overflow:auto;padding:16px;background:
+  radial-gradient(1200px 600px at -10% -20%,#1c1437 0%,transparent 50%),var(--bg)}
 .msg{max-width:70%;margin:8px 10px;padding:10px;border-radius:10px;position:relative}
 .msg.me{background:#5b21b6;margin-left:auto}
 .msg.you{background:#202c33;margin-right:auto}
@@ -103,3 +81,12 @@ body{
   body.is-mobile-chat .main{display:flex}
   .btn.back{display:inline-flex}
 }
+
+/* ===== Scrollbars dark (Chrome/Edge/Safari + Firefox) ===== */
+*{scrollbar-width:thin;scrollbar-color:var(--scroll-thumb) var(--scroll-bg)}
+*::-webkit-scrollbar{width:10px;height:10px}
+*::-webkit-scrollbar-track{background:var(--scroll-bg)}
+*::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border-radius:8px;border:2px solid var(--scroll-bg)}
+*::-webkit-scrollbar-thumb:hover{background:var(--scroll-thumb-hover)}
+*::-webkit-scrollbar-corner{background:var(--scroll-bg)}
+.chat-list,.messages{scrollbar-gutter:stable both-edges}
