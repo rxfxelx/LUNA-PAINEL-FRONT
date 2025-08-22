@@ -1,212 +1,278 @@
-const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
-const $  = (s) => document.querySelector(s);
-const show = (sel) => $(sel).classList.remove("hidden");
-const hide = (sel) => $(sel).classList.add("hidden");
-
-function jwt() { return localStorage.getItem("luna_jwt") || ""; }
-function authHeaders() { return { "Authorization": "Bearer " + jwt() }; }
-
-async function api(path, opts = {}) {
-  const res = await fetch(BACKEND() + path, {
-    headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers||{}) },
-    ...opts
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(()=> "");
-    throw new Error(`HTTP ${res.status}: ${t}`);
+class LunaPainel {
+  constructor() {
+    this.token = localStorage.getItem("instance_token")
+    this.chats = []
+    this.filteredChats = []
+    this.init()
   }
-  return res.json();
-}
 
-/* ---------- Caches ---------- */
-const NAME_CACHE = new Map(); // chatid -> { name, imageUrl }
-let LABELS = [];
-
-/* ---------- Utils ---------- */
-function getChatId(ch){ return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
-function getLastText(ch){ return ch?.wa_lastMessageText || ch?.wa_lastMessage?.text || ch?.lastText || ""; }
-function getUnread(ch){ return ch?.wa_unreadCount || ch?.unread || 0; }
-function formatTime(ts){
-  if (!ts) return "";
-  let n = Number(ts);
-  if (!Number.isFinite(n)) return String(ts);
-  if (n > 1e12) n = Math.floor(n/1000); // ms -> s
-  const d = new Date(n*1000);
-  return d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
-}
-function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'' : '&#39;'}[m])); }
-
-/* ---------- LOGIN (host fixo no backend) ---------- */
-async function doLogin() {
-  const token  = $("#token").value.trim();
-  const label  = $("#label").value.trim();
-  const number = $("#number").value.trim();
-  if (!token)  { $("#msg").textContent = "Informe o token da instância"; return; }
-
-  try {
-    const r = await fetch(BACKEND() + "/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, label, number_hint: number })
-    });
-    if (!r.ok) throw new Error(await r.text());
-    const data = await r.json();
-    localStorage.setItem("luna_jwt", data.jwt);
-    localStorage.setItem("luna_profile", JSON.stringify(data.profile || { label, number_hint: number }));
-    switchToApp();
-  } catch (e) {
-    console.error(e); $("#msg").textContent = e.message || "Falha no login";
+  init() {
+    this.bindEvents()
+    this.checkAuth()
   }
-}
 
-function switchToApp() {
-  hide("#login-view"); show("#app-view");
-  try { const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
-        $("#profile").textContent = p.label ? `• ${p.label}` : ""; } catch {}
-  loadChats();
-  api("/api/labels").then(ls => { LABELS = ls; }).catch(()=>{});
-  api("/api/instance/status").then(st => console.log("STATUS:", st)).catch(()=>{});
-}
-
-function ensureRoute(){ if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
-
-/* ---------- CHATS ---------- */
-async function loadChats() {
-  const list = $("#chat-list");
-  list.innerHTML = "<div class='hint'>Carregando...</div>";
-  try {
-    const data = await api("/api/chats", {
-      method: "POST",
-      body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 50, offset: 0 })
-    });
-    const items = Array.isArray(data?.items) ? data.items : [];
-    if (items.length === 0) { list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>"; return; }
-    renderChats(items);
-    enrichChats(items.slice(0, 50));
-  } catch (e) {
-    console.error(e);
-    list.innerHTML = `<div class='error'>Falha ao carregar chats: ${e.message}</div>`;
+  getBackendUrl() {
+    const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "")
+    return BACKEND()
   }
-}
 
-function renderChats(chats){
-  const list = $("#chat-list"); list.innerHTML = "";
-  chats.forEach(ch => {
-    const chatid  = getChatId(ch);
-    const name0   = ch.wa_contactName || ch.name || chatid || "Contato";
-    const preview = getLastText(ch);
-    const time    = formatTime(ch.wa_lastMsgTimestamp || ch.lastTs || ch.lastTimestamp);
-    const unread  = getUnread(ch);
+  bindEvents() {
+    // Login form
+    const loginForm = document.getElementById("login-form")
+    if (loginForm) {
+      loginForm.addEventListener("submit", (e) => this.handleLogin(e))
+    }
 
-    const el = document.createElement("div");
-    el.className = "chat-item";
-    el.dataset.chatid = chatid;
-    el.onclick = () => openChat(ch);
-    el.innerHTML = `
-      <div class="avatar">
-        <span>${(name0||"?").slice(0,2).toUpperCase()}</span>
-      </div>
-      <div class="chat-main">
-        <div class="row1">
-          <div class="name">${escapeHtml(name0)}</div>
-          <div class="time">${escapeHtml(time)}</div>
-        </div>
-        <div class="row2">
-          <div class="preview">${escapeHtml(preview)}</div>
-          ${unread ? `<div class="badge">${unread}</div>` : `<div class="badge badge--empty"></div>`}
-        </div>
-      </div>
-    `;
-    list.appendChild(el);
+    // Logout button
+    const logoutBtn = document.getElementById("logout-btn")
+    if (logoutBtn) {
+      logoutBtn.addEventListener("click", () => this.handleLogout())
+    }
 
-    if (NAME_CACHE.has(chatid)) applyNameImage(el, NAME_CACHE.get(chatid));
-  });
-}
+    // Refresh button
+    const refreshBtn = document.getElementById("refresh-btn")
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", () => this.loadChats())
+    }
 
-async function enrichChats(chats){
-  const jobs = chats.map(async ch => {
-    const chatid = getChatId(ch);
-    if (!chatid || NAME_CACHE.has(chatid)) return;
+    // Search input
+    const searchInput = document.getElementById("search-input")
+    if (searchInput) {
+      searchInput.addEventListener("input", (e) => this.handleSearch(e.target.value))
+    }
+  }
+
+  checkAuth() {
+    if (this.token) {
+      this.showMainScreen()
+      this.loadChats()
+    } else {
+      this.showLoginScreen()
+    }
+  }
+
+  showLoginScreen() {
+    document.getElementById("login-screen").style.display = "flex"
+    document.getElementById("main-screen").style.display = "none"
+  }
+
+  showMainScreen() {
+    document.getElementById("login-screen").style.display = "none"
+    document.getElementById("main-screen").style.display = "block"
+  }
+
+  async handleLogin(e) {
+    e.preventDefault()
+
+    const tokenInput = document.getElementById("instance-token")
+    const loginBtn = document.querySelector(".login-btn")
+    const btnText = document.querySelector(".btn-text")
+    const loadingSpinner = document.querySelector(".loading-spinner")
+    const errorDiv = document.getElementById("login-error")
+
+    const token = tokenInput.value.trim()
+
+    if (!token) {
+      this.showError("Por favor, insira o Instance Token")
+      return
+    }
+
+    // Show loading state
+    loginBtn.disabled = true
+    btnText.style.display = "none"
+    loadingSpinner.style.display = "block"
+    errorDiv.style.display = "none"
+
     try {
-      const info = await api(`/api/chat/name-image?chatid=${encodeURIComponent(chatid)}`, { method:"GET" });
-      NAME_CACHE.set(chatid, info || {});
-      const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
-      if (row) applyNameImage(row, info || {});
-    } catch {}
-  });
-  await Promise.allSettled(jobs);
-}
+      const response = await fetch(`${this.getBackendUrl()}/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ token }),
+      })
 
-function applyNameImage(rowEl, info){
-  if (!rowEl || !info) return;
-  if (info.name)  rowEl.querySelector(".name").textContent = info.name;
-  if (info.imageUrl){
-    const a = rowEl.querySelector(".avatar");
-    a.innerHTML = "";
-    const img = document.createElement("img");
-    img.src = info.imageUrl; img.alt = "avatar";
-    a.appendChild(img);
+      if (response.ok) {
+        this.token = token
+        localStorage.setItem("instance_token", token)
+        this.showMainScreen()
+        this.loadChats()
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        this.showError(errorData.message || "Token inválido. Verifique e tente novamente.")
+      }
+    } catch (error) {
+      console.error("Login error:", error)
+      this.showError("Erro de conexão. Verifique sua internet e tente novamente.")
+    } finally {
+      // Reset loading state
+      loginBtn.disabled = false
+      btnText.style.display = "block"
+      loadingSpinner.style.display = "none"
+    }
+  }
+
+  handleLogout() {
+    localStorage.removeItem("instance_token")
+    this.token = null
+    this.chats = []
+    this.showLoginScreen()
+
+    // Clear form
+    const tokenInput = document.getElementById("instance-token")
+    if (tokenInput) {
+      tokenInput.value = ""
+    }
+  }
+
+  async loadChats() {
+    if (!this.token) return
+
+    const loadingDiv = document.getElementById("loading-chats")
+    const chatsListDiv = document.getElementById("chats-list")
+    const noChatsDiv = document.getElementById("no-chats")
+
+    // Show loading
+    loadingDiv.style.display = "block"
+    chatsListDiv.style.display = "none"
+    noChatsDiv.style.display = "none"
+
+    try {
+      const response = await fetch(`${this.getBackendUrl()}/chat/find`, {
+        method: "POST",
+        headers: {
+          token: this.token,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          operator: "AND",
+          sort: "-wa_lastMsgTimestamp",
+          limit: 50,
+          offset: 0,
+        }),
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        this.chats = data.items || []
+        this.filteredChats = [...this.chats]
+        this.renderChats()
+      } else {
+        if (response.status === 401) {
+          this.handleLogout()
+          this.showError("Sessão expirada. Faça login novamente.")
+        } else {
+          throw new Error("Erro ao carregar conversas")
+        }
+      }
+    } catch (error) {
+      console.error("Error loading chats:", error)
+      this.showError("Erro ao carregar conversas. Tente novamente.")
+
+      // Hide loading and show no chats
+      loadingDiv.style.display = "none"
+      noChatsDiv.style.display = "block"
+    }
+  }
+
+  renderChats() {
+    const loadingDiv = document.getElementById("loading-chats")
+    const chatsListDiv = document.getElementById("chats-list")
+    const noChatsDiv = document.getElementById("no-chats")
+
+    loadingDiv.style.display = "none"
+
+    if (this.filteredChats.length === 0) {
+      chatsListDiv.style.display = "none"
+      noChatsDiv.style.display = "block"
+      return
+    }
+
+    chatsListDiv.style.display = "block"
+    noChatsDiv.style.display = "none"
+
+    chatsListDiv.innerHTML = this.filteredChats
+      .map((chat) => {
+        const name = chat.wa_name || chat.wa_contactName || "Contato"
+        const lastMessage = chat.wa_lastMessageText || "Sem mensagens"
+        const hasImage = chat.image || chat.profilePic
+
+        // Generate initials for fallback
+        const initials = name
+          .split(" ")
+          .map((word) => word.charAt(0))
+          .join("")
+          .substring(0, 2)
+          .toUpperCase()
+
+        return `
+                <div class="chat-item" data-chat-id="${chat.wa_chatid}">
+                    <div class="chat-avatar ${hasImage ? "" : "fallback"}">
+                        ${
+                          hasImage
+                            ? `<img src="${hasImage}" alt="${name}" onerror="this.parentElement.innerHTML='${initials}'; this.parentElement.classList.add('fallback');">`
+                            : initials
+                        }
+                    </div>
+                    <div class="chat-info">
+                        <div class="chat-name">${this.escapeHtml(name)}</div>
+                        <div class="chat-last-message">${this.escapeHtml(lastMessage)}</div>
+                    </div>
+                </div>
+            `
+      })
+      .join("")
+
+    // Add click events to chat items
+    const chatItems = chatsListDiv.querySelectorAll(".chat-item")
+    chatItems.forEach((item) => {
+      item.addEventListener("click", () => {
+        // Remove active class from all items
+        chatItems.forEach((i) => i.classList.remove("active"))
+        // Add active class to clicked item
+        item.classList.add("active")
+
+        // Here you could implement chat opening logic
+        console.log("Chat selected:", item.dataset.chatId)
+      })
+    })
+  }
+
+  handleSearch(query) {
+    if (!query.trim()) {
+      this.filteredChats = [...this.chats]
+    } else {
+      const searchTerm = query.toLowerCase()
+      this.filteredChats = this.chats.filter((chat) => {
+        const name = (chat.wa_name || chat.wa_contactName || "").toLowerCase()
+        const lastMessage = (chat.wa_lastMessageText || "").toLowerCase()
+        return name.includes(searchTerm) || lastMessage.includes(searchTerm)
+      })
+    }
+    this.renderChats()
+  }
+
+  showError(message) {
+    const errorDiv = document.getElementById("login-error")
+    if (errorDiv) {
+      errorDiv.textContent = message
+      errorDiv.style.display = "block"
+
+      // Auto-hide error after 5 seconds
+      setTimeout(() => {
+        errorDiv.style.display = "none"
+      }, 5000)
+    }
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement("div")
+    div.textContent = text
+    return div.innerHTML
   }
 }
 
-/* ---------- MESSAGES ---------- */
-async function openChat(ch){
-  window.__CURRENT_CHAT__ = ch;
-  const chatid = getChatId(ch);
-  $("#chat-header").textContent = ch.wa_contactName || ch.name || chatid || "Chat";
-  $("#send-number").value = (chatid || "").replace("@s.whatsapp.net","").replace("@g.us","");
-  await loadMessages(chatid);
-}
-
-async function loadMessages(chatid){
-  const pane = $("#messages");
-  pane.innerHTML = "<div class='hint'>Carregando...</div>";
-  try {
-    const data = await api("/api/messages", {
-      method: "POST",
-      body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" })
-    });
-    const items = Array.isArray(data?.items) ? data.items : [];
-    renderMessages(items);
-  } catch (e) {
-    console.error(e);
-    pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${e.message}</div>`;
-  }
-}
-
-function renderMessages(msgs){
-  const pane = $("#messages"); pane.innerHTML = "";
-  msgs.forEach(m => {
-    const me = m.fromMe || m.fromme || m.from_me || false;
-    const el = document.createElement("div");
-    el.className = "msg " + (me ? "me" : "you");
-    const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "";
-    const who  = m.senderName || m.pushName || "";
-    const ts   = m.messageTimestamp || m.timestamp || "";
-    el.innerHTML = `${escapeHtml(text)}<small>${who} • ${ts}</small>`;
-    pane.appendChild(el);
-  });
-  pane.scrollTop = pane.scrollHeight;
-}
-
-/* ---------- SEND ---------- */
-async function sendNow(){
-  const number = $("#send-number").value.trim();
-  const text   = $("#send-text").value.trim();
-  if (!number || !text) return;
-  try { await api("/api/send-text", { method:"POST", body: JSON.stringify({ number, text }) });
-        $("#send-text").value = ""; }
-  catch (e) { alert(e.message || "Falha ao enviar"); }
-}
-
-/* ---------- BOOT ---------- */
+// Initialize the app when DOM is loaded
 document.addEventListener("DOMContentLoaded", () => {
-  $("#btn-login").onclick  = doLogin;
-  $("#btn-logout").onclick = () => { localStorage.clear(); location.reload(); };
-  $("#btn-send").onclick   = sendNow;
-  $("#btn-refresh").onclick = () => {
-    if (window.__CURRENT_CHAT__) loadMessages(getChatId(window.__CURRENT_CHAT__));
-    else loadChats();
-  };
-  ensureRoute();
-});
+  new LunaPainel()
+})
