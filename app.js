@@ -61,12 +61,23 @@ async function doLogin() {
 
 function switchToApp() {
   hide("#login-view"); show("#app-view");
-  try { const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
-        $("#profile").textContent = p.label ? "• " + p.label : ""; } catch {}
+
+  // remove o login do DOM para nunca mais afetar layout
+  const lv = document.getElementById("login-view");
+  if (lv) lv.remove();
+
+  try {
+    const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
+    $("#profile").textContent = p.label ? "• " + p.label : "";
+  } catch {}
+
   loadChats();
 }
 
-function ensureRoute(){ if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
+function ensureRoute(){
+  if (jwt()) switchToApp();
+  else { show("#login-view"); hide("#app-view"); }
+}
 
 /* =======================
    CHATS
