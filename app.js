@@ -1,4 +1,4 @@
-/* LUNA – FRONT READ-ONLY (SEM ENRICH/IMAGENS) */
+/* LUNA – FRONT READ-ONLY (com enrich de nome/foto) */
 const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
 const $  = (s) => document.querySelector(s);
 const show = (sel) => $(sel).classList.remove("hidden");
@@ -21,7 +21,13 @@ async function api(path, opts = {}) {
 }
 
 /* ---------- Utils ---------- */
+const ENRICH_CACHE = new Map(); // chatid -> { name, imageUrl }
 function getChatId(ch){ return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
+function normalizeNumber(chatid){
+  if (!chatid) return "";
+  // se já tem sufixo, mantém; senão padroniza para @s.whatsapp.net
+  return chatid.includes("@") ? chatid : (chatid + "@s.whatsapp.net");
+}
 function getLastText(ch){ return ch?.wa_lastMessageText || ch?.wa_lastMessage?.text || ch?.lastText || ""; }
 function getUnread(ch){ return ch?.wa_unreadCount ?? ch?.unread ?? 0; }
 function timeStr(ts){
@@ -93,6 +99,9 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items : [];
     if (!items.length) { list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>"; return; }
     renderChats(items);
+
+    // enriquece só os primeiros 50 (já é o limit), em lotes para não spammar
+    enrichChatsBatched(items.slice(0, 50));
   } catch (e) {
     console.error(e);
     list.innerHTML = `<div class='error'>Falha ao carregar chats: ${e.message}</div>`;
@@ -126,7 +135,61 @@ function renderChats(chats){
         </div>
       </div>`;
     list.appendChild(el);
+
+    // se já temos info em cache, aplica
+    if (ENRICH_CACHE.has(chatid)) applyNameImage(el, ENRICH_CACHE.get(chatid));
   });
+}
+
+/* ---------- Enriquecimento de nome/foto ----------
+   Método igual ao que você mostrou:
+   POST /chat/GetNameAndImageURL
+   Aqui chamamos nosso backend proxy: POST /api/chat/name-image
+   Body: { number: "<wa_chatid>", preview: true }
+-------------------------------------------------- */
+async function enrichChatsBatched(chats){
+  // processa em pequenos lotes para evitar muitas conexões simultâneas
+  const batchSize = 5;
+  for (let i = 0; i < chats.length; i += batchSize) {
+    const slice = chats.slice(i, i + batchSize);
+    await Promise.allSettled(slice.map(ch => enrichOne(ch)));
+  }
+}
+
+async function enrichOne(ch){
+  const chatid = getChatId(ch);
+  if (!chatid || ENRICH_CACHE.has(chatid)) return;
+
+  try {
+    const number = normalizeNumber(chatid);
+    // proxy no backend (POST), mapeando para /chat/GetNameAndImageURL na UAZAPI
+    const info = await api("/api/chat/name-image", {
+      method: "POST",
+      body: JSON.stringify({ number, preview: true })
+    });
+    const mapped = {
+      name: info?.wa_name || info?.name || "",
+      imageUrl: info?.imagePreview || info?.image || ""
+    };
+    ENRICH_CACHE.set(chatid, mapped);
+
+    const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
+    if (row) applyNameImage(row, mapped);
+  } catch (e) {
+    // falha silenciosa (para não “sujar” o console)
+  }
+}
+
+function applyNameImage(row, info){
+  if (!row || !info) return;
+  if (info.name)  row.querySelector(".name").textContent = info.name;
+  if (info.imageUrl){
+    const a = row.querySelector(".avatar");
+    a.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = info.imageUrl; img.alt = "avatar"; img.loading = "lazy";
+    a.appendChild(img);
+  }
 }
 
 /* =======================
@@ -173,7 +236,7 @@ function renderMessages(msgs){
     el.innerHTML = `${esc(text)}<small>${esc(who)} • ${esc(ts)}</small>`;
     pane.appendChild(el);
   });
-  pane.scrollTop = pane.scrollHeight;
+  pane.scrollTop = pane.scrollHeight; // rola até o fim do painel de mensagens
 }
 
 /* =======================
@@ -195,6 +258,5 @@ document.addEventListener("DOMContentLoaded", () => {
     else loadChats();
   });
   $("#btn-back-mobile")?.addEventListener("click", goList);
-
   ensureRoute();
 });
