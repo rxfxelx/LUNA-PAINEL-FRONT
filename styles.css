@@ -25,10 +25,20 @@ body {
   background: #21262d;
   border: 1px solid #30363d;
   border-radius: 12px;
-  padding: 2rem;
+  padding: 3rem;
   width: 100%;
-  max-width: 400px;
+  max-width: 480px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.login-icon {
+  margin-bottom: 1.5rem;
+}
+
+.login-icon i {
+  font-size: 4rem;
+  color: #8b5cf6;
+  text-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
 }
 
 .login-header {
@@ -36,21 +46,15 @@ body {
   margin-bottom: 2rem;
 }
 
-.login-header i {
-  font-size: 3rem;
-  color: #8b5cf6;
-  margin-bottom: 1rem;
-}
-
 .login-header h1 {
   color: #e6edf3;
   margin-bottom: 0.5rem;
-  font-size: 1.5rem;
+  font-size: 1.8rem;
 }
 
 .login-header p {
   color: #8b949e;
-  font-size: 0.9rem;
+  font-size: 1rem;
 }
 
 .input-group {
@@ -374,7 +378,7 @@ body {
 
   .login-box {
     margin: 1rem;
-    padding: 1.5rem;
+    padding: 2rem;
   }
 }
 
