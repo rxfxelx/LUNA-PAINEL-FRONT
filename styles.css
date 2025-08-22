@@ -6,7 +6,9 @@
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
-.hidden{display:none}
+
+/* garante que elementos escondidos não ocupem espaço */
+.hidden{display:none !important}
 
 /* LOGIN */
 .login{min-height:100vh;display:grid;place-items:center;padding:24px}
