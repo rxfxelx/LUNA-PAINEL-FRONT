@@ -1,4 +1,4 @@
-const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/,"");
+const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
 const $  = (s) => document.querySelector(s);
 const show = (sel) => $(sel).classList.remove("hidden");
 const hide = (sel) => $(sel).classList.add("hidden");
@@ -18,22 +18,34 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
+/* ---------- Caches/Helpers ---------- */
+const NAME_CACHE = new Map(); // chatid -> { name, imageUrl }
+let LABELS = [];
+
+function getChatId(ch) {
+  return ch?.wa_chatid || ch?.chatid || ch?.id || "";
+}
+
 /* ---------- LOGIN ---------- */
 async function doLogin() {
+  const server = $("#server") ? $("#server").value.trim() : ""; // campo novo no login
   const token  = $("#token").value.trim();
   const label  = $("#label").value.trim();
   const number = $("#number").value.trim();
-  if (!token) { $("#msg").textContent = "Informe o token da instância"; return; }
+
+  if (!server) { $("#msg").textContent = "Informe o Servidor (URL), ex: https://hia-clientes.uazapi.com"; return; }
+  if (!token)  { $("#msg").textContent = "Informe o token da instância"; return; }
+
   try {
     const r = await fetch(BACKEND() + "/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token, label, number_hint: number })
+      body: JSON.stringify({ server_url: server, token, label, number_hint: number })
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
     localStorage.setItem("luna_jwt", data.jwt);
-    localStorage.setItem("luna_profile", JSON.stringify(data.profile || { label, number_hint: number }));
+    localStorage.setItem("luna_profile", JSON.stringify({ ...(data.profile||{}), server_url: server }));
     switchToApp();
   } catch (e) {
     console.error(e); $("#msg").textContent = e.message || "Falha no login";
@@ -45,6 +57,9 @@ function switchToApp() {
   try { const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
         $("#profile").textContent = p.label ? `• ${p.label}` : ""; } catch {}
   loadChats();
+  // pré-carrega metadados (opcional)
+  api("/api/labels").then(ls => { LABELS = ls; }).catch(()=>{});
+  api("/api/instance/status").then(st => console.log("STATUS:", st)).catch(()=>{});
 }
 
 function ensureRoute() { if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
@@ -65,6 +80,7 @@ async function loadChats() {
       return;
     }
     renderChats(items);
+    enrichChats(items.slice(0, 30)); // busca nome/foto dos primeiros 30
   } catch (e) {
     console.error(e);
     list.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar chats: ${e.message}</div>`;
@@ -74,26 +90,61 @@ async function loadChats() {
 function renderChats(chats) {
   const list = $("#chat-list"); list.innerHTML = "";
   chats.forEach(ch => {
+    const chatid = getChatId(ch);
+    const name0 = ch.wa_contactName || ch.name || chatid || "Contato";
+    const initials = (name0 || "?").slice(0,2).toUpperCase();
     const el = document.createElement("div");
     el.className = "chat-item";
+    el.dataset.chatid = chatid;
     el.onclick = () => openChat(ch);
-    const initials = (ch.wa_contactName || ch.name || "?").slice(0,2).toUpperCase();
     el.innerHTML = `
-      <div class="avatar">${initials}</div>
+      <div class="avatar" style="width:36px;height:36px;border-radius:50%;background:#2a3942;display:inline-flex;align-items:center;justify-content:center;color:#8696a0;overflow:hidden">
+        <span>${initials}</span>
+      </div>
       <div class="meta">
-        <div class="name">${ch.wa_contactName || ch.name || ch.wa_chatid || "Contato"}</div>
+        <div class="name">${name0}</div>
         <div class="time">${ch.wa_lastMsgTimestamp || ""}</div>
         <div class="preview">${(ch.wa_lastMessageText || "").slice(0, 60)}</div>
       </div>`;
     list.appendChild(el);
+
+    if (NAME_CACHE.has(chatid)) applyNameImage(el, NAME_CACHE.get(chatid));
   });
+}
+
+async function enrichChats(chats) {
+  const jobs = chats.map(async ch => {
+    const chatid = getChatId(ch);
+    if (!chatid || NAME_CACHE.has(chatid)) return;
+    try {
+      const info = await api(`/api/chat/name-image?chatid=${encodeURIComponent(chatid)}`, { method:"GET" });
+      NAME_CACHE.set(chatid, info || {});
+      const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
+      if (row) applyNameImage(row, info || {});
+    } catch (_) {}
+  });
+  await Promise.allSettled(jobs);
+}
+
+function applyNameImage(rowEl, info) {
+  if (!rowEl || !info) return;
+  if (info.name) rowEl.querySelector(".name").textContent = info.name;
+  if (info.imageUrl) {
+    const av = rowEl.querySelector(".avatar");
+    av.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = info.imageUrl; img.alt = "avatar";
+    img.style.width="36px"; img.style.height="36px"; img.style.borderRadius="50%";
+    av.appendChild(img);
+  }
 }
 
 async function openChat(ch) {
   window.__CURRENT_CHAT__ = ch;
-  $("#chat-header").textContent = ch.wa_contactName || ch.name || ch.wa_chatid || "Chat";
-  $("#send-number").value = (ch.wa_chatid || "").replace("@s.whatsapp.net","").replace("@g.us","");
-  await loadMessages(ch.wa_chatid);
+  const chatid = getChatId(ch);
+  $("#chat-header").textContent = ch.wa_contactName || ch.name || chatid || "Chat";
+  $("#send-number").value = (chatid || "").replace("@s.whatsapp.net","").replace("@g.us","");
+  await loadMessages(chatid);
 }
 
 async function loadMessages(chatid) {
@@ -146,7 +197,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-logout").onclick = () => { localStorage.clear(); location.reload(); };
   $("#btn-send").onclick   = sendNow;
   $("#btn-refresh").onclick = () => {
-    if (window.__CURRENT_CHAT__) loadMessages(window.__CURRENT_CHAT__.wa_chatid);
+    if (window.__CURRENT_CHAT__) loadMessages(getChatId(window.__CURRENT_CHAT__));
     else loadChats();
   };
   ensureRoute();
