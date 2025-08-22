@@ -1,54 +1,101 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Luna – Supervisor WhatsApp</title>
-  <link rel="stylesheet" href="styles.css"/>
-  <script defer src="config.js"></script>
-  <script defer src="app.js"></script>
-  <style>.hidden{display:none} body{margin:0}</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Luna Painel - WhatsApp Clone</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
-  <main id="login-view">
-    <div class="center" style="height:100vh;display:grid;place-items:center;background:#0b141a;color:#e9edef">
-      <div class="card" style="width:360px;background:#111b21;border:1px solid #2a3942;border-radius:10px;padding:24px;display:grid;gap:10px">
-        <h1 style="margin:0 0 8px 0">Entrar</h1>
-        <label>Token da Instância</label>
-        <input id="token" placeholder="cole aqui seu token" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
-        <label>Nome (opcional)</label>
-        <input id="label" placeholder="identificação" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
-        <label>Número (opcional)</label>
-        <input id="number" placeholder="55319..." style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
-        <button id="btn-login" style="background:#00a884;color:white;border:none;border-radius:8px;padding:10px;cursor:pointer">Entrar</button>
-        <div id="msg" style="color:#f88;font-size:13px;min-height:18px"></div>
-      </div>
-    </div>
-  </main>
-
-  <section id="app-view" class="hidden">
-    <header class="header" style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2a3942;padding:12px;background:#111b21;color:#e9edef">
-      <div><strong>Luna</strong> <small id="profile" style="color:#8696a0;margin-left:8px"></small></div>
-      <div>
-        <button id="btn-refresh" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:8px 10px;cursor:pointer">🔄</button>
-        <button id="btn-logout" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:8px 10px;cursor:pointer">Sair</button>
-      </div>
-    </header>
-
-    <div class="layout" style="display:grid;grid-template-columns:360px 1fr;height:calc(100vh - 56px)">
-      <aside class="sidebar" style="background:#111b21;border-right:1px solid #2a3942">
-        <div id="chat-list" class="chat-list" style="overflow:auto"></div>
-      </aside>
-      <main class="main" style="display:grid;grid-template-rows:auto 1fr auto;background:#0b141a;color:#e9edef">
-        <div id="chat-header" class="chat-header" style="padding:12px;border-bottom:1px solid #2a3942;background:#111b21">Selecione um chat</div>
-        <div id="messages" class="messages" style="padding:16px;overflow:auto;background:url('data:image/svg+xml;utf8,<svg xmlns=&quot;http://www.w3.org/2000/svg&quot; width=&quot;200&quot; height=&quot;200&quot;><text x=&quot;10&quot; y=&quot;20&quot; fill=&quot;%232a3942&quot; font-size=&quot;12&quot;>Luna</text></svg>') repeat"></div>
-        <div class="send" style="display:grid;grid-template-columns:240px 1fr auto;gap:8px;padding:12px;border-top:1px solid #2a3942;background:#111b21">
-          <input id="send-number" placeholder="Número (55319...)" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:6px;padding:10px"/>
-          <input id="send-text" placeholder="Mensagem" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:6px;padding:10px"/>
-          <button id="btn-send" style="background:#00a884;border:none;color:white;border-radius:6px;padding:10px;cursor:pointer">Enviar</button>
+    <div id="app">
+        <!-- Login Screen -->
+        <div id="login-screen" class="login-container">
+            <div class="login-box">
+                <div class="login-header">
+                    <i class="fab fa-whatsapp"></i>
+                    <h1>Luna Painel</h1>
+                    <p>Entre com seu Instance Token</p>
+                </div>
+                <form id="login-form" class="login-form">
+                    <div class="input-group">
+                        <input 
+                            type="text" 
+                            id="instance-token" 
+                            placeholder="Instance Token" 
+                            required
+                        >
+                    </div>
+                    <button type="submit" class="login-btn">
+                        <span class="btn-text">Entrar</span>
+                        <div class="loading-spinner" style="display: none;">
+                            <i class="fas fa-spinner fa-spin"></i>
+                        </div>
+                    </button>
+                </form>
+                <div id="login-error" class="error-message" style="display: none;"></div>
+            </div>
         </div>
-      </main>
+
+        <!-- Main App Screen -->
+        <div id="main-screen" class="main-container" style="display: none;">
+            <div class="app-layout">
+                <!-- Sidebar -->
+                <div class="sidebar">
+                    <div class="sidebar-header">
+                        <div class="user-info">
+                            <div class="user-avatar">
+                                <i class="fas fa-user"></i>
+                            </div>
+                            <span class="user-name">Luna Painel</span>
+                        </div>
+                        <div class="header-actions">
+                            <button class="action-btn" id="refresh-btn" title="Atualizar">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                            <button class="action-btn" id="logout-btn" title="Sair">
+                                <i class="fas fa-sign-out-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="search-container">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" placeholder="Pesquisar conversas..." id="search-input">
+                        </div>
+                    </div>
+
+                    <div class="chats-container">
+                        <div id="loading-chats" class="loading-container">
+                            <div class="loading-spinner">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                            <p>Carregando conversas...</p>
+                        </div>
+                        <div id="chats-list" class="chats-list"></div>
+                        <div id="no-chats" class="no-chats" style="display: none;">
+                            <i class="fas fa-comments"></i>
+                            <p>Nenhuma conversa encontrada</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Content -->
+                <div class="main-content">
+                    <div class="chat-placeholder">
+                        <div class="placeholder-content">
+                            <i class="fab fa-whatsapp"></i>
+                            <h2>Luna Painel Web</h2>
+                            <p>Selecione um chat para começar a conversar</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
-  </section>
+
+    <script src="config.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
