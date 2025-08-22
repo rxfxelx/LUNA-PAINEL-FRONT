@@ -1,290 +1,193 @@
-class LunaPainel {
-  constructor() {
-    this.token = localStorage.getItem("instance_token")
-    this.chats = []
-    this.filteredChats = []
-    this.init()
+/* LUNA – FRONT READ-ONLY (corrigido para o backend atual) */
+const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/,"");
+const $ = (s)=>document.querySelector(s);
+const show = (s)=>$(s).classList.remove("hidden");
+const hide = (s)=>$(s).classList.add("hidden");
+
+/* ---------- JWT / API ---------- */
+function jwt(){ return localStorage.getItem("luna_jwt") || ""; }
+function authHeaders(){ return { "Authorization": "Bearer " + jwt() }; }
+
+async function api(path, opts={}){
+  const res = await fetch(BACKEND() + path, {
+    headers: { "Content-Type":"application/json", ...authHeaders(), ...(opts.headers||{}) },
+    ...opts
+  });
+  if(!res.ok){
+    const t = await res.text().catch(()=> "");
+    throw new Error(`HTTP ${res.status}: ${t}`);
   }
+  return res.json();
+}
 
-  init() {
-    this.bindEvents()
-    this.checkAuth()
-  }
+/* ---------- Utils ---------- */
+const CACHE = new Map(); // chatid -> { name, imageUrl }
+function getChatId(ch){ return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
+function getLastText(ch){ return ch?.wa_lastMessageText || ch?.wa_lastMessage?.text || ch?.lastText || ""; }
+function getUnread(ch){ return ch?.wa_unreadCount || ch?.unread || 0; }
+function timeStr(ts){
+  if(!ts) return "";
+  let n = Number(ts); if(n>1e12) n=Math.floor(n/1000);
+  return new Date(n*1000).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
+}
+function esc(s){return String(s||"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 
-  getBackendUrl() {
-    const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "")
-    return BACKEND()
-  }
+/* ---------- LOGIN (POST /api/auth/login { token }) ---------- */
+async function doLogin(){
+  const token = $("#token").value.trim();
+  const msg = $("#msg"); msg.textContent = "";
+  if(!token){ msg.textContent="Informe o token da instância"; return; }
 
-  bindEvents() {
-    // Login form
-    const loginForm = document.getElementById("login-form")
-    if (loginForm) {
-      loginForm.addEventListener("submit", (e) => this.handleLogin(e))
-    }
-
-    // Logout button
-    const logoutBtn = document.getElementById("logout-btn")
-    if (logoutBtn) {
-      logoutBtn.addEventListener("click", () => this.handleLogout())
-    }
-
-    // Refresh button
-    const refreshBtn = document.getElementById("refresh-btn")
-    if (refreshBtn) {
-      refreshBtn.addEventListener("click", () => this.loadChats())
-    }
-
-    // Search input
-    const searchInput = document.getElementById("search-input")
-    if (searchInput) {
-      searchInput.addEventListener("input", (e) => this.handleSearch(e.target.value))
-    }
-  }
-
-  checkAuth() {
-    if (this.token) {
-      this.showMainScreen()
-      this.loadChats()
-    } else {
-      this.showLoginScreen()
-    }
-  }
-
-  showLoginScreen() {
-    document.getElementById("login-screen").style.display = "flex"
-    document.getElementById("main-screen").style.display = "none"
-  }
-
-  showMainScreen() {
-    document.getElementById("login-screen").style.display = "none"
-    document.getElementById("main-screen").style.display = "block"
-  }
-
-  async handleLogin(e) {
-    e.preventDefault()
-
-    const tokenInput = document.getElementById("instance-token")
-    const loginBtn = document.querySelector(".login-btn")
-    const btnText = document.querySelector(".btn-text")
-    const loadingSpinner = document.querySelector(".loading-spinner")
-    const errorDiv = document.getElementById("login-error")
-
-    const token = tokenInput.value.trim()
-
-    if (!token) {
-      this.showError("Por favor, insira o Instance Token")
-      return
-    }
-
-    // Show loading state
-    loginBtn.disabled = true
-    btnText.style.display = "none"
-    loadingSpinner.style.display = "block"
-    errorDiv.style.display = "none"
-
-    try {
-      const response = await fetch(`${this.getBackendUrl()}/instance/connect`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ instance_token: token }),
-      })
-
-      if (response.ok) {
-        const responseData = await response.json()
-        const sessionToken = responseData.token || responseData.session_token || token
-        this.token = sessionToken
-        localStorage.setItem("instance_token", sessionToken)
-        this.showMainScreen()
-        this.loadChats()
-      } else {
-        const errorData = await response.json().catch(() => ({}))
-        this.showError(errorData.message || "Token inválido. Verifique e tente novamente.")
-      }
-    } catch (error) {
-      console.error("Login error:", error)
-      this.showError("Erro de conexão. Verifique sua internet e tente novamente.")
-    } finally {
-      // Reset loading state
-      loginBtn.disabled = false
-      btnText.style.display = "block"
-      loadingSpinner.style.display = "none"
-    }
-  }
-
-  handleLogout() {
-    localStorage.removeItem("instance_token")
-    this.token = null
-    this.chats = []
-    this.showLoginScreen()
-
-    // Clear form
-    const tokenInput = document.getElementById("instance-token")
-    if (tokenInput) {
-      tokenInput.value = ""
-    }
-  }
-
-  async loadChats() {
-    if (!this.token) return
-
-    const loadingDiv = document.getElementById("loading-chats")
-    const chatsListDiv = document.getElementById("chats-list")
-    const noChatsDiv = document.getElementById("no-chats")
-
-    // Show loading
-    loadingDiv.style.display = "block"
-    chatsListDiv.style.display = "none"
-    noChatsDiv.style.display = "none"
-
-    try {
-      const response = await fetch(`${this.getBackendUrl()}/chats`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${this.token}`,
-          "Content-Type": "application/json",
-        },
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        this.chats = Array.isArray(data) ? data : data.chats || data.items || []
-        this.filteredChats = [...this.chats]
-        this.renderChats()
-      } else {
-        if (response.status === 401) {
-          this.handleLogout()
-          this.showError("Sessão expirada. Faça login novamente.")
-        } else {
-          throw new Error("Erro ao carregar conversas")
-        }
-      }
-    } catch (error) {
-      console.error("Error loading chats:", error)
-      this.showError("Erro ao carregar conversas. Tente novamente.")
-
-      // Hide loading and show no chats
-      loadingDiv.style.display = "none"
-      noChatsDiv.style.display = "block"
-    }
-  }
-
-  renderChats() {
-    const loadingDiv = document.getElementById("loading-chats")
-    const chatsListDiv = document.getElementById("chats-list")
-    const noChatsDiv = document.getElementById("no-chats")
-
-    loadingDiv.style.display = "none"
-
-    if (this.filteredChats.length === 0) {
-      chatsListDiv.style.display = "none"
-      noChatsDiv.style.display = "block"
-      return
-    }
-
-    chatsListDiv.style.display = "block"
-    noChatsDiv.style.display = "none"
-
-    chatsListDiv.innerHTML = this.filteredChats
-      .map((chat) => {
-        const name = chat.name || chat.wa_name || chat.wa_contactName || chat.contact?.name || "Contato"
-        const lastMessage = chat.lastMessage?.text || chat.wa_lastMessageText || "Sem mensagens"
-        const hasImage = chat.profilePic || chat.image || chat.contact?.profilePic
-        const timestamp = chat.lastMessage?.timestamp || chat.wa_lastMsgTimestamp
-        const unreadCount = chat.unreadCount || chat.unread || 0
-
-        // Generate initials for fallback
-        const initials = name
-          .split(" ")
-          .map((word) => word.charAt(0))
-          .join("")
-          .substring(0, 2)
-          .toUpperCase()
-
-        // Format timestamp
-        const timeStr = timestamp ? this.formatTime(timestamp) : ""
-
-        return `
-                <div class="chat-item" data-chat-id="${chat.id || chat.wa_chatid || chat.chatId}">
-                    <div class="chat-avatar ${hasImage ? "" : "fallback"}">
-                        ${
-                          hasImage
-                            ? `<img src="${hasImage}" alt="${name}" onerror="this.parentElement.innerHTML='${initials}'; this.parentElement.classList.add('fallback');">`
-                            : initials
-                        }
-                    </div>
-                    <div class="chat-info">
-                        <div class="chat-header">
-                            <div class="chat-name">${this.escapeHtml(name)}</div>
-                            ${timeStr ? `<div class="chat-time">${timeStr}</div>` : ""}
-                        </div>
-                        <div class="chat-footer">
-                            <div class="chat-last-message">${this.escapeHtml(lastMessage)}</div>
-                            ${unreadCount > 0 ? `<div class="unread-badge">${unreadCount}</div>` : ""}
-                        </div>
-                    </div>
-                </div>
-            `
-      })
-      .join("")
-
-    // Add click events to chat items
-    const chatItems = chatsListDiv.querySelectorAll(".chat-item")
-    chatItems.forEach((item) => {
-      item.addEventListener("click", () => {
-        // Remove active class from all items
-        chatItems.forEach((i) => i.classList.remove("active"))
-        // Add active class to clicked item
-        item.classList.add("active")
-
-        // Here you could implement chat opening logic
-        console.log("Chat selected:", item.dataset.chatId)
-      })
-    })
-  }
-
-  formatTime(timestamp) {
-    try {
-      const date = new Date(timestamp * 1000) // Convert from seconds to milliseconds if needed
-      const now = new Date()
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-      const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
-
-      if (messageDate.getTime() === today.getTime()) {
-        // Today - show time
-        return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
-      } else {
-        // Other days - show date
-        return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
-      }
-    } catch (error) {
-      return ""
-    }
-  }
-
-  showError(message) {
-    const errorDiv = document.getElementById("login-error")
-    if (errorDiv) {
-      errorDiv.textContent = message
-      errorDiv.style.display = "block"
-
-      // Auto-hide error after 5 seconds
-      setTimeout(() => {
-        errorDiv.style.display = "none"
-      }, 5000)
-    }
-  }
-
-  escapeHtml(text) {
-    const div = document.createElement("div")
-    div.textContent = text
-    return div.innerHTML
+  try{
+    const r = await fetch(BACKEND()+"/api/auth/login",{
+      method:"POST",
+      headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ token }) // <- formato correto
+    });
+    if(!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    localStorage.setItem("luna_jwt", data.jwt);
+    localStorage.setItem("luna_profile", JSON.stringify(data.profile||{}));
+    switchToApp();
+  }catch(e){
+    console.error(e);
+    msg.textContent = "Token inválido. Verifique e tente novamente.";
   }
 }
 
-// Initialize the app when DOM is loaded
-document.addEventListener("DOMContentLoaded", () => {
-  new LunaPainel()
-})
+function switchToApp(){
+  hide("#login-view"); show("#app-view");
+  try{ const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
+       $("#profile").textContent = p.label ? "• "+p.label : ""; }catch{}
+  loadChats();
+}
+
+function ensureRoute(){ if(jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
+
+/* ---------- CHATS ---------- */
+async function loadChats(){
+  const list = $("#chat-list");
+  list.innerHTML = "<div class='hint'>Carregando...</div>";
+  try{
+    // backend já tem fallback para /chat/find
+    const data = await api("/api/chats", {
+      method:"POST",
+      body: JSON.stringify({ operator:"AND", sort:"-wa_lastMsgTimestamp", limit:50, offset:0 })
+    });
+    const items = Array.isArray(data?.items)?data.items:[];
+    if(!items.length){ list.innerHTML="<div class='hint'>Nenhum chat encontrado</div>"; return; }
+    renderChats(items);
+    enrich(items.slice(0,60));
+  }catch(e){
+    console.error(e); list.innerHTML = `<div class='error'>Falha ao carregar chats: ${e.message}</div>`;
+  }
+}
+
+function renderChats(chats){
+  const list = $("#chat-list"); list.innerHTML="";
+  chats.forEach(ch=>{
+    const chatid = getChatId(ch);
+    const name0  = ch.wa_contactName || ch.name || chatid || "Contato";
+    const t      = timeStr(ch.wa_lastMsgTimestamp || ch.lastTs || ch.lastTimestamp);
+    const prev   = getLastText(ch);
+    const unread = getUnread(ch);
+
+    const el = document.createElement("div");
+    el.className="chat-item";
+    el.dataset.chatid = chatid;
+    el.onclick = ()=> openChat(ch);
+    el.innerHTML = `
+      <div class="avatar"><span>${(name0||'?').slice(0,2).toUpperCase()}</span></div>
+      <div class="chat-main">
+        <div class="row1">
+          <div class="name">${esc(name0)}</div>
+          <div class="time">${esc(t)}</div>
+        </div>
+        <div class="row2">
+          <div class="preview">${esc(prev)}</div>
+          ${unread?`<div class="badge">${unread}</div>`:`<div class="badge badge--empty"></div>`}
+        </div>
+      </div>`;
+    list.appendChild(el);
+
+    if(CACHE.has(chatid)) applyNameImage(el, CACHE.get(chatid));
+  });
+}
+
+async function enrich(chats){
+  const jobs = chats.map(async ch=>{
+    const chatid = getChatId(ch);
+    if(!chatid || CACHE.has(chatid)) return;
+    try{
+      const info = await api(`/api/chat/name-image?chatid=${encodeURIComponent(chatid)}`);
+      CACHE.set(chatid, info||{});
+      const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
+      if(row) applyNameImage(row, info||{});
+    }catch{}
+  });
+  await Promise.allSettled(jobs);
+}
+
+function applyNameImage(row, info){
+  if(info.name) row.querySelector(".name").textContent = info.name;
+  if(info.imageUrl){
+    const a = row.querySelector(".avatar"); a.innerHTML="";
+    const img = document.createElement("img"); img.src = info.imageUrl; img.alt="avatar";
+    a.appendChild(img);
+  }
+}
+
+/* ---------- MENSAGENS ---------- */
+async function openChat(ch){
+  window.__CURRENT_CHAT__ = ch;
+  const chatid = getChatId(ch);
+  $("#chat-header").textContent = ch.wa_contactName || ch.name || chatid || "Chat";
+
+  if (window.matchMedia("(max-width:1023px)").matches){
+    document.body.classList.add("is-mobile-chat");
+    document.body.classList.remove("is-mobile-list");
+  }
+  await loadMessages(chatid);
+}
+
+async function loadMessages(chatid){
+  const pane = $("#messages");
+  pane.innerHTML = "<div class='hint'>Carregando...</div>";
+  try{
+    const data = await api("/api/messages", {
+      method:"POST",
+      body: JSON.stringify({ chatid, limit:100, sort:"-messageTimestamp" })
+    });
+    const items = Array.isArray(data?.items)?data.items:[];
+    renderMessages(items);
+  }catch(e){
+    console.error(e); pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${e.message}</div>`;
+  }
+}
+
+function renderMessages(msgs){
+  const pane = $("#messages"); pane.innerHTML="";
+  msgs.forEach(m=>{
+    const me = m.fromMe || m.fromme || m.from_me || false;
+    const el = document.createElement("div");
+    el.className = "msg " + (me?"me":"you");
+    const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "";
+    const who  = m.senderName || m.pushName || "";
+    const ts   = m.messageTimestamp || m.timestamp || "";
+    el.innerHTML = `${esc(text)}<small>${esc(who)} • ${esc(ts)}</small>`;
+    pane.appendChild(el);
+  });
+  pane.scrollTop = pane.scrollHeight;
+}
+
+/* ---------- MOBILE ---------- */
+function goList(){ document.body.classList.add("is-mobile-list"); document.body.classList.remove("is-mobile-chat"); }
+
+/* ---------- BOOT ---------- */
+document.addEventListener("DOMContentLoaded", ()=>{
+  $("#btn-login")?.addEventListener("click", doLogin);
+  $("#btn-logout")?.addEventListener("click", ()=>{ localStorage.clear(); location.reload(); });
+  $("#btn-refresh")?.addEventListener("click", ()=>{ if(window.__CURRENT_CHAT__) loadMessages(getChatId(window.__CURRENT_CHAT__)); else loadChats(); });
+  $("#btn-back-mobile")?.addEventListener("click", goList);
+  ensureRoute();
+});
