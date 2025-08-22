@@ -1,4 +1,6 @@
-/* LUNA – FRONT READ-ONLY (com enrich de nome/foto) */
+/* LUNA – FRONT READ-ONLY (com enrich de nome/foto + mobile + scrolls) */
+
+/* ---------- BASICS ---------- */
 const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
 const $  = (s) => document.querySelector(s);
 const show = (sel) => $(sel).classList.remove("hidden");
@@ -20,8 +22,9 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-/* ---------- Utils ---------- */
+/* ---------- UTILS ---------- */
 const ENRICH_CACHE = new Map(); // chatid -> { name, imageUrl }
+
 function getChatId(ch){ return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
 function normalizeNumber(chatid){
   if (!chatid) return "";
@@ -32,11 +35,28 @@ function getUnread(ch){ return ch?.wa_unreadCount ?? ch?.unread ?? 0; }
 function timeStr(ts){
   if (!ts) return "";
   let n = Number(ts);
-  if (n > 1e12) n = Math.floor(n/1000);
+  if (n > 1e12) n = Math.floor(n/1000); // ms -> s
   if (!Number.isFinite(n)) return String(ts);
   return new Date(n*1000).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
 }
 function esc(s){ return String(s||"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// Corrige possíveis textos em latin‑1 / URL encoded
+function fixEncoding(s) {
+  if (!s) return s;
+  try {
+    if (/%[0-9A-F]{2}/i.test(s)) return decodeURIComponent(s);
+  } catch {}
+  try {
+    // latin-1 -> utf-8
+    return decodeURIComponent(escape(s));
+  } catch {}
+  return s;
+}
+function cleanName(name) {
+  const t = fixEncoding(String(name || ""));
+  return t.replace(/\s+/g, " ").trim();
+}
 
 /* =======================
    LOGIN
@@ -66,8 +86,7 @@ async function doLogin() {
 
 function switchToApp() {
   hide("#login-view"); show("#app-view");
-  const lv = document.getElementById("login-view");
-  if (lv) lv.remove();
+  const lv = document.getElementById("login-view"); if (lv) lv.remove();
   try {
     const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
     $("#profile").textContent = p.label ? "• " + p.label : "";
@@ -94,6 +113,8 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items : [];
     if (!items.length) { list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>"; return; }
     renderChats(items);
+
+    // enriquece primeiros 50 (limit)
     enrichChatsBatched(items.slice(0, 50));
   } catch (e) {
     console.error(e);
@@ -105,7 +126,7 @@ function renderChats(chats){
   const list = $("#chat-list"); list.innerHTML = "";
   chats.forEach(ch => {
     const chatid = getChatId(ch);
-    const name0  = ch.wa_contactName || ch.name || chatid || "Contato";
+    const baseName = cleanName(ch.wa_contactName || ch.name || chatid || "Contato");
     const t      = timeStr(ch.wa_lastMsgTimestamp || ch.lastTs || ch.lastTimestamp);
     const prev   = getLastText(ch);
     const unread = getUnread(ch);
@@ -116,10 +137,10 @@ function renderChats(chats){
     el.onclick = () => openChat(ch);
 
     el.innerHTML = `
-      <div class="avatar"><span>${(name0||'?').slice(0,2).toUpperCase()}</span></div>
+      <div class="avatar"><span>${(baseName||'?').slice(0,2).toUpperCase()}</span></div>
       <div class="chat-main">
         <div class="row1">
-          <div class="name">${esc(name0)}</div>
+          <div class="name">${esc(baseName)}</div>
           <div class="time">${esc(t)}</div>
         </div>
         <div class="row2">
@@ -148,7 +169,7 @@ async function enrichOne(ch){
 
   try {
     const number = normalizeNumber(chatid);
-    const info = await api("/api/chat/GetNameAndImageURL", {   // <- AQUI: POST no endpoint correto
+    const info = await api("/api/chat/GetNameAndImageURL", {
       method: "POST",
       body: JSON.stringify({ number, preview: true })
     });
@@ -161,19 +182,31 @@ async function enrichOne(ch){
     const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
     if (row) applyNameImage(row, mapped);
   } catch (e) {
-    // falha silenciosa
+    console.debug("enrichOne failed:", e?.message || e);
   }
 }
 
 function applyNameImage(row, info){
   if (!row || !info) return;
-  if (info.name)  row.querySelector(".name").textContent = info.name;
-  if (info.imageUrl){
+  const nm = cleanName(info.name || "");
+  if (nm) {
+    const nameEl = row.querySelector(".name");
+    if (nameEl) nameEl.textContent = nm;
+  }
+  const url = info.imageUrl || "";
+  if (url) {
     const a = row.querySelector(".avatar");
-    a.innerHTML = "";
-    const img = document.createElement("img");
-    img.src = info.imageUrl; img.alt = "avatar"; img.loading = "lazy";
-    a.appendChild(img);
+    if (a) {
+      a.innerHTML = "";
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = "avatar";
+      img.loading = "lazy";
+      img.style.width = "100%";
+      img.style.height = "100%";
+      img.style.objectFit = "cover";
+      a.appendChild(img);
+    }
   }
 }
 
@@ -183,7 +216,9 @@ function applyNameImage(row, info){
 async function openChat(ch){
   window.__CURRENT_CHAT__ = ch;
   const chatid = getChatId(ch);
-  $("#chat-header").textContent = ch.wa_contactName || ch.name || chatid || "Chat";
+  $("#chat-header").textContent = cleanName(ch.wa_contactName || ch.name || chatid || "Chat");
+
+  // Mobile: alterna para a view de mensagens
   if (window.matchMedia("(max-width:1023px)").matches){
     document.body.classList.add("is-mobile-chat");
     document.body.classList.remove("is-mobile-list");
@@ -214,12 +249,12 @@ function renderMessages(msgs){
     const el = document.createElement("div");
     el.className = "msg " + (me ? "me" : "you");
     const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "";
-    const who  = m.senderName || m.pushName || "";
+    const who  = cleanName(m.senderName || m.pushName || "");
     const ts   = m.messageTimestamp || m.timestamp || "";
     el.innerHTML = `${esc(text)}<small>${esc(who)} • ${esc(ts)}</small>`;
     pane.appendChild(el);
   });
-  pane.scrollTop = pane.scrollHeight;
+  pane.scrollTop = pane.scrollHeight; // rola até o fim do painel de mensagens
 }
 
 /* =======================
