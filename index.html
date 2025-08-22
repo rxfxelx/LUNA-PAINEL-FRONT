@@ -7,41 +7,25 @@
   <link rel="stylesheet" href="styles.css"/>
   <script defer src="config.js"></script>
   <script defer src="app.js"></script>
-  <style>
-    .hidden{display:none}
-    body{margin:0}
-  </style>
+  <style>.hidden{display:none} body{margin:0}</style>
 </head>
 <body>
-  <!-- VIEW: LOGIN -->
   <main id="login-view">
     <div class="center" style="height:100vh;display:grid;place-items:center;background:#0b141a;color:#e9edef">
       <div class="card" style="width:360px;background:#111b21;border:1px solid #2a3942;border-radius:10px;padding:24px;display:grid;gap:10px">
         <h1 style="margin:0 0 8px 0">Entrar</h1>
-
-        <label>Servidor (URL)</label>
-        <input id="server" placeholder="https://hia-clientes.uazapi.com"
-               style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
-        <small style="color:#28d;display:block;margin:-6px 0 8px 2px">
-          Ex.: https://hia-clientes.uazapi.com
-        </small>
-
         <label>Token da Instância</label>
         <input id="token" placeholder="cole aqui seu token" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
-
         <label>Nome (opcional)</label>
         <input id="label" placeholder="identificação" style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
-
         <label>Número (opcional)</label>
         <input id="number" placeholder="55319..." style="background:#202c33;color:#e9edef;border:1px solid #2a3942;border-radius:8px;padding:10px"/>
-
         <button id="btn-login" style="background:#00a884;color:white;border:none;border-radius:8px;padding:10px;cursor:pointer">Entrar</button>
         <div id="msg" style="color:#f88;font-size:13px;min-height:18px"></div>
       </div>
     </div>
   </main>
 
-  <!-- VIEW: APP -->
   <section id="app-view" class="hidden">
     <header class="header" style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #2a3942;padding:12px;background:#111b21;color:#e9edef">
       <div><strong>Luna</strong> <small id="profile" style="color:#8696a0;margin-left:8px"></small></div>
