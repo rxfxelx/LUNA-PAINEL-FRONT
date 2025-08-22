@@ -23,7 +23,7 @@ async function api(path, opts = {}) {
 /* ---------- Utils ---------- */
 function getChatId(ch){ return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
 function getLastText(ch){ return ch?.wa_lastMessageText || ch?.wa_lastMessage?.text || ch?.lastText || ""; }
-function getUnread(ch){ return ch?.wa_unreadCount || ch?.unread || 0; }
+function getUnread(ch){ return ch?.wa_unreadCount ?? ch?.unread ?? 0; }
 function timeStr(ts){
   if (!ts) return "";
   let n = Number(ts);
@@ -112,6 +112,7 @@ function renderChats(chats){
     el.className = "chat-item";
     el.dataset.chatid = chatid;
     el.onclick = () => openChat(ch);
+
     el.innerHTML = `
       <div class="avatar"><span>${(name0||'?').slice(0,2).toUpperCase()}</span></div>
       <div class="chat-main">
@@ -121,7 +122,7 @@ function renderChats(chats){
         </div>
         <div class="row2">
           <div class="preview">${esc(prev)}</div>
-          ${unread ? `<div class="badge">${unread}</div>` : `<div class="badge badge--empty"></div>`}
+          ${unread > 0 ? `<div class="badge">${unread}</div>` : ``}
         </div>
       </div>`;
     list.appendChild(el);
