@@ -18,34 +18,28 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-/* ---------- Caches/Helpers ---------- */
-const NAME_CACHE = new Map(); // chatid -> { name, imageUrl }
+const NAME_CACHE = new Map();
 let LABELS = [];
 
-function getChatId(ch) {
-  return ch?.wa_chatid || ch?.chatid || ch?.id || "";
-}
+function getChatId(ch) { return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
 
-/* ---------- LOGIN ---------- */
+/* LOGIN (host fixo no backend) */
 async function doLogin() {
-  const server = $("#server") ? $("#server").value.trim() : ""; // campo novo no login
   const token  = $("#token").value.trim();
   const label  = $("#label").value.trim();
   const number = $("#number").value.trim();
-
-  if (!server) { $("#msg").textContent = "Informe o Servidor (URL), ex: https://hia-clientes.uazapi.com"; return; }
   if (!token)  { $("#msg").textContent = "Informe o token da instância"; return; }
 
   try {
     const r = await fetch(BACKEND() + "/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ server_url: server, token, label, number_hint: number })
+      body: JSON.stringify({ token, label, number_hint: number })
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
     localStorage.setItem("luna_jwt", data.jwt);
-    localStorage.setItem("luna_profile", JSON.stringify({ ...(data.profile||{}), server_url: server }));
+    localStorage.setItem("luna_profile", JSON.stringify(data.profile || { label, number_hint: number }));
     switchToApp();
   } catch (e) {
     console.error(e); $("#msg").textContent = e.message || "Falha no login";
@@ -57,14 +51,13 @@ function switchToApp() {
   try { const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
         $("#profile").textContent = p.label ? `• ${p.label}` : ""; } catch {}
   loadChats();
-  // pré-carrega metadados (opcional)
   api("/api/labels").then(ls => { LABELS = ls; }).catch(()=>{});
   api("/api/instance/status").then(st => console.log("STATUS:", st)).catch(()=>{});
 }
 
 function ensureRoute() { if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
 
-/* ---------- CHATS/MESSAGES ---------- */
+/* CHATS */
 async function loadChats() {
   const list = $("#chat-list");
   list.innerHTML = "<div style='padding:12px;color:#8696a0'>Carregando...</div>";
@@ -80,7 +73,7 @@ async function loadChats() {
       return;
     }
     renderChats(items);
-    enrichChats(items.slice(0, 30)); // busca nome/foto dos primeiros 30
+    enrichChats(items.slice(0, 30));
   } catch (e) {
     console.error(e);
     list.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar chats: ${e.message}</div>`;
@@ -93,6 +86,7 @@ function renderChats(chats) {
     const chatid = getChatId(ch);
     const name0 = ch.wa_contactName || ch.name || chatid || "Contato";
     const initials = (name0 || "?").slice(0,2).toUpperCase();
+
     const el = document.createElement("div");
     el.className = "chat-item";
     el.dataset.chatid = chatid;
@@ -139,6 +133,7 @@ function applyNameImage(rowEl, info) {
   }
 }
 
+/* MESSAGES */
 async function openChat(ch) {
   window.__CURRENT_CHAT__ = ch;
   const chatid = getChatId(ch);
@@ -181,7 +176,7 @@ function renderMessages(msgs) {
 
 function escapeHtml(s){ return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'' : '&#39;'}[m])); }
 
-/* ---------- SEND ---------- */
+/* SEND */
 async function sendNow() {
   const number = $("#send-number").value.trim();
   const text   = $("#send-text").value.trim();
@@ -191,7 +186,7 @@ async function sendNow() {
   catch (e) { alert(e.message || "Falha ao enviar"); }
 }
 
-/* ---------- BOOT ---------- */
+/* BOOT */
 document.addEventListener("DOMContentLoaded", () => {
   $("#btn-login").onclick  = doLogin;
   $("#btn-logout").onclick = () => { localStorage.clear(); location.reload(); };
