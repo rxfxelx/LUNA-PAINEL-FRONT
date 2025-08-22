@@ -25,7 +25,6 @@ const ENRICH_CACHE = new Map(); // chatid -> { name, imageUrl }
 function getChatId(ch){ return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
 function normalizeNumber(chatid){
   if (!chatid) return "";
-  // se já tem sufixo, mantém; senão padroniza para @s.whatsapp.net
   return chatid.includes("@") ? chatid : (chatid + "@s.whatsapp.net");
 }
 function getLastText(ch){ return ch?.wa_lastMessageText || ch?.wa_lastMessage?.text || ch?.lastText || ""; }
@@ -33,7 +32,7 @@ function getUnread(ch){ return ch?.wa_unreadCount ?? ch?.unread ?? 0; }
 function timeStr(ts){
   if (!ts) return "";
   let n = Number(ts);
-  if (n > 1e12) n = Math.floor(n/1000); // ms -> s
+  if (n > 1e12) n = Math.floor(n/1000);
   if (!Number.isFinite(n)) return String(ts);
   return new Date(n*1000).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
 }
@@ -67,16 +66,12 @@ async function doLogin() {
 
 function switchToApp() {
   hide("#login-view"); show("#app-view");
-
-  // remove o login do DOM para nunca mais afetar layout
   const lv = document.getElementById("login-view");
   if (lv) lv.remove();
-
   try {
     const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
     $("#profile").textContent = p.label ? "• " + p.label : "";
   } catch {}
-
   loadChats();
 }
 
@@ -99,8 +94,6 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items : [];
     if (!items.length) { list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>"; return; }
     renderChats(items);
-
-    // enriquece só os primeiros 50 (já é o limit), em lotes para não spammar
     enrichChatsBatched(items.slice(0, 50));
   } catch (e) {
     console.error(e);
@@ -136,19 +129,12 @@ function renderChats(chats){
       </div>`;
     list.appendChild(el);
 
-    // se já temos info em cache, aplica
     if (ENRICH_CACHE.has(chatid)) applyNameImage(el, ENRICH_CACHE.get(chatid));
   });
 }
 
-/* ---------- Enriquecimento de nome/foto ----------
-   Método igual ao que você mostrou:
-   POST /chat/GetNameAndImageURL
-   Aqui chamamos nosso backend proxy: POST /api/chat/name-image
-   Body: { number: "<wa_chatid>", preview: true }
--------------------------------------------------- */
+/* ---------- Enriquecimento de nome/foto (POST /api/chat/GetNameAndImageURL) ---------- */
 async function enrichChatsBatched(chats){
-  // processa em pequenos lotes para evitar muitas conexões simultâneas
   const batchSize = 5;
   for (let i = 0; i < chats.length; i += batchSize) {
     const slice = chats.slice(i, i + batchSize);
@@ -162,8 +148,7 @@ async function enrichOne(ch){
 
   try {
     const number = normalizeNumber(chatid);
-    // proxy no backend (POST), mapeando para /chat/GetNameAndImageURL na UAZAPI
-    const info = await api("/api/chat/name-image", {
+    const info = await api("/api/chat/GetNameAndImageURL", {   // <- AQUI: POST no endpoint correto
       method: "POST",
       body: JSON.stringify({ number, preview: true })
     });
@@ -176,7 +161,7 @@ async function enrichOne(ch){
     const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
     if (row) applyNameImage(row, mapped);
   } catch (e) {
-    // falha silenciosa (para não “sujar” o console)
+    // falha silenciosa
   }
 }
 
@@ -199,8 +184,6 @@ async function openChat(ch){
   window.__CURRENT_CHAT__ = ch;
   const chatid = getChatId(ch);
   $("#chat-header").textContent = ch.wa_contactName || ch.name || chatid || "Chat";
-
-  // Mobile: alternar p/ view de mensagens
   if (window.matchMedia("(max-width:1023px)").matches){
     document.body.classList.add("is-mobile-chat");
     document.body.classList.remove("is-mobile-list");
@@ -236,7 +219,7 @@ function renderMessages(msgs){
     el.innerHTML = `${esc(text)}<small>${esc(who)} • ${esc(ts)}</small>`;
     pane.appendChild(el);
   });
-  pane.scrollTop = pane.scrollHeight; // rola até o fim do painel de mensagens
+  pane.scrollTop = pane.scrollHeight;
 }
 
 /* =======================
