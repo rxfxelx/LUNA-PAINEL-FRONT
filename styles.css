@@ -5,7 +5,12 @@
 }
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font:14px/1.4 system-ui,Segoe UI,Roboto,Arial;
+  /* impede scroll da página; só os painéis internos rolam */
+  overflow:hidden;
+}
 
 /* garante que elementos escondidos não ocupem espaço */
 .hidden{display:none !important}
@@ -23,13 +28,35 @@ body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Seg
 .msg-err{min-height:18px;color:#ff6161;font-size:13px}
 
 /* APP */
-.app .topbar{position:sticky;top:0;z-index:5;background:var(--card);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--muted);padding:10px 12px}
+.app{
+  height:100vh;              /* ocupa a viewport inteira */
+  display:flex; flex-direction:column;
+}
+.app .topbar{
+  flex:0 0 auto;
+  background:var(--card);display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--muted);padding:10px 12px
+}
 .brand{font-weight:700}
 .brand small{color:var(--sub2);margin-left:8px}
-.shell{display:grid;grid-template-columns:340px 1fr;min-height:calc(100vh - 48px)}
-.sidebar{border-right:1px solid var(--muted);background:var(--card);min-height:0;display:flex;flex-direction:column}
-.sidebar-head{padding:10px 12px;border-bottom:1px solid var(--muted);color:var(--sub2)}
-.chat-list{overflow:auto}
+
+/* grade: sidebar + main, com altura fixada e rolagem interna */
+.shell{
+  flex:1 1 auto; height:calc(100vh - 48px); /* 48px ~= topbar */
+  display:grid; grid-template-columns:340px 1fr;
+  min-height:0; /* permite que filhos usem overflow:auto */
+}
+
+/* --- SIDEBAR (rolagem própria) --- */
+.sidebar{
+  min-height:0; /* essencial p/ overflow funcionar no grid */
+  border-right:1px solid var(--muted);background:var(--card);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+.sidebar-head{padding:10px 12px;border-bottom:1px solid var(--muted);color:var(--sub2);flex:0 0 auto}
+.chat-list{
+  flex:1 1 auto; min-height:0; overflow:auto; /* rolagem só aqui */
+}
 .hint{padding:12px;color:var(--sub2)}
 .error{padding:12px;color:#ff7070}
 
@@ -44,15 +71,23 @@ body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Seg
 .row2{display:flex;gap:8px;align-items:center;margin-top:2px}
 .preview{flex:1;min-width:0;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .badge{background:var(--green);color:#0b141a;border-radius:999px;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;font-size:12px;font-weight:700}
-.badge--empty{background:transparent;color:transparent}
 
-.main{min-width:0;display:flex;flex-direction:column}
-.chatbar{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--muted);background:var(--card)}
+/* --- MAIN (rolagem própria) --- */
+.main{
+  min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden;
+}
+.chatbar{
+  flex:0 0 auto; display:flex;align-items:center;gap:8px;
+  padding:10px 12px;border-bottom:1px solid var(--muted);background:var(--card)
+}
 .btn.back{display:none}
 .chat-title{font-weight:600}
-.messages{flex:1;overflow:auto;padding:16px;background:
-  radial-gradient(1200px 600px at -10% -20%,#1c1437 0%,transparent 50%),
-  var(--bg)}
+.messages{
+  flex:1 1 auto; min-height:0; overflow:auto; /* rolagem só aqui */
+  padding:16px;background:
+    radial-gradient(1200px 600px at -10% -20%,#1c1437 0%,transparent 50%),
+    var(--bg)
+}
 .msg{max-width:70%;margin:8px 10px;padding:10px;border-radius:10px;position:relative}
 .msg.me{background:#5b21b6;margin-left:auto}
 .msg.you{background:#202c33;margin-right:auto}
@@ -62,7 +97,7 @@ body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Seg
 @media (max-width: 1023px){
   .shell{grid-template-columns:1fr}
   .sidebar{display:none}
-  body.is-mobile-list .sidebar{display:block}
+  body.is-mobile-list .sidebar{display:flex}
   body.is-mobile-list .main{display:none}
   body.is-mobile-chat .sidebar{display:none}
   body.is-mobile-chat .main{display:flex}
