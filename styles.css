@@ -1,70 +1,200 @@
-:root{
-  --bg:#0b141a; --card:#111b21; --muted:#2a3942;
-  --text:#e9edef; --sub:#aebac1; --sub2:#8696a0;
-  --violet:#7c3aed; --violet2:#a78bfa; --green:#25d366;
+/* LUNA – FRONT READ-ONLY (SEM ENRICH/IMAGENS) */
+const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
+const $  = (s) => document.querySelector(s);
+const show = (sel) => $(sel).classList.remove("hidden");
+const hide = (sel) => $(sel).classList.add("hidden");
+
+/* ---------- JWT / API ---------- */
+function jwt() { return localStorage.getItem("luna_jwt") || ""; }
+function authHeaders() { return { "Authorization": "Bearer " + jwt() }; }
+
+async function api(path, opts = {}) {
+  const res = await fetch(BACKEND() + path, {
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers||{}) },
+    ...opts
+  });
+  if (!res.ok) {
+    const t = await res.text().catch(()=> "");
+    throw new Error(`HTTP ${res.status}: ${t}`);
+  }
+  return res.json();
 }
-*{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,Segoe UI,Roboto,Arial}
 
-/* garante que elementos escondidos não ocupem espaço */
-.hidden{display:none !important}
-
-/* LOGIN */
-.login{min-height:100vh;display:grid;place-items:center;padding:24px}
-.login-card{width:min(360px,92vw);background:var(--card);border:1px solid var(--muted);border-radius:16px;padding:24px;display:grid;gap:12px;box-shadow:0 8px 24px #0005}
-.login-icon{font-size:32px;color:var(--violet)}
-.login h1{margin:0;text-align:center}
-.login-sub{margin:0;text-align:center;color:var(--sub2)}
-.inp{background:#202c33;color:var(--text);border:1px solid var(--muted);border-radius:10px;padding:12px}
-.btn{cursor:pointer;border:1px solid var(--muted);border-radius:10px;padding:12px 14px;color:var(--text);background:#202c33}
-.btn-primary{background:linear-gradient(90deg,var(--violet),var(--violet2));border:none}
-.ghost{background:#202c33}
-.msg-err{min-height:18px;color:#ff6161;font-size:13px}
-
-/* APP */
-.app .topbar{position:sticky;top:0;z-index:5;background:var(--card);display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--muted);padding:10px 12px}
-.brand{font-weight:700}
-.brand small{color:var(--sub2);margin-left:8px}
-.shell{display:grid;grid-template-columns:340px 1fr;min-height:calc(100vh - 48px)}
-.sidebar{border-right:1px solid var(--muted);background:var(--card);min-height:0;display:flex;flex-direction:column}
-.sidebar-head{padding:10px 12px;border-bottom:1px solid var(--muted);color:var(--sub2)}
-.chat-list{overflow:auto}
-.hint{padding:12px;color:var(--sub2)}
-.error{padding:12px;color:#ff7070}
-
-.chat-item{display:flex;gap:12px;align-items:center;padding:10px 12px;border-bottom:1px solid #1c2b33;cursor:pointer;background:var(--card)}
-.chat-item:hover{background:#15202b}
-.avatar{width:48px;height:48px;border-radius:50%;overflow:hidden;background:#2a3942;color:#cfe6f3;display:flex;align-items:center;justify-content:center;font-weight:700}
-.avatar img{width:100%;height:100%;object-fit:cover;display:block}
-.chat-main{flex:1;min-width:0}
-.row1{display:flex;gap:8px}
-.name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
-.time{color:var(--sub2);font-size:12px}
-.row2{display:flex;gap:8px;align-items:center;margin-top:2px}
-.preview{flex:1;min-width:0;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.badge{background:var(--green);color:#0b141a;border-radius:999px;min-width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;font-size:12px;font-weight:700}
-.badge--empty{background:transparent;color:transparent}
-
-.main{min-width:0;display:flex;flex-direction:column}
-.chatbar{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--muted);background:var(--card)}
-.btn.back{display:none}
-.chat-title{font-weight:600}
-.messages{flex:1;overflow:auto;padding:16px;background:
-  radial-gradient(1200px 600px at -10% -20%,#1c1437 0%,transparent 50%),
-  var(--bg)}
-.msg{max-width:70%;margin:8px 10px;padding:10px;border-radius:10px;position:relative}
-.msg.me{background:#5b21b6;margin-left:auto}
-.msg.you{background:#202c33;margin-right:auto}
-.msg small{display:block;color:#c1c7cd;opacity:.75;margin-top:6px;font-size:11px}
-
-/* MOBILE */
-@media (max-width: 1023px){
-  .shell{grid-template-columns:1fr}
-  .sidebar{display:none}
-  body.is-mobile-list .sidebar{display:block}
-  body.is-mobile-list .main{display:none}
-  body.is-mobile-chat .sidebar{display:none}
-  body.is-mobile-chat .main{display:flex}
-  .btn.back{display:inline-flex}
+/* ---------- Utils ---------- */
+function getChatId(ch){ return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
+function getLastText(ch){ return ch?.wa_lastMessageText || ch?.wa_lastMessage?.text || ch?.lastText || ""; }
+function getUnread(ch){ return ch?.wa_unreadCount ?? ch?.unread ?? 0; }
+function timeStr(ts){
+  if (!ts) return "";
+  let n = Number(ts);
+  if (n > 1e12) n = Math.floor(n/1000); // ms -> s
+  if (!Number.isFinite(n)) return String(ts);
+  return new Date(n*1000).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
 }
+function esc(s){ return String(s||"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+/* =======================
+   LOGIN
+   ======================= */
+async function doLogin() {
+  const token = $("#token").value.trim();
+  const msgEl = $("#msg"); msgEl.textContent = "";
+  if (!token) { msgEl.textContent = "Informe o token da instância"; return; }
+
+  try {
+    const r = await fetch(BACKEND() + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token })
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+
+    localStorage.setItem("luna_jwt", data.jwt);
+    localStorage.setItem("luna_profile", JSON.stringify(data.profile || {}));
+    switchToApp();
+  } catch (e) {
+    console.error("Login error:", e);
+    msgEl.textContent = "Token inválido. Verifique e tente novamente.";
+  }
+}
+
+function switchToApp() {
+  hide("#login-view"); show("#app-view");
+
+  // remove o login do DOM para nunca mais afetar layout
+  const lv = document.getElementById("login-view");
+  if (lv) lv.remove();
+
+  try {
+    const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
+    $("#profile").textContent = p.label ? "• " + p.label : "";
+  } catch {}
+
+  loadChats();
+}
+
+function ensureRoute(){
+  if (jwt()) switchToApp();
+  else { show("#login-view"); hide("#app-view"); }
+}
+
+/* =======================
+   CHATS
+   ======================= */
+async function loadChats() {
+  const list = $("#chat-list");
+  list.innerHTML = "<div class='hint'>Carregando...</div>";
+  try {
+    const data = await api("/api/chats", {
+      method: "POST",
+      body: JSON.stringify({ operator:"AND", sort:"-wa_lastMsgTimestamp", limit:50, offset:0 })
+    });
+    const items = Array.isArray(data?.items) ? data.items : [];
+    if (!items.length) { list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>"; return; }
+    renderChats(items);
+  } catch (e) {
+    console.error(e);
+    list.innerHTML = `<div class='error'>Falha ao carregar chats: ${e.message}</div>`;
+  }
+}
+
+function renderChats(chats){
+  const list = $("#chat-list"); list.innerHTML = "";
+  chats.forEach(ch => {
+    const chatid = getChatId(ch);
+    const name0  = ch.wa_contactName || ch.name || chatid || "Contato";
+    const t      = timeStr(ch.wa_lastMsgTimestamp || ch.lastTs || ch.lastTimestamp);
+    const prev   = getLastText(ch);
+    const unread = getUnread(ch);
+
+    const el = document.createElement("div");
+    el.className = "chat-item";
+    el.dataset.chatid = chatid;
+    el.onclick = () => openChat(ch);
+
+    el.innerHTML = `
+      <div class="avatar"><span>${(name0||'?').slice(0,2).toUpperCase()}</span></div>
+      <div class="chat-main">
+        <div class="row1">
+          <div class="name">${esc(name0)}</div>
+          <div class="time">${esc(t)}</div>
+        </div>
+        <div class="row2">
+          <div class="preview">${esc(prev)}</div>
+          ${unread > 0 ? `<div class="badge">${unread}</div>` : ``}
+        </div>
+      </div>`;
+    list.appendChild(el);
+  });
+}
+
+/* =======================
+   MESSAGES (READ-ONLY)
+   ======================= */
+async function openChat(ch){
+  window.__CURRENT_CHAT__ = ch;
+  const chatid = getChatId(ch);
+  $("#chat-header").textContent = ch.wa_contactName || ch.name || chatid || "Chat";
+
+  // Mobile: alternar p/ view de mensagens
+  if (window.matchMedia("(max-width:1023px)").matches){
+    document.body.classList.add("is-mobile-chat");
+    document.body.classList.remove("is-mobile-list");
+  }
+  await loadMessages(chatid);
+}
+
+async function loadMessages(chatid){
+  const pane = $("#messages");
+  pane.innerHTML = "<div class='hint'>Carregando...</div>";
+  try {
+    const data = await api("/api/messages", {
+      method: "POST",
+      body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" })
+    });
+    const items = Array.isArray(data?.items) ? data.items : [];
+    renderMessages(items);
+  } catch (e) {
+    console.error(e);
+    pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${e.message}</div>`;
+  }
+}
+
+function renderMessages(msgs){
+  const pane = $("#messages"); pane.innerHTML = "";
+  msgs.forEach(m => {
+    const me = m.fromMe || m.fromme || m.from_me || false;
+    const el = document.createElement("div");
+    el.className = "msg " + (me ? "me" : "you");
+    const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "";
+    const who  = m.senderName || m.pushName || "";
+    const ts   = m.messageTimestamp || m.timestamp || "";
+    el.innerHTML = `${esc(text)}<small>${esc(who)} • ${esc(ts)}</small>`;
+    pane.appendChild(el);
+  });
+  pane.scrollTop = pane.scrollHeight;
+}
+
+/* =======================
+   MOBILE HELPERS
+   ======================= */
+function goList(){
+  document.body.classList.add("is-mobile-list");
+  document.body.classList.remove("is-mobile-chat");
+}
+
+/* =======================
+   BOOT
+   ======================= */
+document.addEventListener("DOMContentLoaded", () => {
+  $("#btn-login")?.addEventListener("click", doLogin);
+  $("#btn-logout")?.addEventListener("click", () => { localStorage.clear(); location.reload(); });
+  $("#btn-refresh")?.addEventListener("click", () => {
+    if (window.__CURRENT_CHAT__) loadMessages(getChatId(window.__CURRENT_CHAT__));
+    else loadChats();
+  });
+  $("#btn-back-mobile")?.addEventListener("click", goList);
+
+  ensureRoute();
+});
