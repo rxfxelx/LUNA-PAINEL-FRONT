@@ -1,49 +1,96 @@
-<script>
-/* =========================
-   Config + helpers
-========================= */
-const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/,"");
-const $  = (s) => document.querySelector(s);
-const show = (sel) => $(sel).classList.remove("hidden");
-const hide = (sel) => $(sel).classList.add("hidden");
-function jwt() { return localStorage.getItem("luna_jwt") || ""; }
-function authHeaders() { return { "Authorization": "Bearer " + jwt() }; }
-const isMobile = () => window.matchMedia("(max-width: 1023px)").matches;
+/* ========================================================================
+ * LUNA – FRONTEND APP.JS (COMPLETO)
+ * - Login robusto (pega o botão/inputs mesmo que mudem os IDs/classes)
+ * - Carrega lista de chats com foto/nome/última mensagem/hora/badge de não lidas
+ * - Abre chat e renderiza mensagens (texto, mídia com placeholders)
+ * - Envia texto (se a barra estiver no HTML)
+ * - Busca nome/foto por /api/name-image com cache + revalidação
+ * - Mobile friendly: alterna lista/chat em telas menores
+ * ===================================================================== */
+
+/* -------------------- CONFIG & HELPERS -------------------- */
+const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
+const state = {
+  currentChatId: null,
+  chats: [],
+  profiles: new Map(),  // cache por chatid -> { name, image, imagePreview }
+  lastMsg: new Map(),   // cache de última mensagem do chat (preview)
+};
+
+function setJWT(jwt) { localStorage.setItem("luna_jwt", jwt); }
+function getJWT() { return localStorage.getItem("luna_jwt") || ""; }
+function clearJWT() { localStorage.removeItem("luna_jwt"); }
+
+function authHeaders() { return { "Authorization": "Bearer " + getJWT() }; }
+
+function showLogin() { $(".login")?.classList.remove("hidden"); $(".app")?.classList.add("hidden"); }
+function showApp()   { $(".login")?.classList.add("hidden"); $(".app")?.classList.remove("hidden"); }
+
+function fmtTime(ts) {
+  if (!ts) return "";
+  // ts pode vir como epoch em segundos ou string; normaliza
+  const n = typeof ts === "number" ? ts : parseInt(ts, 10);
+  const d = new Date((n > 1e12 ? n : n * 1000));
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function escapeHtml(s) {
+  return String(s || "").replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
-    headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers||{}) },
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers || {}) },
     ...opts
   });
+  if (res.status === 401) {
+    // Não apaga o token automaticamente; mostra erro e volta ao login para o usuário decidir
+    const t = await res.text().catch(() => "");
+    showLogin();
+    throw new Error(`401 Unauthorized: ${t || "Reautentique-se."}`);
+  }
   if (!res.ok) {
-    const t = await res.text().catch(()=> "");
+    const t = await res.text().catch(() => "");
     throw new Error(`HTTP ${res.status}: ${t}`);
   }
-  const ct = res.headers.get("content-type") || "";
-  return ct.includes("application/json") ? res.json() : res.text();
+  return res.json();
 }
 
-function escapeHtml(s){return String(s||"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-function formatTime(ts){
-  if(!ts) return "";
-  // aceitando timestamp Unix em segundos ou ms
-  const n = Number(ts);
-  const d = new Date(n < 2e12 ? n*1000 : n);
-  return d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-}
-function needsBetterName(name){
-  if(!name) return true;
-  const s = String(name).toLowerCase();
-  return s.includes("@s.whatsapp.net") || /^\d{5,}@s\.whatsapp\.net$/.test(s) || /^\d+$/.test(s);
-}
-
-/* =========================
-   LOGIN FLOW
-========================= */
+/* -------------------- LOGIN (ROBUSTO) -------------------- */
 async function doLogin() {
-  const token  = $("#token").value.trim();
-  if (!token) { $("#msg").textContent = "Informe o token da instância"; return; }
+  const loginRoot = $(".login") || document;
+
+  const tokenInput =
+    $("#token", loginRoot) ||
+    $('input[name="token"]', loginRoot) ||
+    $('input[type="text"]', loginRoot) ||
+    $('input', loginRoot);
+
+  const btn =
+    $("#btn-login", loginRoot) ||
+    $('[data-action="login"]', loginRoot) ||
+    $('button[type="submit"]', loginRoot) ||
+    $('button', loginRoot);
+
+  const errBox =
+    $("#login-error", loginRoot) ||
+    $(".msg-err", loginRoot) ||
+    (function () {
+      const d = document.createElement("div");
+      d.className = "msg-err";
+      btn?.parentElement?.appendChild(d);
+      return d;
+    })();
+
+  const token = (tokenInput?.value || "").trim();
+  errBox.textContent = "";
+  if (!token) { errBox.textContent = "Informe o token da instância."; tokenInput?.focus(); return; }
+
   try {
+    if (btn) { btn.disabled = true; btn.dataset._text = btn.textContent; btn.textContent = "Entrando…"; }
     const r = await fetch(BACKEND() + "/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -51,250 +98,296 @@ async function doLogin() {
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
-    localStorage.setItem("luna_jwt", data.jwt);
-    localStorage.setItem("luna_profile", JSON.stringify({ label: data?.profile?.label || null }));
-    switchToApp();
+    if (!data?.jwt) throw new Error("Resposta inválida do servidor.");
+    setJWT(data.jwt);
+
+    if (data.profile) localStorage.setItem("luna_profile", JSON.stringify(data.profile));
+
+    showApp();
+    await loadChats();
   } catch (e) {
-    console.error(e); $("#msg").textContent = "Token inválido. Verifique e tente novamente.";
-  }
-}
-
-function switchToApp() {
-  hide("#login-view"); show("#app-view");
-  try { const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
-        $("#profile").textContent = p.label ? `• ${p.label}` : ""; } catch {}
-  if (isMobile()) document.body.classList.add("is-mobile-list");
-  loadChats();
-}
-
-function ensureRoute(){ if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
-
-/* =========================
-   NAME/IMAGE ENRICH (cache 60s + dedup)
-========================= */
-const enrichedCache = new Map(); // chatId -> { name, image, ts }
-const inflight = new Map();      // chatId -> Promise
-function cacheGetFresh(chatId){ const v = enrichedCache.get(chatId); return v && (Date.now()-v.ts<=60_000) ? v : null; }
-
-/* =========================
-   CHATS
-========================= */
-let __currentChat = null;
-
-async function loadChats(){
-  const list = $("#chat-list");
-  list.innerHTML = "<div class='hint'>Carregando conversas...</div>";
-  try{
-    const data = await api("/api/chats", {
-      method:"POST",
-      body: JSON.stringify({ operator:"AND", sort:"-wa_lastMsgTimestamp", limit: 100, offset: 0 })
-    });
-    const items = Array.isArray(data?.items) ? data.items : [];
-    if (!items.length){ list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>"; return; }
-    renderChats(items);
-  }catch(e){
     console.error(e);
-    list.innerHTML = `<div class='error'>Falha ao carregar chats: ${escapeHtml(e.message)}</div>`;
+    errBox.textContent = e?.message || "Falha no login.";
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset._text || "Entrar"; }
   }
 }
 
-function renderChats(chats){
-  const list = $("#chat-list"); list.innerHTML = "";
-  chats.forEach(ch => list.appendChild(createChatItem(ch)));
+/* -------------------- NAME/IMAGE (com cache + revalidação) -------------------- */
+async function fetchNameImage(chatid, { preview = true, force = false } = {}) {
+  if (!force && state.profiles.has(chatid)) return state.profiles.get(chatid);
+
+  try {
+    const data = await api("/api/name-image", {
+      method: "POST",
+      body: JSON.stringify({ number: chatid, preview })
+    });
+    const prof = {
+      name: data?.name || null,
+      image: data?.image || null,
+      imagePreview: data?.imagePreview || null
+    };
+    state.profiles.set(chatid, prof);
+    return prof;
+  } catch (e) {
+    // Se URL assinada expirada foi detectada pelo backend, tente revalidar
+    if (/expired|signature/i.test(String(e.message))) {
+      try {
+        const data = await api("/api/name-image", {
+          method: "POST",
+          body: JSON.stringify({ number: chatid, preview, force: true })
+        });
+        const prof = {
+          name: data?.name || null,
+          image: data?.image || null,
+          imagePreview: data?.imagePreview || null
+        };
+        state.profiles.set(chatid, prof);
+        return prof;
+      } catch { /* ignora */ }
+    }
+    return state.profiles.get(chatid) || { name: null, image: null, imagePreview: null };
+  }
 }
 
-function createChatItem(chat){
-  // normaliza campos comuns
-  const chatId  = chat.wa_chatid || chat.wa_chatId || chat.chatid || chat.chatId || "";
-  const name    = chat.wa_contactName || chat.name || chat.wa_name || chatId || "";
-  const unread  = Number(chat.wa_unreadCount || chat.unread || 0);
-  const lastTS  = chat.wa_lastMsgTimestamp || chat.lastMessageTimestamp || chat.updatedAt || chat.ts || "";
-  const preview = chat.wa_lastMessageText || chat.lastMessageText || chat.preview || "";
+/* -------------------- CHATS -------------------- */
+function normalizeChat(c) {
+  // nome
+  const name =
+    c.wa_contactName || c.wa_name || c.name || c.title || c.wa_chatid || "Contato";
+  // última mensagem/horário
+  const lastText = c.wa_lastMessageText || c.lead_lastMsgText || c.lastMessage || "";
+  const lastTs = c.wa_lastMsgTimestamp || c.lastMsgTimestamp || c.updatedAt || c.timestamp || "";
+  const unread = c.wa_unreadCount ?? c.unreadCount ?? 0;
 
-  const item    = document.createElement("div");
-  item.className= "chat-item";
-  const avatar  = document.createElement("div");
-  avatar.className = "avatar";
+  return {
+    chatid: c.wa_chatid || c.wa_fastid || c.chatid || c.id || "",
+    name,
+    lastText,
+    lastTs,
+    unread,
+    isGroup: !!(c.wa_isGroup || c.isGroup)
+  };
+}
 
-  const main = document.createElement("div"); main.className = "chat-main";
-  const row1 = document.createElement("div"); row1.className = "row1";
-  const elName= document.createElement("div"); elName.className = "name"; elName.textContent = name;
-  const elTime= document.createElement("div"); elTime.className = "time"; elTime.textContent = formatTime(lastTS);
-  row1.append(elName, elTime);
+async function loadChats() {
+  const list = $("#chat-list");
+  if (list) list.innerHTML = "<div class='hint'>Carregando…</div>";
 
-  const row2 = document.createElement("div"); row2.className = "row2";
-  const elPrev= document.createElement("div"); elPrev.className = "preview"; elPrev.textContent = preview || "";
-  row2.appendChild(elPrev);
+  try {
+    const data = await api("/api/chats", {
+      method: "POST",
+      body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 50, offset: 0 })
+    });
+    const items = Array.isArray(data?.items) ? data.items.map(normalizeChat) : [];
+    state.chats = items;
+    if (list) renderChats(items);
+  } catch (e) {
+    console.error(e);
+    if (list) list.innerHTML = `<div class='error'>Falha ao carregar chats: ${escapeHtml(e.message)}</div>`;
+  }
+}
 
-  if (unread > 0){
+function renderChats(chats) {
+  const list = $("#chat-list");
+  if (!list) return;
+  list.innerHTML = "";
+
+  chats.forEach(async (c) => {
+    const li = document.createElement("div");
+    li.className = "chat-item";
+    li.dataset.chatid = c.chatid;
+
+    // avatar
+    const avatar = document.createElement("div");
+    avatar.className = "avatar";
+    const prof = await fetchNameImage(c.chatid, { preview: true });
+    if (prof?.imagePreview || prof?.image) {
+      const img = document.createElement("img");
+      img.alt = "";
+      img.loading = "lazy";
+      img.src = prof.imagePreview || prof.image;
+      img.onerror = () => { avatar.textContent = (c.name || "?").slice(0, 2).toUpperCase(); };
+      avatar.appendChild(img);
+    } else {
+      avatar.textContent = (c.name || "?").slice(0, 2).toUpperCase();
+    }
+
+    const main = document.createElement("div");
+    main.className = "chat-main";
+
+    const row1 = document.createElement("div");
+    row1.className = "row1";
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = prof?.name || c.name || c.chatid;
+    const time = document.createElement("div");
+    time.className = "time";
+    time.textContent = fmtTime(c.lastTs);
+    row1.append(name, time);
+
+    const row2 = document.createElement("div");
+    row2.className = "row2";
+    const preview = document.createElement("div");
+    preview.className = "preview";
+    preview.textContent = c.lastText || state.lastMsg.get(c.chatid) || "";
     const badge = document.createElement("span");
     badge.className = "badge";
-    badge.textContent = unread;
-    row2.appendChild(badge);
-  }
+    badge.textContent = c.unread > 0 ? String(c.unread) : "";
+    if (c.unread <= 0) badge.style.display = "none";
 
-  main.append(row1, row2);
-  item.append(avatar, main);
+    row2.append(preview, badge);
+    main.append(row1, row2);
 
-  const mount = {
-    updateAvatar: (url)=> setAvatar(url),
-    updateName:   (n)=> { elName.textContent = n; }
-  };
-
-  function drawFallback(){
-    const span = document.createElement("span");
-    const initials = (name || chatId || "?").split(" ").filter(Boolean)
-      .slice(0,2).map(s=>s[0]?.toUpperCase()).join("") || "??";
-    avatar.innerHTML = ""; span.textContent = initials; avatar.appendChild(span);
-  }
-
-  function setAvatar(url){
-    avatar.innerHTML = "";
-    if (url){
-      const img = document.createElement("img");
-      img.loading = "lazy"; img.alt="avatar"; img.referrerPolicy="no-referrer";
-      img.src=url;
-      let retried = false;
-      img.onerror = async () => {
-        if (retried){ drawFallback(); return; }
-        retried = true;
-        await enrichChatIfNeeded({ chatId, name }, mount, /*force*/true);
-      };
-      avatar.appendChild(img);
-    } else { drawFallback(); }
-  }
-
-  // inicial
-  drawFallback();
-  // tenta enriquecer (nome/foto) com cache curto
-  enrichChatIfNeeded({ chatId, name }, mount);
-
-  // click
-  item.onclick = () => openChat({ chatId, nameDisplay: elName.textContent });
-
-  return item;
-}
-
-async function enrichChatIfNeeded(chat, mount, force=false){
-  if (!chat.chatId) return;
-  if (!force){
-    const fresh = cacheGetFresh(chat.chatId);
-    if (fresh){
-      if (fresh.image) mount.updateAvatar(fresh.image);
-      if (needsBetterName(chat.name) && fresh.name) mount.updateName(fresh.name);
-      return;
-    }
-  }
-
-  if (inflight.has(chat.chatId)){
-    const r = await inflight.get(chat.chatId);
-    if (r?.image) mount.updateAvatar(r.image);
-    if (needsBetterName(chat.name) && r?.name) mount.updateName(r.name);
-    return;
-  }
-
-  const p = (async () => {
-    try{
-      const data = await api("/api/name-image", {
-        method: "POST",
-        body: JSON.stringify({ number: chat.chatId, preview: true })
-      });
-      const res = {
-        name:  data?.name  || data?.wa_name || data?.wa_contactName || "",
-        image: data?.image || data?.imagePreview || ""
-      };
-      enrichedCache.set(chat.chatId, { ...res, ts: Date.now() });
-      return res;
-    }catch{ return null; }
-  })();
-
-  inflight.set(chat.chatId, p);
-  const res = await p.finally(()=> inflight.delete(chat.chatId));
-  if (!res) return;
-  if (res.image) mount.updateAvatar(res.image);
-  if (needsBetterName(chat.name) && res.name) mount.updateName(res.name);
-}
-
-/* =========================
-   OPEN CHAT + MESSAGES
-========================= */
-async function openChat(ch){
-  __currentChat = ch;
-  $("#chat-header").textContent = ch.nameDisplay || ch.chatId || "Chat";
-  $("#messages").innerHTML = "<div class='hint'>Carregando...</div>";
-  if (isMobile()){ document.body.classList.remove("is-mobile-list"); document.body.classList.add("is-mobile-chat"); }
-  loadMessages(ch.chatId);
-}
-
-async function loadMessages(chatid){
-  const pane = $("#messages");
-  try{
-    const data = await api("/api/messages", {
-      method: "POST",
-      body: JSON.stringify({ chatid, limit: 120, sort: "-messageTimestamp" })
-    });
-    const items = Array.isArray(data?.items) ? data.items : [];
-    renderMessages(items.reverse());
-  }catch(e){
-    console.error(e);
-    pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message)}</div>`;
-  }
-}
-
-function renderMessages(msgs){
-  const pane = $("#messages"); pane.innerHTML = "";
-  msgs.forEach(m => {
-    const me = !!(m.fromMe || m.fromme || m.from_me);
-    const el = document.createElement("div");
-    el.className = "msg " + (me ? "me" : "you");
-    const who  = m.senderName || m.pushName || "";
-    const ts   = m.messageTimestamp || m.timestamp || "";
-    let text = (
-      m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || ""
-    );
-    // midias básicas (mostra placeholder)
-    if (!text && (m.type === "image" || m.message?.imageMessage)) text = "[imagem]";
-    if (!text && (m.type === "video" || m.message?.videoMessage)) text = "[vídeo]";
-    if (!text && (m.type === "audio" || m.message?.audioMessage)) text = "[áudio]";
-    if (!text && (m.type === "document" || m.message?.documentMessage)) text = "[documento]";
-
-    el.innerHTML = `${escapeHtml(text)}<small>${escapeHtml(who)} • ${formatTime(ts)}</small>`;
-    pane.appendChild(el);
+    li.append(avatar, main);
+    li.addEventListener("click", () => openChat(c.chatid, name.textContent));
+    list.appendChild(li);
   });
+}
+
+/* -------------------- MESSAGES -------------------- */
+function renderMessages(msgs) {
+  const pane = $("#messages");
+  if (!pane) return;
+  pane.innerHTML = "";
+
+  msgs.forEach(m => {
+    const me = m.fromMe || m.fromme || m.from_me || false;
+    const bubble = document.createElement("div");
+    bubble.className = "msg " + (me ? "me" : "you");
+
+    // conteúdo: tenta várias chaves comuns
+    let text =
+      m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "";
+
+    // placeholders simples para mídia se não houver texto
+    if (!text) {
+      if (m.type === "image" || m?.message?.imageMessage) text = "📷 Foto";
+      else if (m.type === "video" || m?.message?.videoMessage) text = "🎥 Vídeo";
+      else if (m.type === "audio" || m?.message?.audioMessage) text = "🎵 Áudio";
+      else if (m.type === "document" || m?.message?.documentMessage) text = "📄 Documento";
+    }
+
+    const who = m.senderName || m.pushName || (me ? "Você" : "");
+    const ts = m.messageTimestamp || m.timestamp || m.date || "";
+
+    bubble.innerHTML = `${escapeHtml(text)}<small>${escapeHtml(who)} • ${fmtTime(ts)}</small>`;
+    pane.appendChild(bubble);
+  });
+
   pane.scrollTop = pane.scrollHeight;
 }
 
-/* =========================
-   SEND (se usar)
-========================= */
-async function sendNow(){
-  const number = $("#send-number").value.trim();
-  const text   = $("#send-text").value.trim();
-  if (!number || !text) return;
-  try{
-    await api("/api/send-text", { method:"POST", body: JSON.stringify({ number, text }) });
-    $("#send-text").value = "";
-    if (__currentChat?.chatId) loadMessages(__currentChat.chatId);
-  }catch(e){ alert(e.message || "Falha ao enviar"); }
+async function loadMessages(chatid) {
+  const pane = $("#messages");
+  if (pane) pane.innerHTML = "<div class='hint'>Carregando…</div>";
+
+  try {
+    const data = await api("/api/messages", {
+      method: "POST",
+      body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" })
+    });
+
+    const items = Array.isArray(data?.items) ? data.items.slice().reverse() : [];
+    // Atualiza preview e hora no card
+    if (items.length > 0) {
+      const last = items[items.length - 1];
+      const previewText =
+        last.text || last.caption || last?.message?.text || last?.message?.conversation || last?.body || "";
+      state.lastMsg.set(chatid, previewText);
+
+      const card = $(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
+      card?.querySelector(".preview") && (card.querySelector(".preview").textContent = previewText);
+      const ts = last.messageTimestamp || last.timestamp || last.date;
+      card?.querySelector(".time") && (card.querySelector(".time").textContent = fmtTime(ts));
+      // zerar badge de não lidas do card aberto
+      const badge = card?.querySelector(".badge");
+      if (badge) { badge.textContent = ""; badge.style.display = "none"; }
+    }
+
+    renderMessages(items);
+  } catch (e) {
+    console.error(e);
+    if (pane) pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message)}</div>`;
+  }
 }
 
-/* =========================
-   BOOT
-========================= */
+async function openChat(chatid, displayName) {
+  state.currentChatId = chatid;
+
+  // título
+  const header = $("#chat-header") || $(".chat-title");
+  if (header) header.textContent = displayName || chatid;
+
+  // número na barra de envio (se existir)
+  const numInput = $("#send-number");
+  if (numInput) numInput.value = (chatid || "").replace("@s.whatsapp.net", "").replace("@g.us", "");
+
+  // mobile
+  if (window.matchMedia("(max-width: 1023px)").matches) {
+    document.body.classList.remove("is-mobile-list");
+    document.body.classList.add("is-mobile-chat");
+  }
+
+  await loadMessages(chatid);
+}
+
+/* -------------------- SEND (opcional) -------------------- */
+async function sendNow() {
+  const number = $("#send-number")?.value.trim();
+  const text = $("#send-text")?.value.trim();
+  if (!number || !text) return;
+  try {
+    await api("/api/send-text", {
+      method: "POST",
+      body: JSON.stringify({ number, text })
+    });
+    $("#send-text").value = "";
+    // reload msgs se o chat atual bate com o number
+    const cid = (state.currentChatId || "").replace("@s.whatsapp.net", "").replace("@g.us", "");
+    if (cid === number) await loadMessages(state.currentChatId);
+  } catch (e) {
+    alert(e.message || "Falha ao enviar.");
+  }
+}
+
+/* -------------------- BOOTSTRAP -------------------- */
 document.addEventListener("DOMContentLoaded", () => {
-  $("#btn-login").onclick  = doLogin;
-  $("#btn-logout").onclick = () => { localStorage.clear(); location.reload(); };
-  $("#btn-send").onclick   = sendNow;
-  $("#btn-refresh").onclick = () => {
-    if (__currentChat) loadMessages(__currentChat.chatId);
+  // Bind do botão Login
+  const loginRoot = $(".login") || document;
+  const btnLogin =
+    $("#btn-login", loginRoot) ||
+    $('[data-action="login"]', loginRoot) ||
+    $('button[type="submit"]', loginRoot) ||
+    $('button', loginRoot);
+  btnLogin?.addEventListener("click", (ev) => { ev.preventDefault?.(); doLogin(); });
+
+  const tokenInput =
+    $("#token", loginRoot) ||
+    $('input[name="token"]', loginRoot) ||
+    $('input[type="text"]', loginRoot) ||
+    $('input', loginRoot);
+  tokenInput?.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin(); } });
+
+  // Logout
+  $("#btn-logout")?.addEventListener("click", () => { clearJWT(); showLogin(); });
+
+  // Refresh (recarrega chat atual ou lista)
+  $("#btn-refresh")?.addEventListener("click", () => {
+    if (state.currentChatId) loadMessages(state.currentChatId);
     else loadChats();
-  };
-  ensureRoute();
-  window.addEventListener("resize", () => {
-    if (!jwt()) return;
-    if (isMobile() && !__currentChat) { document.body.classList.add("is-mobile-list"); document.body.classList.remove("is-mobile-chat"); }
-    else if (isMobile() && __currentChat) { document.body.classList.add("is-mobile-chat"); document.body.classList.remove("is-mobile-list"); }
-    else { document.body.classList.remove("is-mobile-list","is-mobile-chat"); }
   });
+
+  // Enviar (se a barra existir)
+  $("#btn-send")?.addEventListener("click", (e) => { e.preventDefault(); sendNow(); });
+
+  // Back mobile
+  $(".btn.back")?.addEventListener("click", () => {
+    document.body.classList.remove("is-mobile-chat");
+    document.body.classList.add("is-mobile-list");
+  });
+
+  // Estado inicial
+  if (getJWT()) { showApp(); loadChats(); }
+  else { showLogin(); }
 });
-</script>
