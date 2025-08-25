@@ -19,8 +19,9 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-// ====== Nome/foto helpers ======
-const NAME_CACHE = new Map();
+// ====== Nome/foto caches ======
+const NAME_CACHE  = new Map();  // chatid -> name
+const IMAGE_CACHE = new Map();  // chatid -> { image, imagePreview }
 
 function fixEncoding(s) {
   try {
@@ -51,24 +52,40 @@ function bestName(chat) {
   return formatNumberFromChatId(chat.wa_chatid || chat.chatid);
 }
 
-async function ensureName(chat) {
+// Traz nome e imagem (preview) e popula caches
+async function ensureNameImage(chat) {
   const id = chat.wa_chatid || chat.chatid;
-  if (!id) return null;
-  if (NAME_CACHE.has(id)) return NAME_CACHE.get(id);
+  if (!id) return;
+
+  const hasName  = NAME_CACHE.has(id) || !!chat.wa_contactName;
+  const hasImage = IMAGE_CACHE.has(id);
+
+  if (hasName && hasImage) return;
 
   try {
     const res = await api("/api/name-image", {
       method: "POST",
       body: JSON.stringify({ number: id, preview: true })
     });
-    const fixed = fixEncoding(res?.name || "");
-    if (fixed) {
+
+    if (res?.name) {
+      const fixed = fixEncoding(res.name);
       NAME_CACHE.set(id, fixed);
       chat.wa_contactName = fixed;
-      return fixed;
     }
-  } catch {}
-  return null;
+    IMAGE_CACHE.set(id, {
+      image: res?.image || null,
+      imagePreview: res?.imagePreview || null
+    });
+  } catch {
+    // não quebra a UI se der 404/405 na UAZAPI
+  }
+}
+
+function previewAvatarUrl(chat) {
+  const id = chat.wa_chatid || chat.chatid;
+  const cached = id ? IMAGE_CACHE.get(id) : null;
+  return cached?.imagePreview || cached?.image || null;
 }
 
 // ====== Login ======
@@ -125,6 +142,35 @@ async function loadChats() {
   }
 }
 
+// extrai uma prévia decente da última mensagem
+function lastPreview(chat) {
+  const lm = chat.lastMessage || {};
+  const type = (lm.messageType || lm.wa_lastMessageType || "").toLowerCase();
+
+  // texto direto / caption
+  const text =
+    chat.wa_lastMessageText ||
+    lm.text ||
+    lm.caption ||
+    lm.content?.text ||
+    lm.message?.conversation ||
+    lm.body ||
+    "";
+
+  if (text) return String(text).trim();
+
+  // rótulos por tipo de mídia
+  if (type.includes("image"))  return "[imagem]";
+  if (type.includes("video"))  return "[vídeo]";
+  if (type.includes("audio") || type.includes("ptt")) return "[áudio]";
+  if (type.includes("sticker")) return "[figurinha]";
+  if (type.includes("document") || type.includes("file")) return "[arquivo]";
+  if (type.includes("contact")) return "[contato]";
+  if (type.includes("location")) return "[localização]";
+
+  return "";
+}
+
 function renderChats(chats) {
   const list = $("#chat-list"); list.innerHTML = "";
   chats.forEach(ch => {
@@ -134,29 +180,47 @@ function renderChats(chats) {
 
     const displayName = bestName(ch);
     const initials = (displayName || "?").slice(0,2).toUpperCase();
-    const ts = ch.wa_lastMsgTimestamp || "";
+    const ts = ch.wa_lastMsgTimestamp || ch.lastMessageTimestamp || "";
+    const preview = lastPreview(ch);
 
     el.innerHTML = `
-      <div class="avatar">${initials}</div>
+      <div class="avatar">
+        <img class="avatar-img hidden" alt=""/>
+        <div class="avatar-fallback">${initials}</div>
+      </div>
       <div class="meta">
         <div class="name">${displayName}</div>
         <div class="time">${ts}</div>
-        <div class="preview">${(ch.wa_lastMessageText || "").slice(0, 60)}</div>
+        <div class="preview">${escapeHtml(preview)}</div>
       </div>`;
 
     list.appendChild(el);
 
-    if (!ch.wa_contactName) {
-      ensureName(ch).then(n => { if (n) el.querySelector(".name").textContent = n; });
-    }
+    // completa nome/foto assíncrono (lazy)
+    ensureNameImage(ch).then(() => {
+      // nome
+      const newName = bestName(ch);
+      el.querySelector(".name").textContent = newName;
+
+      // avatar
+      const url = previewAvatarUrl(ch);
+      const img = el.querySelector(".avatar-img");
+      const fb  = el.querySelector(".avatar-fallback");
+      if (url) {
+        img.src = url;
+        img.onload = () => { img.classList.remove("hidden"); fb.classList.add("hidden"); };
+        img.onerror = () => { img.classList.add("hidden"); fb.classList.remove("hidden"); };
+      }
+    });
   });
 }
 
 // ====== Mensagens ======
 async function openChat(ch) {
-  await ensureName(ch);
+  window.__CURRENT_CHAT__ = ch;
+  await ensureNameImage(ch); // garante possíveis atualizações
   $("#chat-header").textContent = bestName(ch) || "Chat";
-  $("#send-number").value = (ch.wa_chatid || "").replace("@s.whatsapp.net","").replace("@g.us","");
+  $("#send-number").value = (ch.wa_chatid || ch.chatid || "").replace("@s.whatsapp.net","").replace("@g.us","");
   await loadMessages(ch.wa_chatid || ch.chatid);
 }
 
@@ -183,13 +247,24 @@ function renderMessages(msgs) {
     el.className = "msg " + (me ? "me" : "you");
 
     // Texto/mídia simples (ajuste conforme sua UAZAPI):
-    const text =
+    const type = (m.messageType || "").toLowerCase();
+    let text =
       m.text ||
       m.message?.text ||
       m.caption ||
       m?.message?.conversation ||
       m?.body ||
       "";
+
+    if (!text) {
+      if (type.includes("image"))  text = "[imagem]";
+      else if (type.includes("video"))  text = "[vídeo]";
+      else if (type.includes("audio") || type.includes("ptt")) text = "[áudio]";
+      else if (type.includes("sticker")) text = "[figurinha]";
+      else if (type.includes("document")) text = "[arquivo]";
+      else if (type.includes("contact")) text = "[contato]";
+      else if (type.includes("location")) text = "[localização]";
+    }
 
     const who = m.senderName || m.pushName || "";
     const ts  = m.messageTimestamp || m.timestamp || "";
@@ -215,7 +290,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnLogout) btnLogout.onclick = () => { localStorage.clear(); location.reload(); };
   if (btnSend)   btnSend.onclick   = () => {}; // envio desativado por enquanto
   if (btnRefresh) btnRefresh.onclick = () => {
-    if (window.__CURRENT_CHAT__) loadMessages(window.__CURRENT_CHAT__.wa_chatid);
+    if (window.__CURRENT_CHAT__) loadMessages(window.__CURRENT_CHAT__.wa_chatid || window.__CURRENT_CHAT__.chatid);
     else loadChats();
   };
 
