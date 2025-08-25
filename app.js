@@ -1,20 +1,15 @@
-/* LUNA – FRONT READ-ONLY (enrich nome/foto + mobile + scrolls) */
-/* Ajuste: NÃO faz auto‑logout em 401 para não “voltar” à tela de login. */
-
-/* ---------- BASICS ---------- */
+// ===== Config & helpers =====
 const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
 const $  = (s) => document.querySelector(s);
 const show = (sel) => $(sel).classList.remove("hidden");
 const hide = (sel) => $(sel).classList.add("hidden");
 
-/* ---------- JWT / API ---------- */
-function jwt() { return localStorage.getItem("luna_jwt") || ""; }
-function authHeaders() { return { "Authorization": "Bearer " + jwt() }; }
+function jwt(){ return localStorage.getItem("luna_jwt") || ""; }
+function authHeaders(){ return { "Authorization": "Bearer " + jwt() }; }
 
-/* NÃO redireciona em 401 — só repassa o erro para a UI mostrar */
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
-    headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers||{}) },
+    headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers || {}) },
     ...opts
   });
   if (!res.ok) {
@@ -24,34 +19,62 @@ async function api(path, opts = {}) {
   return res.json();
 }
 
-/* ---------- UTILS ---------- */
-const ENRICH_CACHE = new Map(); // chatid -> { name, imageUrl }
+// ====== Nome/foto helpers ======
+const NAME_CACHE = new Map();
 
-function getChatId(ch){ return ch?.wa_chatid || ch?.chatid || ch?.id || ""; }
-function normalizeNumber(chatid){
-  if (!chatid) return "";
-  return chatid.includes("@") ? chatid : (chatid + "@s.whatsapp.net");
+function fixEncoding(s) {
+  try {
+    if (typeof s === "string" && /[ÃÂ¢€™‰]/.test(s)) {
+      const bytes = Uint8Array.from([...s].map(c => c.charCodeAt(0)));
+      return new TextDecoder("utf-8").decode(bytes);
+    }
+  } catch {}
+  return s;
 }
-function getLastText(ch){ return ch?.wa_lastMessageText || ch?.wa_lastMessage?.text || ch?.lastText || ""; }
-function getUnread(ch){ return ch?.wa_unreadCount ?? ch?.unread ?? 0; }
-function timeStr(ts){
-  if (!ts) return "";
-  let n = Number(ts);
-  if (n > 1e12) n = Math.floor(n/1000);
-  if (!Number.isFinite(n)) return String(ts);
-  return new Date(n*1000).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
-}
-function esc(s){ return String(s||"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-function fixEncoding(s) { try{ if(/%[0-9A-F]{2}/i.test(s)) return decodeURIComponent(s); }catch{} try{ return decodeURIComponent(escape(s)); }catch{} return s; }
-function cleanName(name) { return fixEncoding(String(name||"")).replace(/\s+/g," ").trim(); }
 
-/* =======================
-   LOGIN
-   ======================= */
+function formatNumberFromChatId(chatid) {
+  const num = String(chatid || "").replace(/@.*/, "");
+  const br = num.replace(/^55(\d{2})(\d{5})(\d{4})$/, "+55 ($1) $2-$3");
+  return br !== num ? br : num;
+}
+
+function bestName(chat) {
+  const last = chat.lastMessage || {};
+  const raw =
+    chat.wa_contactName ||
+    chat.wa_name ||
+    chat.name ||
+    last.senderName ||
+    last.pushName ||
+    "";
+  if (raw) return fixEncoding(raw);
+  return formatNumberFromChatId(chat.wa_chatid || chat.chatid);
+}
+
+async function ensureName(chat) {
+  const id = chat.wa_chatid || chat.chatid;
+  if (!id) return null;
+  if (NAME_CACHE.has(id)) return NAME_CACHE.get(id);
+
+  try {
+    const res = await api("/api/name-image", {
+      method: "POST",
+      body: JSON.stringify({ number: id, preview: true })
+    });
+    const fixed = fixEncoding(res?.name || "");
+    if (fixed) {
+      NAME_CACHE.set(id, fixed);
+      chat.wa_contactName = fixed;
+      return fixed;
+    }
+  } catch {}
+  return null;
+}
+
+// ====== Login ======
 async function doLogin() {
-  const token = $("#token").value.trim();
-  const msgEl = $("#msg"); msgEl.textContent = "";
-  if (!token) { msgEl.textContent = "Informe o token da instância"; return; }
+  const token = $("#token")?.value?.trim();
+  if (!token) { $("#msg").textContent = "Informe o token da instância"; return; }
 
   try {
     const r = await fetch(BACKEND() + "/api/auth/login", {
@@ -65,166 +88,136 @@ async function doLogin() {
     localStorage.setItem("luna_profile", JSON.stringify(data.profile || {}));
     switchToApp();
   } catch (e) {
-    console.error("Login error:", e);
-    msgEl.textContent = "Token inválido. Verifique e tente novamente.";
+    $("#msg").textContent = e.message || "Falha no login";
   }
 }
 
 function switchToApp() {
   hide("#login-view"); show("#app-view");
-  const lv = document.getElementById("login-view"); if (lv) lv.remove();
-  try { const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
-        $("#profile").textContent = p.label ? "• " + p.label : ""; } catch {}
+  try {
+    const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
+    $("#profile").textContent = p?.label ? `• ${p.label}` : "";
+  } catch {}
   loadChats();
 }
 
-function ensureRoute(){ if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
+function ensureRoute() {
+  if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); }
+}
 
-/* =======================
-   CHATS
-   ======================= */
+// ====== Chats ======
 async function loadChats() {
   const list = $("#chat-list");
-  list.innerHTML = "<div class='hint'>Carregando...</div>";
+  list.innerHTML = "<div style='padding:12px;color:#8696a0'>Carregando...</div>";
   try {
     const data = await api("/api/chats", {
       method: "POST",
-      body: JSON.stringify({ operator:"AND", sort:"-wa_lastMsgTimestamp", limit:50, offset:0 })
+      body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 50, offset: 0 })
     });
     const items = Array.isArray(data?.items) ? data.items : [];
-    if (!items.length) { list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>"; return; }
+    if (items.length === 0) {
+      list.innerHTML = "<div style='padding:12px;color:#8696a0'>Nenhum chat encontrado</div>";
+      return;
+    }
     renderChats(items);
-    enrichChatsBatched(items.slice(0, 50));
   } catch (e) {
-    console.error(e);
-    list.innerHTML = `<div class='error'>Falha ao carregar chats: ${e.message}</div>`;
+    list.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar chats: ${e.message}</div>`;
   }
 }
 
-function renderChats(chats){
+function renderChats(chats) {
   const list = $("#chat-list"); list.innerHTML = "";
   chats.forEach(ch => {
-    const chatid = getChatId(ch);
-    const baseName = cleanName(ch.wa_contactName || ch.name || chatid || "Contato");
-    const t      = timeStr(ch.wa_lastMsgTimestamp || ch.lastTs || ch.lastTimestamp);
-    const prev   = getLastText(ch);
-    const unread = getUnread(ch);
-
     const el = document.createElement("div");
     el.className = "chat-item";
-    el.dataset.chatid = chatid;
     el.onclick = () => openChat(ch);
+
+    const displayName = bestName(ch);
+    const initials = (displayName || "?").slice(0,2).toUpperCase();
+    const ts = ch.wa_lastMsgTimestamp || "";
+
     el.innerHTML = `
-      <div class="avatar"><span>${(baseName||'?').slice(0,2).toUpperCase()}</span></div>
-      <div class="chat-main">
-        <div class="row1"><div class="name">${esc(baseName)}</div><div class="time">${esc(t)}</div></div>
-        <div class="row2"><div class="preview">${esc(prev)}</div>${unread>0?`<div class="badge">${unread}</div>`:``}</div>
+      <div class="avatar">${initials}</div>
+      <div class="meta">
+        <div class="name">${displayName}</div>
+        <div class="time">${ts}</div>
+        <div class="preview">${(ch.wa_lastMessageText || "").slice(0, 60)}</div>
       </div>`;
+
     list.appendChild(el);
 
-    if ( ENRICH_CACHE.has(chatid) ) applyNameImage(el, ENRICH_CACHE.get(chatid));
+    if (!ch.wa_contactName) {
+      ensureName(ch).then(n => { if (n) el.querySelector(".name").textContent = n; });
+    }
   });
 }
 
-/* ---------- Enriquecimento (POST /api/chat/GetNameAndImageURL) ---------- */
-async function enrichChatsBatched(chats){
-  const batch = 5;
-  for (let i=0;i<chats.length;i+=batch){
-    await Promise.allSettled(chats.slice(i,i+batch).map(enrichOne));
-  }
-}
-async function enrichOne(ch){
-  const chatid = getChatId(ch);
-  if (!chatid || ENRICH_CACHE.has(chatid)) return;
-  try{
-    const number = normalizeNumber(chatid);
-    const infoRaw = await api("/api/chat/GetNameAndImageURL", {
-      method: "POST",
-      body: JSON.stringify({ number, preview:true })
-    });
-    const info = infoRaw?.data && typeof infoRaw.data === "object" ? infoRaw.data : infoRaw;
-    const mapped = { name: info?.wa_name || info?.name || "", imageUrl: info?.imagePreview || info?.image || "" };
-    if (!mapped.name && !mapped.imageUrl) return;
-    ENRICH_CACHE.set(chatid, mapped);
-    const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
-    if (row) applyNameImage(row, mapped);
-  }catch(e){ console.warn("[enrich] fail", e?.message||e); }
-}
-function applyNameImage(row, info){
-  if (!row || !info) return;
-  const nm = cleanName(info.name||"");
-  if (nm){ const n = row.querySelector(".name"); if (n) n.textContent = nm; }
-  const url = info.imageUrl||"";
-  if (url){
-    const a = row.querySelector(".avatar"); if (a){ a.innerHTML=""; const img=document.createElement("img");
-      img.src=url; img.alt="avatar"; img.loading="lazy"; img.style.width="100%"; img.style.height="100%"; img.style.objectFit="cover";
-      a.appendChild(img); }
-  }
+// ====== Mensagens ======
+async function openChat(ch) {
+  await ensureName(ch);
+  $("#chat-header").textContent = bestName(ch) || "Chat";
+  $("#send-number").value = (ch.wa_chatid || "").replace("@s.whatsapp.net","").replace("@g.us","");
+  await loadMessages(ch.wa_chatid || ch.chatid);
 }
 
-/* =======================
-   MESSAGES (READ-ONLY)
-   ======================= */
-async function openChat(ch){
-  window.__CURRENT_CHAT__ = ch;
-  const chatid = getChatId(ch);
-  $("#chat-header").textContent = cleanName(ch.wa_contactName || ch.name || chatid || "Chat");
-  if (window.matchMedia("(max-width:1023px)").matches){
-    document.body.classList.add("is-mobile-chat");
-    document.body.classList.remove("is-mobile-list");
-  }
-  await loadMessages(chatid);
-}
-
-async function loadMessages(chatid){
+async function loadMessages(chatid) {
   const pane = $("#messages");
-  pane.innerHTML = "<div class='hint'>Carregando...</div>";
-  try{
+  pane.innerHTML = "<div style='padding:12px;color:#8696a0'>Carregando...</div>";
+  try {
     const data = await api("/api/messages", {
       method: "POST",
-      body: JSON.stringify({ chatid, limit:100, sort:"-messageTimestamp" })
+      body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" })
     });
-    const items = Array.isArray(data?.items)?data.items:[];
+    const items = Array.isArray(data?.items) ? data.items : [];
     renderMessages(items);
-  }catch(e){
-    console.error(e);
-    pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${e.message}</div>`;
+  } catch (e) {
+    pane.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar mensagens: ${e.message}</div>`;
   }
 }
 
-function renderMessages(msgs){
-  const pane = $("#messages"); pane.innerHTML="";
-  msgs.forEach(m=>{
+function renderMessages(msgs) {
+  const pane = $("#messages"); pane.innerHTML = "";
+  msgs.forEach(m => {
     const me = m.fromMe || m.fromme || m.from_me || false;
     const el = document.createElement("div");
     el.className = "msg " + (me ? "me" : "you");
-    const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "";
-    const who  = cleanName(m.senderName || m.pushName || "");
-    const ts   = m.messageTimestamp || m.timestamp || "";
-    el.innerHTML = `${esc(text)}<small>${esc(who)} • ${esc(ts)}</small>`;
+
+    // Texto/mídia simples (ajuste conforme sua UAZAPI):
+    const text =
+      m.text ||
+      m.message?.text ||
+      m.caption ||
+      m?.message?.conversation ||
+      m?.body ||
+      "";
+
+    const who = m.senderName || m.pushName || "";
+    const ts  = m.messageTimestamp || m.timestamp || "";
+
+    el.innerHTML = `${escapeHtml(text)}<small>${who ? escapeHtml(who) + " • " : ""}${ts}</small>`;
     pane.appendChild(el);
   });
   pane.scrollTop = pane.scrollHeight;
 }
 
-/* =======================
-   MOBILE HELPERS
-   ======================= */
-function goList(){
-  document.body.classList.add("is-mobile-list");
-  document.body.classList.remove("is-mobile-chat");
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
-/* =======================
-   BOOT
-   ======================= */
+// ====== Boot ======
 document.addEventListener("DOMContentLoaded", () => {
-  $("#btn-login")?.addEventListener("click", doLogin);
-  $("#btn-logout")?.addEventListener("click", () => { localStorage.clear(); location.reload(); });
-  $("#btn-refresh")?.addEventListener("click", () => {
-    if (window.__CURRENT_CHAT__) loadMessages(getChatId(window.__CURRENT_CHAT__));
+  const btnLogin   = $("#btn-login");
+  const btnLogout  = $("#btn-logout");
+  const btnSend    = $("#btn-send");
+  const btnRefresh = $("#btn-refresh");
+
+  if (btnLogin)  btnLogin.onclick  = doLogin;
+  if (btnLogout) btnLogout.onclick = () => { localStorage.clear(); location.reload(); };
+  if (btnSend)   btnSend.onclick   = () => {}; // envio desativado por enquanto
+  if (btnRefresh) btnRefresh.onclick = () => {
+    if (window.__CURRENT_CHAT__) loadMessages(window.__CURRENT_CHAT__.wa_chatid);
     else loadChats();
-  });
-  $("#btn-back-mobile")?.addEventListener("click", goList);
+  };
+
   ensureRoute();
 });
