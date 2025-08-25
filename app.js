@@ -88,9 +88,32 @@ async function doLogin() {
 
 function switchToApp() {
   hide("#login-view")
-  show("#app-view")
-  setMobileMode("list")
-  loadChats()
+  show("#loading-view")
+
+  const progressText = $("#loading-view .progress-text")
+  const loadingSteps = [
+    "Conectando...",
+    "Autenticando...",
+    "Carregando conversas...",
+    "Preparando interface...",
+    "Quase pronto...",
+  ]
+
+  let stepIndex = 0
+  const stepInterval = setInterval(() => {
+    if (stepIndex < loadingSteps.length) {
+      progressText.textContent = loadingSteps[stepIndex]
+      stepIndex++
+    }
+  }, 1000)
+
+  setTimeout(() => {
+    clearInterval(stepInterval)
+    hide("#loading-view")
+    show("#app-view")
+    setMobileMode("list")
+    loadChats()
+  }, 5000)
 }
 
 function ensureRoute() {
