@@ -4,6 +4,26 @@ const $ = (s) => document.querySelector(s)
 const show = (sel) => $(sel).classList.remove("hidden")
 const hide = (sel) => $(sel).classList.add("hidden")
 
+// Idle callback (não bloqueia UI)
+const rIC = (cb) =>
+  (window.requestIdleCallback
+    ? window.requestIdleCallback(cb, { timeout: 200 })
+    : setTimeout(cb, 0))
+
+// Limitador de concorrência simples
+async function runLimited(tasks, limit = 8) {
+  const results = []
+  let i = 0
+  const workers = new Array(Math.min(limit, tasks.length)).fill(0).map(async () => {
+    while (i < tasks.length) {
+      const cur = i++
+      try { results[cur] = await tasks[cur]() } catch (e) { results[cur] = undefined }
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
 function isMobile() {
   return window.matchMedia("(max-width:1023px)").matches
 }
@@ -88,32 +108,9 @@ async function doLogin() {
 
 function switchToApp() {
   hide("#login-view")
-  show("#loading-view")
-
-  const progressText = $("#loading-view .progress-text")
-  const loadingSteps = [
-    "Conectando...",
-    "Autenticando...",
-    "Carregando conversas...",
-    "Preparando interface...",
-    "Quase pronto...",
-  ]
-
-  let stepIndex = 0
-  const stepInterval = setInterval(() => {
-    if (stepIndex < loadingSteps.length) {
-      progressText.textContent = loadingSteps[stepIndex]
-      stepIndex++
-    }
-  }, 1000)
-
-  setTimeout(() => {
-    clearInterval(stepInterval)
-    hide("#loading-view")
-    show("#app-view")
-    setMobileMode("list")
-    loadChats()
-  }, 5000)
+  show("#app-view")
+  setMobileMode("list")
+  loadChats()
 }
 
 function ensureRoute() {
@@ -160,10 +157,11 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items : []
     state.chats = items
 
-    // Prefetch da última mensagem + name-image para cada chat (em paralelo controlado)
-    await prefetchCards(items)
+    // Renderização progressiva dos cards (mostra rápido)
+    await progressiveRenderChats(items)
 
-    renderChats(items)
+    // Prefetch paralelo (limitado) para completar fotos/nomes sem travar a UI
+    await prefetchCards(items)
   } catch (e) {
     console.error(e)
     list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`
@@ -172,16 +170,8 @@ async function loadChats() {
   }
 }
 
-async function prefetchCards(items) {
-  const tasks = items.map(async (ch) => {
-    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
-    const resp = await fetchNameImage(chatid)
-    state.nameCache.set(chatid, resp)
-  })
-  await Promise.all(tasks)
-}
-
-function renderChats(chats) {
+// Renderiza chats em lotes pequenos para aparecer rápido
+async function progressiveRenderChats(chats) {
   const list = $("#chat-list")
   list.innerHTML = ""
 
@@ -190,69 +180,145 @@ function renderChats(chats) {
     return
   }
 
-  chats.forEach((ch) => {
-    const el = document.createElement("div")
-    el.className = "chat-item"
-    el.onclick = () => openChat(ch)
+  const BATCH = 12
+  for (let i = 0; i < chats.length; i += BATCH) {
+    const slice = chats.slice(i, i + BATCH)
+    slice.forEach((ch) => appendChatSkeleton(list, ch))
+    await new Promise((r) => rIC(r))
+  }
 
+  // após skeletons, tentamos preencher com cache existente (se já houver)
+  chats.forEach((ch) => hydrateChatCard(ch))
+}
+
+// Cria item básico rapidamente (skeleton com nome bruto)
+function appendChatSkeleton(list, ch) {
+  const el = document.createElement("div")
+  el.className = "chat-item"
+  el.dataset.chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+  el.onclick = () => openChat(ch)
+
+  const avatar = document.createElement("div")
+  avatar.className = "avatar"
+  avatar.textContent = "··"
+
+  const main = document.createElement("div")
+  main.className = "chat-main"
+
+  const top = document.createElement("div")
+  top.className = "row1"
+  const nm = document.createElement("div")
+  nm.className = "name"
+  nm.textContent = (ch.wa_contactName || ch.name || el.dataset.chatid || "Contato").toString()
+  const tm = document.createElement("div")
+  tm.className = "time"
+  const lastTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ""
+  tm.textContent = lastTs ? formatTime(lastTs) : ""
+  top.appendChild(nm)
+  top.appendChild(tm)
+
+  const bottom = document.createElement("div")
+  bottom.className = "row2"
+  const preview = document.createElement("div")
+  preview.className = "preview"
+  const pvText = (state.lastMsg.get(el.dataset.chatid) || ch.wa_lastMessageText || "").replace(/\s+/g, " ").trim()
+  preview.textContent = pvText || "Carregando..."
+  preview.title = pvText
+
+  const unread = document.createElement("span")
+  unread.className = "badge"
+  const count = state.unread.get(el.dataset.chatid) || ch.wa_unreadCount || 0
+  if (count > 0) unread.textContent = count
+  else unread.style.display = "none"
+
+  bottom.appendChild(preview)
+  bottom.appendChild(unread)
+
+  main.appendChild(top)
+  main.appendChild(bottom)
+  el.appendChild(avatar)
+  el.appendChild(main)
+  list.appendChild(el)
+}
+
+// Atualiza um card com foto/nome do cache (quando disponível)
+function hydrateChatCard(ch) {
+  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+  const cache = state.nameCache.get(chatid)
+  if (!chatid || !cache) return
+
+  const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
+  if (!el) return
+
+  const avatar = el.querySelector(".avatar")
+  const nameEl = el.querySelector(".name")
+  if (cache.imagePreview || cache.image) {
+    avatar.innerHTML = ""
+    const img = document.createElement("img")
+    img.src = cache.imagePreview || cache.image
+    img.alt = "avatar"
+    avatar.appendChild(img)
+  } else {
+    avatar.textContent = initialsOf(cache.name || nameEl.textContent)
+  }
+  if (cache.name) nameEl.textContent = cache.name
+}
+
+// Prefetch paralelo limitado: name-image + última mensagem (para preview)
+async function prefetchCards(items) {
+  const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
-    const cache = state.nameCache.get(chatid) || {}
-    const name = (cache.name || ch.wa_contactName || ch.name || chatid || "Contato").toString()
-    const lastTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ""
+    return async () => {
+      if (!chatid) return
 
-    const avatar = document.createElement("div")
-    avatar.className = "avatar"
-    const imgUrl = cache.imagePreview || cache.image || ""
-    if (imgUrl) {
-      const img = document.createElement("img")
-      img.src = imgUrl
-      img.alt = "avatar"
-      avatar.appendChild(img)
-    } else {
-      avatar.textContent = initialsOf(name)
+      // 1) name-image
+      if (!state.nameCache.has(chatid)) {
+        try {
+          const resp = await fetchNameImage(chatid)
+          state.nameCache.set(chatid, resp)
+          hydrateChatCard(ch)
+        } catch {}
+      }
+
+      // 2) última mensagem (para quem não tem)
+      if (!state.lastMsg.has(chatid) && !ch.wa_lastMessageText) {
+        try {
+          const data = await api("/api/messages", {
+            method: "POST",
+            body: JSON.stringify({ chatid, limit: 1, sort: "-messageTimestamp" }),
+          })
+          const last = Array.isArray(data?.items) ? data.items[0] : null
+          if (last) {
+            const pv = (
+              last.text ||
+              last.caption ||
+              last?.message?.text ||
+              last?.message?.conversation ||
+              last?.body ||
+              ""
+            ).replace(/\s+/g, " ").trim()
+            state.lastMsg.set(chatid, pv)
+
+            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`)
+            if (card) {
+              card.textContent = pv || "Sem mensagens"
+              card.title = pv
+            }
+            const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`)
+            if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "")
+          }
+        } catch {}
+      }
     }
-
-    const main = document.createElement("div")
-    main.className = "chat-main"
-
-    const top = document.createElement("div")
-    top.className = "row1"
-    const nm = document.createElement("div")
-    nm.className = "name"
-    nm.textContent = name
-    const tm = document.createElement("div")
-    tm.className = "time"
-    tm.textContent = lastTs ? formatTime(lastTs) : ""
-    top.appendChild(nm)
-    top.appendChild(tm)
-
-    const bottom = document.createElement("div")
-    bottom.className = "row2"
-    const preview = document.createElement("div")
-    preview.className = "preview"
-
-    const pvText = (state.lastMsg.get(chatid) || ch.wa_lastMessageText || "").replace(/\s+/g, " ").trim()
-    preview.textContent = pvText || "Sem mensagens"
-    preview.title = pvText
-
-    const unread = document.createElement("span")
-    unread.className = "badge"
-    const count = state.unread.get(chatid) || ch.wa_unreadCount || 0
-    if (count > 0) {
-      unread.textContent = count
-    } else {
-      unread.style.display = "none"
-    }
-
-    bottom.appendChild(preview)
-    bottom.appendChild(unread)
-
-    main.appendChild(top)
-    main.appendChild(bottom)
-    el.appendChild(avatar)
-    el.appendChild(main)
-    list.appendChild(el)
   })
+
+  // Executa com limite de concorrência e cedendo tempo à UI
+  const CHUNK = 10
+  for (let i = 0; i < tasks.length; i += CHUNK) {
+    const slice = tasks.slice(i, i + CHUNK)
+    await runLimited(slice, 6)
+    await new Promise((r) => rIC(r))
+  }
 }
 
 function formatTime(timestamp) {
@@ -303,11 +369,11 @@ async function loadMessages(chatid) {
     })
     const items = Array.isArray(data?.items) ? data.items : []
 
-    // renderização progressiva (do mais antigo -> mais recente)
+    // renderização progressiva (do mais antigo -> mais recente) em lotes menores (mais responsivo)
     await progressiveRenderMessages(items.slice().reverse())
 
     // Atualiza preview do card após abrir
-    const last = items[0] // no array original, 0 é o mais recente (pois veio -messageTimestamp)
+    const last = items[0] // mais recente no array original
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "")
       .replace(/\s+/g, " ")
       .trim()
@@ -318,10 +384,7 @@ async function loadMessages(chatid) {
   }
 }
 
-/* ========= renderização PROGRESSIVA =========
-   - Mantém sua renderMessages original (abaixo), mas agora usamos
-     progressiveRenderMessages para as mensagens irem surgindo em lotes.
-   - Não remove funções existentes.                                         */
+/* ========= renderização PROGRESSIVA ========= */
 async function progressiveRenderMessages(msgs) {
   const pane = $("#messages")
   pane.innerHTML = ""
@@ -337,12 +400,11 @@ async function progressiveRenderMessages(msgs) {
     return
   }
 
-  const BATCH = 15 // quantas mensagens por "lote" (ajuste se quiser)
+  const BATCH = 10
   for (let i = 0; i < msgs.length; i += BATCH) {
     const slice = msgs.slice(i, i + BATCH)
     slice.forEach((m) => appendMessageBubble(pane, m))
-    // deixa o browser respirar e pintar os elementos deste lote
-    await new Promise((r) => requestAnimationFrame(r))
+    await new Promise((r) => rIC(r))
     pane.scrollTop = pane.scrollHeight
   }
 }
