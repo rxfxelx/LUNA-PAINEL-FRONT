@@ -2,56 +2,57 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
-  <title>Luna Painel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Luna – Supervisor WhatsApp</title>
   <link rel="stylesheet" href="styles.css"/>
+  <script defer src="config.js"></script>
+  <script defer src="app.js"></script>
+  <style>.hidden{display:none!important}</style>
 </head>
-<body class="is-mobile-list">
+<body>
 
   <!-- LOGIN -->
   <main id="login-view" class="login">
     <div class="login-card">
-      <div class="login-icon">☏</div>
-      <h1>Luna Painel</h1>
-      <p class="login-sub">Entre com seu Instance Token</p>
-      <input id="token" class="inp" placeholder="cole o token aqui" autocomplete="off"/>
+      <div class="login-icon">🌙</div>
+      <h1>Entrar</h1>
+      <p class="login-sub">Cole o token da sua instância UAZAPI</p>
+      <input id="token" class="inp" placeholder="Instance token" />
       <button id="btn-login" class="btn btn-primary">Entrar</button>
       <div id="msg" class="msg-err"></div>
     </div>
   </main>
 
   <!-- APP -->
-  <section id="app-view" class="hidden app">
+  <section id="app-view" class="app hidden">
     <header class="topbar">
       <div class="brand">Luna <small id="profile"></small></div>
-      <div class="actions">
-        <button id="btn-refresh" class="btn ghost" aria-label="Atualizar">🔄</button>
-        <button id="btn-logout"  class="btn ghost" aria-label="Sair">Sair</button>
+      <div>
+        <button id="btn-refresh" class="btn">🔄</button>
+        <button id="btn-logout" class="btn">Sair</button>
       </div>
     </header>
 
     <div class="shell">
-      <!-- LISTA -->
       <aside class="sidebar">
         <div class="sidebar-head">Conversas</div>
         <div id="chat-list" class="chat-list"></div>
       </aside>
 
-      <!-- MENSAGENS -->
       <main class="main">
-        <header class="chatbar">
-          <button id="btn-back-mobile" class="btn back" aria-label="Voltar">←</button>
+        <div class="chatbar">
+          <button id="btn-back-mobile" class="btn back">◀</button>
           <div id="chat-header" class="chat-title">Selecione um chat</div>
-        </header>
-        <div id="messages" class="messages">
-          <div class="hint">Nada selecionado</div>
+        </div>
+        <div id="messages" class="messages"></div>
+        <div class="send">
+          <input id="send-number" class="inp" placeholder="Número (55319...)" />
+          <input id="send-text" class="inp" placeholder="Mensagem" />
+          <button id="btn-send" class="btn btn-primary">Enviar</button>
         </div>
       </main>
     </div>
   </section>
 
-  <!-- ORDEM IMPORTANTE -->
-  <script src="config.js"></script>
-  <script src="app.js"></script>
 </body>
 </html>
