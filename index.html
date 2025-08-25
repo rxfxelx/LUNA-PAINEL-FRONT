@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="pt-BR" class="dark">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -8,47 +8,106 @@
   <script defer src="config.js"></script>
   <script defer src="app.js"></script>
   <style>.hidden{display:none!important}</style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700&family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
 
   <!-- LOGIN -->
   <main id="login-view" class="login">
     <div class="login-card">
-      <div class="login-icon">🌙</div>
-      <h1>Entrar</h1>
-      <p class="login-sub">Cole o token da sua instância UAZAPI</p>
-      <input id="token" class="inp" placeholder="Instance token" />
-      <button id="btn-login" class="btn btn-primary">Entrar</button>
-      <div id="msg" class="msg-err"></div>
+      <div class="login-header">
+        <div class="login-icon">🌙</div>
+        <h1>Luna</h1>
+        <p class="login-sub">Supervisor WhatsApp Profissional</p>
+      </div>
+      <div class="login-form">
+        <div class="form-group">
+          <label for="token">Token da Instância</label>
+          <input id="token" class="inp" placeholder="Cole seu token UAZAPI aqui" />
+        </div>
+        <button id="btn-login" class="btn btn-primary">
+          <span>Entrar no Sistema</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7"/>
+          </svg>
+        </button>
+        <div id="msg" class="msg-err"></div>
+      </div>
     </div>
   </main>
 
   <!-- APP -->
   <section id="app-view" class="app hidden">
     <header class="topbar">
-      <div class="brand">Luna <small id="profile"></small></div>
-      <div>
-        <button id="btn-refresh" class="btn">🔄</button>
-        <button id="btn-logout" class="btn">Sair</button>
+      <div class="brand">
+        <div class="brand-icon">🌙</div>
+        <div class="brand-text">
+          <span class="brand-name">Luna</span>
+          <small id="profile">Supervisor WhatsApp</small>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <button id="btn-refresh" class="btn btn-icon" title="Atualizar">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/>
+            <path d="M21 3v5h-5"/>
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/>
+            <path d="M3 21v-5h5"/>
+          </svg>
+        </button>
+        <button id="btn-logout" class="btn btn-secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+            <polyline points="16,17 21,12 16,7"/>
+            <line x1="21" y1="12" x2="9" y2="12"/>
+          </svg>
+          Sair
+        </button>
       </div>
     </header>
 
     <div class="shell">
       <aside class="sidebar">
-        <div class="sidebar-head">Conversas</div>
+        <div class="sidebar-head">
+          <h2>Conversas</h2>
+          <div class="sidebar-stats">
+            <span class="stats-badge">Ativo</span>
+          </div>
+        </div>
         <div id="chat-list" class="chat-list"></div>
       </aside>
 
       <main class="main">
         <div class="chatbar">
-          <button id="btn-back-mobile" class="btn back">◀</button>
-          <div id="chat-header" class="chat-title">Selecione um chat</div>
+          <button id="btn-back-mobile" class="btn btn-icon back">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M19 12H5M12 19l-7-7 7-7"/>
+            </svg>
+          </button>
+          <div class="chat-info">
+            <div id="chat-header" class="chat-title">Selecione uma conversa</div>
+            <div class="chat-status">Escolha um chat para começar</div>
+          </div>
         </div>
-        <div id="messages" class="messages"></div>
+        <div id="messages" class="messages">
+          <div class="empty-state">
+            <div class="empty-icon">💬</div>
+            <h3>Nenhuma conversa selecionada</h3>
+            <p>Escolha uma conversa da lista para visualizar as mensagens</p>
+          </div>
+        </div>
         <div class="send">
-          <input id="send-number" class="inp" placeholder="Número (55319...)" />
-          <input id="send-text" class="inp" placeholder="Mensagem" />
-          <button id="btn-send" class="btn btn-primary">Enviar</button>
+          <div class="send-group">
+            <input id="send-number" class="inp inp-compact" placeholder="Número (55319...)" />
+            <input id="send-text" class="inp inp-main" placeholder="Digite sua mensagem..." />
+            <button id="btn-send" class="btn btn-primary btn-send">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+              </svg>
+            </button>
+          </div>
         </div>
       </main>
     </div>
