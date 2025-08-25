@@ -279,10 +279,12 @@ async function loadMessages(chatid) {
       body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" }),
     })
     const items = Array.isArray(data?.items) ? data.items : []
-    renderMessages(items.reverse())
+
+    // renderização progressiva (do mais antigo -> mais recente)
+    await progressiveRenderMessages(items.slice().reverse())
 
     // Atualiza preview do card após abrir
-    const last = items[items.length - 1]
+    const last = items[0] // no array original, 0 é o mais recente (pois veio -messageTimestamp)
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "")
       .replace(/\s+/g, " ")
       .trim()
@@ -293,6 +295,51 @@ async function loadMessages(chatid) {
   }
 }
 
+/* ========= renderização PROGRESSIVA =========
+   - Mantém sua renderMessages original (abaixo), mas agora usamos
+     progressiveRenderMessages para as mensagens irem surgindo em lotes.
+   - Não remove funções existentes.                                         */
+async function progressiveRenderMessages(msgs) {
+  const pane = $("#messages")
+  pane.innerHTML = ""
+
+  if (!msgs.length) {
+    pane.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon">💬</div>
+        <h3>Nenhuma mensagem</h3>
+        <p>Esta conversa ainda não possui mensagens</p>
+      </div>
+    `
+    return
+  }
+
+  const BATCH = 15 // quantas mensagens por "lote" (ajuste se quiser)
+  for (let i = 0; i < msgs.length; i += BATCH) {
+    const slice = msgs.slice(i, i + BATCH)
+    slice.forEach((m) => appendMessageBubble(pane, m))
+    // deixa o browser respirar e pintar os elementos deste lote
+    await new Promise((r) => requestAnimationFrame(r))
+    pane.scrollTop = pane.scrollHeight
+  }
+}
+
+function appendMessageBubble(pane, m) {
+  const me = m.fromMe || m.fromme || m.from_me || false
+  const el = document.createElement("div")
+  el.className = "msg " + (me ? "me" : "you")
+  const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || ""
+  const who = m.senderName || m.pushName || ""
+  const ts = m.messageTimestamp || m.timestamp || ""
+
+  el.innerHTML = `
+    ${escapeHtml(text)}
+    <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
+  `
+  pane.appendChild(el)
+}
+
+/* ========= SUA renderização “clássica” (mantida) ========= */
 function renderMessages(msgs) {
   const pane = $("#messages")
   pane.innerHTML = ""
