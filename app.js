@@ -1,4 +1,4 @@
-/* LUNA – FRONT READ-ONLY (com enrich de nome/foto + mobile + scrolls + logs) */
+/* LUNA – FRONT READ-ONLY (enrich nome/foto + mobile + scrolls + 401 auto‑logout) */
 
 /* ---------- BASICS ---------- */
 const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
@@ -10,11 +10,18 @@ const hide = (sel) => $(sel).classList.add("hidden");
 function jwt() { return localStorage.getItem("luna_jwt") || ""; }
 function authHeaders() { return { "Authorization": "Bearer " + jwt() }; }
 
+/* Auto‑logout quando o backend responder 401 */
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
     headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers||{}) },
     ...opts
   });
+  if (res.status === 401) {
+    try { console.warn("401 -> logout", await res.text()); } catch {}
+    localStorage.removeItem("luna_jwt");
+    location.reload();
+    throw new Error("Unauthorized");
+  }
   if (!res.ok) {
     const t = await res.text().catch(()=> "");
     throw new Error(`HTTP ${res.status}: ${t}`);
