@@ -1,94 +1,48 @@
-// ===== Config & helpers =====
-const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
-const $  = (s) => document.querySelector(s);
-const show = (sel) => $(sel).classList.remove("hidden");
-const hide = (sel) => $(sel).classList.add("hidden");
+/* app.js — Luna Painel (frontend)
+ * - Login com Instance Token (salvo como JWT vindo do backend)
+ * - Lista de chats com avatar, nome, hora da última mensagem e preview
+ * - Mensagens do chat selecionado
+ * - Totalmente compatível com o CSS que enviei
+ */
 
-function jwt(){ return localStorage.getItem("luna_jwt") || ""; }
-function authHeaders(){ return { "Authorization": "Bearer " + jwt() }; }
+/* ========= helpers ========= */
+const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/,"");
+const $       = (s) => document.querySelector(s);
+const show    = (sel) => $(sel)?.classList.remove("hidden");
+const hide    = (sel) => $(sel)?.classList.add("hidden");
+
+function jwt() {
+  return localStorage.getItem("luna_jwt") || "";
+}
+function setJwt(v) {
+  if (v) localStorage.setItem("luna_jwt", v);
+}
+function clearAuth() {
+  localStorage.removeItem("luna_jwt");
+  localStorage.removeItem("luna_profile");
+}
+
+function authHeaders(extra={}) {
+  const h = { "Content-Type": "application/json", ...extra };
+  const t = jwt();
+  if (t) h["Authorization"] = "Bearer " + t;
+  return h;
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
-    headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers || {}) },
+    headers: authHeaders(opts.headers || {}),
     ...opts
   });
   if (!res.ok) {
-    const t = await res.text().catch(()=> "");
+    let t = "";
+    try { t = await res.text(); } catch {}
     throw new Error(`HTTP ${res.status}: ${t}`);
   }
   return res.json();
 }
 
-// ====== Nome/foto caches ======
-const NAME_CACHE  = new Map();  // chatid -> name
-const IMAGE_CACHE = new Map();  // chatid -> { image, imagePreview }
-
-function fixEncoding(s) {
-  try {
-    if (typeof s === "string" && /[ÃÂ¢€™‰]/.test(s)) {
-      const bytes = Uint8Array.from([...s].map(c => c.charCodeAt(0)));
-      return new TextDecoder("utf-8").decode(bytes);
-    }
-  } catch {}
-  return s;
-}
-
-function formatNumberFromChatId(chatid) {
-  const num = String(chatid || "").replace(/@.*/, "");
-  const br = num.replace(/^55(\d{2})(\d{5})(\d{4})$/, "+55 ($1) $2-$3");
-  return br !== num ? br : num;
-}
-
-function bestName(chat) {
-  const last = chat.lastMessage || {};
-  const raw =
-    chat.wa_contactName ||
-    chat.wa_name ||
-    chat.name ||
-    last.senderName ||
-    last.pushName ||
-    "";
-  if (raw) return fixEncoding(raw);
-  return formatNumberFromChatId(chat.wa_chatid || chat.chatid);
-}
-
-// Traz nome e imagem (preview) e popula caches
-async function ensureNameImage(chat) {
-  const id = chat.wa_chatid || chat.chatid;
-  if (!id) return;
-
-  const hasName  = NAME_CACHE.has(id) || !!chat.wa_contactName;
-  const hasImage = IMAGE_CACHE.has(id);
-
-  if (hasName && hasImage) return;
-
-  try {
-    const res = await api("/api/name-image", {
-      method: "POST",
-      body: JSON.stringify({ number: id, preview: true })
-    });
-
-    if (res?.name) {
-      const fixed = fixEncoding(res.name);
-      NAME_CACHE.set(id, fixed);
-      chat.wa_contactName = fixed;
-    }
-    IMAGE_CACHE.set(id, {
-      image: res?.image || null,
-      imagePreview: res?.imagePreview || null
-    });
-  } catch {
-    // não quebra a UI se der 404/405 na UAZAPI
-  }
-}
-
-function previewAvatarUrl(chat) {
-  const id = chat.wa_chatid || chat.chatid;
-  const cached = id ? IMAGE_CACHE.get(id) : null;
-  return cached?.imagePreview || cached?.image || null;
-}
-
-// ====== Login ======
+/* ========= login ========= */
 async function doLogin() {
   const token = $("#token")?.value?.trim();
   if (!token) { $("#msg").textContent = "Informe o token da instância"; return; }
@@ -101,198 +55,264 @@ async function doLogin() {
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
-    localStorage.setItem("luna_jwt", data.jwt);
-    localStorage.setItem("luna_profile", JSON.stringify(data.profile || {}));
+    setJwt(data.jwt);
+    localStorage.setItem("luna_profile", JSON.stringify({}));
     switchToApp();
   } catch (e) {
-    $("#msg").textContent = e.message || "Falha no login";
+    console.error(e);
+    $("#msg").textContent = "Token inválido. Verifique e tente novamente.";
   }
 }
 
 function switchToApp() {
-  hide("#login-view"); show("#app-view");
-  try {
-    const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
-    $("#profile").textContent = p?.label ? `• ${p.label}` : "";
-  } catch {}
+  hide("#login-view");
+  show("#app-view");
   loadChats();
 }
 
 function ensureRoute() {
-  if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); }
+  if (jwt()) switchToApp();
+  else { show("#login-view"); hide("#app-view"); }
 }
 
-// ====== Chats ======
+/* ========= normalização dos dados ========= */
+/* Garante que sempre teremos name, image, lastMessage{text,timestamp} */
+function normalizeChat(raw) {
+  const chat = { ...raw };
+
+  // nome: preferir campos de contato; cair para chatId
+  chat.name =
+    chat.wa_contactName ||
+    chat.contactName ||
+    chat.wa_name ||
+    chat.name ||
+    chat.wa_chatid ||
+    chat.chatid ||
+    chat.chatId ||
+    "";
+
+  // chatId padronizado
+  chat.chatId = chat.wa_chatid || chat.chatid || chat.chatId || "";
+
+  // avatar
+  chat.image = chat.image || chat.profileImage || chat.photo || null;
+
+  // última mensagem (tentar vários campos)
+  const lastText =
+    (chat.lastMessage && chat.lastMessage.text) ||
+    chat.wa_lastMessageText ||
+    chat.last_msg_text ||
+    chat.preview || "";
+
+  const lastTs =
+    (chat.lastMessage && chat.lastMessage.timestamp) ||
+    chat.wa_lastMsgTimestamp ||
+    chat.last_msg_timestamp ||
+    chat.timestamp || null;
+
+  chat.lastMessage = {
+    text: lastText || "",
+    timestamp: lastTs ? Number(lastTs) : null
+  };
+
+  return chat;
+}
+
+function fmtTime(tsSec) {
+  if (!tsSec) return "";
+  const d = new Date(Number(tsSec) * 1000);
+  return d.toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" });
+}
+
+/* ========= render da lista de chats ========= */
+function renderChatItem(chat) {
+  const item = document.createElement("div");
+  item.className = "chat-item";
+
+  // avatar
+  const avatar = document.createElement("div");
+  avatar.className = "avatar";
+  if (chat.image) {
+    const img = document.createElement("img");
+    img.src = chat.image;
+    img.className = "avatar-img";
+    img.loading = "lazy";
+    avatar.appendChild(img);
+  } else {
+    const span = document.createElement("span");
+    span.className = "avatar-fallback";
+    const initials = (chat.name || chat.chatId || "?")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0,2)
+      .map(s => s[0]?.toUpperCase())
+      .join("") || "??";
+    span.textContent = initials;
+    avatar.appendChild(span);
+  }
+
+  // meta
+  const meta = document.createElement("div");
+  meta.className = "meta";
+
+  const row1 = document.createElement("div");
+  row1.className = "row1";
+
+  const name = document.createElement("div");
+  name.className = "name";
+  name.textContent = chat.name || chat.chatId;
+
+  const time = document.createElement("div");
+  time.className = "time";
+  time.textContent = fmtTime(chat.lastMessage?.timestamp);
+
+  row1.appendChild(name);
+  row1.appendChild(time);
+
+  const row2 = document.createElement("div");
+  row2.className = "row2";
+
+  const preview = document.createElement("div");
+  preview.className = "preview";
+  preview.textContent = chat.lastMessage?.text || "";
+
+  row2.appendChild(preview);
+
+  meta.appendChild(row1);
+  meta.appendChild(row2);
+
+  item.appendChild(avatar);
+  item.appendChild(meta);
+
+  item.onclick = () => openChat(chat.chatId, chat.name || chat.chatId);
+  return item;
+}
+
+/* ========= carregar lista de chats ========= */
 async function loadChats() {
   const list = $("#chat-list");
-  list.innerHTML = "<div style='padding:12px;color:#8696a0'>Carregando...</div>";
+  list.innerHTML = "<div class='hint'>Carregando...</div>";
   try {
+    // você pode ajustar o corpo conforme seu backend (paginado, etc.)
     const data = await api("/api/chats", {
       method: "POST",
-      body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 50, offset: 0 })
+      body: JSON.stringify({
+        operator: "AND",
+        sort: "-wa_lastMsgTimestamp",
+        limit: 100, offset: 0
+      })
     });
+
     const items = Array.isArray(data?.items) ? data.items : [];
-    if (items.length === 0) {
-      list.innerHTML = "<div style='padding:12px;color:#8696a0'>Nenhum chat encontrado</div>";
+    if (!items.length) {
+      list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>";
       return;
     }
-    renderChats(items);
+
+    // normalizar e renderizar
+    list.innerHTML = "";
+    items.map(normalizeChat).forEach(ch => list.appendChild(renderChatItem(ch)));
+
   } catch (e) {
-    list.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar chats: ${e.message}</div>`;
+    console.error(e);
+    list.innerHTML = `<div class='error'>Falha ao carregar chats: ${e.message}</div>`;
   }
 }
 
-// extrai uma prévia decente da última mensagem
-function lastPreview(chat) {
-  const lm = chat.lastMessage || {};
-  const type = (lm.messageType || lm.wa_lastMessageType || "").toLowerCase();
+/* ========= mensagens ========= */
+let CURRENT_CHAT_ID = null;
 
-  // texto direto / caption
-  const text =
-    chat.wa_lastMessageText ||
-    lm.text ||
-    lm.caption ||
-    lm.content?.text ||
-    lm.message?.conversation ||
-    lm.body ||
-    "";
+async function openChat(chatId, title) {
+  CURRENT_CHAT_ID = chatId;
+  $("#chat-header").textContent = title || chatId || "Chat";
+  $("#messages").innerHTML = "<div class='hint'>Carregando...</div>";
+  await loadMessages(chatId);
 
-  if (text) return String(text).trim();
-
-  // rótulos por tipo de mídia
-  if (type.includes("image"))  return "[imagem]";
-  if (type.includes("video"))  return "[vídeo]";
-  if (type.includes("audio") || type.includes("ptt")) return "[áudio]";
-  if (type.includes("sticker")) return "[figurinha]";
-  if (type.includes("document") || type.includes("file")) return "[arquivo]";
-  if (type.includes("contact")) return "[contato]";
-  if (type.includes("location")) return "[localização]";
-
-  return "";
+  // mobile: entra na tela de chat
+  if (window.matchMedia("(max-width:1023px)").matches) {
+    document.body.classList.remove("is-mobile-list");
+    document.body.classList.add("is-mobile-chat");
+  }
 }
 
-function renderChats(chats) {
-  const list = $("#chat-list"); list.innerHTML = "";
-  chats.forEach(ch => {
-    const el = document.createElement("div");
-    el.className = "chat-item";
-    el.onclick = () => openChat(ch);
-
-    const displayName = bestName(ch);
-    const initials = (displayName || "?").slice(0,2).toUpperCase();
-    const ts = ch.wa_lastMsgTimestamp || ch.lastMessageTimestamp || "";
-    const preview = lastPreview(ch);
-
-    el.innerHTML = `
-      <div class="avatar">
-        <img class="avatar-img hidden" alt=""/>
-        <div class="avatar-fallback">${initials}</div>
-      </div>
-      <div class="meta">
-        <div class="name">${displayName}</div>
-        <div class="time">${ts}</div>
-        <div class="preview">${escapeHtml(preview)}</div>
-      </div>`;
-
-    list.appendChild(el);
-
-    // completa nome/foto assíncrono (lazy)
-    ensureNameImage(ch).then(() => {
-      // nome
-      const newName = bestName(ch);
-      el.querySelector(".name").textContent = newName;
-
-      // avatar
-      const url = previewAvatarUrl(ch);
-      const img = el.querySelector(".avatar-img");
-      const fb  = el.querySelector(".avatar-fallback");
-      if (url) {
-        img.src = url;
-        img.onload = () => { img.classList.remove("hidden"); fb.classList.add("hidden"); };
-        img.onerror = () => { img.classList.add("hidden"); fb.classList.remove("hidden"); };
-      }
-    });
-  });
-}
-
-// ====== Mensagens ======
-async function openChat(ch) {
-  window.__CURRENT_CHAT__ = ch;
-  await ensureNameImage(ch); // garante possíveis atualizações
-  $("#chat-header").textContent = bestName(ch) || "Chat";
-  $("#send-number").value = (ch.wa_chatid || ch.chatid || "").replace("@s.whatsapp.net","").replace("@g.us","");
-  await loadMessages(ch.wa_chatid || ch.chatid);
-}
-
-async function loadMessages(chatid) {
+async function loadMessages(chatId) {
   const pane = $("#messages");
-  pane.innerHTML = "<div style='padding:12px;color:#8696a0'>Carregando...</div>";
   try {
     const data = await api("/api/messages", {
       method: "POST",
-      body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" })
+      body: JSON.stringify({ chatid: chatId, limit: 100, sort: "-messageTimestamp" })
     });
     const items = Array.isArray(data?.items) ? data.items : [];
-    renderMessages(items);
+    renderMessages(items.reverse());
   } catch (e) {
-    pane.innerHTML = `<div style='padding:12px;color:#f88'>Falha ao carregar mensagens: ${e.message}</div>`;
+    console.error(e);
+    pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${e.message}</div>`;
   }
 }
 
 function renderMessages(msgs) {
-  const pane = $("#messages"); pane.innerHTML = "";
+  const pane = $("#messages");
+  pane.innerHTML = "";
   msgs.forEach(m => {
     const me = m.fromMe || m.fromme || m.from_me || false;
     const el = document.createElement("div");
     el.className = "msg " + (me ? "me" : "you");
 
-    // Texto/mídia simples (ajuste conforme sua UAZAPI):
-    const type = (m.messageType || "").toLowerCase();
-    let text =
+    // texto de vários formatos possíveis
+    const text =
       m.text ||
       m.message?.text ||
       m.caption ||
       m?.message?.conversation ||
-      m?.body ||
-      "";
+      m?.body || "";
 
-    if (!text) {
-      if (type.includes("image"))  text = "[imagem]";
-      else if (type.includes("video"))  text = "[vídeo]";
-      else if (type.includes("audio") || type.includes("ptt")) text = "[áudio]";
-      else if (type.includes("sticker")) text = "[figurinha]";
-      else if (type.includes("document")) text = "[arquivo]";
-      else if (type.includes("contact")) text = "[contato]";
-      else if (type.includes("location")) text = "[localização]";
-    }
+    const who  = m.senderName || m.pushName || "";
+    const ts   = m.messageTimestamp || m.timestamp || "";
 
-    const who = m.senderName || m.pushName || "";
-    const ts  = m.messageTimestamp || m.timestamp || "";
-
-    el.innerHTML = `${escapeHtml(text)}<small>${who ? escapeHtml(who) + " • " : ""}${ts}</small>`;
+    el.innerHTML = `${escapeHtml(text)}<small>${escapeHtml(who)} ${ts ? "• " + ts : ""}</small>`;
     pane.appendChild(el);
   });
   pane.scrollTop = pane.scrollHeight;
 }
 
 function escapeHtml(s){
-  return String(s||"").replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  return String(s||"").replace(/[&<>"']/g, m => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[m]));
 }
 
-// ====== Boot ======
-document.addEventListener("DOMContentLoaded", () => {
-  const btnLogin   = $("#btn-login");
-  const btnLogout  = $("#btn-logout");
-  const btnSend    = $("#btn-send");
-  const btnRefresh = $("#btn-refresh");
+/* ========= envio manual (opcional) ========= */
+async function sendNow() {
+  const number = $("#send-number")?.value?.trim();
+  const text   = $("#send-text")?.value?.trim();
+  if (!number || !text) return;
 
-  if (btnLogin)  btnLogin.onclick  = doLogin;
-  if (btnLogout) btnLogout.onclick = () => { localStorage.clear(); location.reload(); };
-  if (btnSend)   btnSend.onclick   = () => {}; // envio desativado por enquanto
-  if (btnRefresh) btnRefresh.onclick = () => {
-    if (window.__CURRENT_CHAT__) loadMessages(window.__CURRENT_CHAT__.wa_chatid || window.__CURRENT_CHAT__.chatid);
+  try {
+    await api("/api/send-text", {
+      method: "POST",
+      body: JSON.stringify({ number, text })
+    });
+    $("#send-text").value = "";
+    if (CURRENT_CHAT_ID) loadMessages(CURRENT_CHAT_ID);
+  } catch (e) {
+    alert(e.message || "Falha ao enviar");
+  }
+}
+
+/* ========= eventos ========= */
+document.addEventListener("DOMContentLoaded", () => {
+  // botões
+  $("#btn-login")    ?.addEventListener("click", doLogin);
+  $("#btn-logout")   ?.addEventListener("click", () => { clearAuth(); location.reload(); });
+  $("#btn-send")     ?.addEventListener("click", sendNow);
+  $("#btn-refresh")  ?.addEventListener("click", () => {
+    if (CURRENT_CHAT_ID) loadMessages(CURRENT_CHAT_ID);
     else loadChats();
-  };
+  });
+  $(".btn.back")     ?.addEventListener("click", () => {
+    document.body.classList.remove("is-mobile-chat");
+    document.body.classList.add("is-mobile-list");
+  });
 
   ensureRoute();
 });
