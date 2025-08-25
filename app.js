@@ -1,4 +1,4 @@
-/* LUNA – FRONT READ-ONLY (com enrich de nome/foto + mobile + scrolls) */
+/* LUNA – FRONT READ-ONLY (com enrich de nome/foto + mobile + scrolls + logs) */
 
 /* ---------- BASICS ---------- */
 const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
@@ -44,13 +44,8 @@ function esc(s){ return String(s||"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&
 // Corrige possíveis textos em latin‑1 / URL encoded
 function fixEncoding(s) {
   if (!s) return s;
-  try {
-    if (/%[0-9A-F]{2}/i.test(s)) return decodeURIComponent(s);
-  } catch {}
-  try {
-    // latin-1 -> utf-8
-    return decodeURIComponent(escape(s));
-  } catch {}
+  try { if (/%[0-9A-F]{2}/i.test(s)) return decodeURIComponent(s); } catch {}
+  try { return decodeURIComponent(escape(s)); } catch {}
   return s;
 }
 function cleanName(name) {
@@ -169,20 +164,27 @@ async function enrichOne(ch){
 
   try {
     const number = normalizeNumber(chatid);
-    const info = await api("/api/chat/GetNameAndImageURL", {
+    console.log("[enrich] req", number);
+    const infoRaw = await api("/api/chat/GetNameAndImageURL", {
       method: "POST",
       body: JSON.stringify({ number, preview: true })
     });
+    const info = infoRaw?.data && typeof infoRaw.data === "object" ? infoRaw.data : infoRaw;
+    console.log("[enrich] resp", infoRaw);
+
     const mapped = {
       name: info?.wa_name || info?.name || "",
       imageUrl: info?.imagePreview || info?.image || ""
     };
+
+    if (!mapped.name && !mapped.imageUrl) return;
+
     ENRICH_CACHE.set(chatid, mapped);
 
     const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
     if (row) applyNameImage(row, mapped);
   } catch (e) {
-    console.debug("enrichOne failed:", e?.message || e);
+    console.warn("[enrich] fail", e?.message || e);
   }
 }
 
@@ -218,7 +220,6 @@ async function openChat(ch){
   const chatid = getChatId(ch);
   $("#chat-header").textContent = cleanName(ch.wa_contactName || ch.name || chatid || "Chat");
 
-  // Mobile: alterna para a view de mensagens
   if (window.matchMedia("(max-width:1023px)").matches){
     document.body.classList.add("is-mobile-chat");
     document.body.classList.remove("is-mobile-list");
@@ -254,7 +255,7 @@ function renderMessages(msgs){
     el.innerHTML = `${esc(text)}<small>${esc(who)} • ${esc(ts)}</small>`;
     pane.appendChild(el);
   });
-  pane.scrollTop = pane.scrollHeight; // rola até o fim do painel de mensagens
+  pane.scrollTop = pane.scrollHeight;
 }
 
 /* =======================
