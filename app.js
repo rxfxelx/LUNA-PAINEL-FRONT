@@ -1,4 +1,5 @@
-/* LUNA – FRONT READ-ONLY (enrich nome/foto + mobile + scrolls + 401 auto‑logout) */
+/* LUNA – FRONT READ-ONLY (enrich nome/foto + mobile + scrolls) */
+/* Ajuste: NÃO faz auto‑logout em 401 para não “voltar” à tela de login. */
 
 /* ---------- BASICS ---------- */
 const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
@@ -10,18 +11,12 @@ const hide = (sel) => $(sel).classList.add("hidden");
 function jwt() { return localStorage.getItem("luna_jwt") || ""; }
 function authHeaders() { return { "Authorization": "Bearer " + jwt() }; }
 
-/* Auto‑logout quando o backend responder 401 */
+/* NÃO redireciona em 401 — só repassa o erro para a UI mostrar */
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
     headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers||{}) },
     ...opts
   });
-  if (res.status === 401) {
-    try { console.warn("401 -> logout", await res.text()); } catch {}
-    localStorage.removeItem("luna_jwt");
-    location.reload();
-    throw new Error("Unauthorized");
-  }
   if (!res.ok) {
     const t = await res.text().catch(()=> "");
     throw new Error(`HTTP ${res.status}: ${t}`);
@@ -42,23 +37,13 @@ function getUnread(ch){ return ch?.wa_unreadCount ?? ch?.unread ?? 0; }
 function timeStr(ts){
   if (!ts) return "";
   let n = Number(ts);
-  if (n > 1e12) n = Math.floor(n/1000); // ms -> s
+  if (n > 1e12) n = Math.floor(n/1000);
   if (!Number.isFinite(n)) return String(ts);
   return new Date(n*1000).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'});
 }
 function esc(s){ return String(s||"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
-
-// Corrige possíveis textos em latin‑1 / URL encoded
-function fixEncoding(s) {
-  if (!s) return s;
-  try { if (/%[0-9A-F]{2}/i.test(s)) return decodeURIComponent(s); } catch {}
-  try { return decodeURIComponent(escape(s)); } catch {}
-  return s;
-}
-function cleanName(name) {
-  const t = fixEncoding(String(name || ""));
-  return t.replace(/\s+/g, " ").trim();
-}
+function fixEncoding(s) { try{ if(/%[0-9A-F]{2}/i.test(s)) return decodeURIComponent(s); }catch{} try{ return decodeURIComponent(escape(s)); }catch{} return s; }
+function cleanName(name) { return fixEncoding(String(name||"")).replace(/\s+/g," ").trim(); }
 
 /* =======================
    LOGIN
@@ -76,7 +61,6 @@ async function doLogin() {
     });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
-
     localStorage.setItem("luna_jwt", data.jwt);
     localStorage.setItem("luna_profile", JSON.stringify(data.profile || {}));
     switchToApp();
@@ -89,17 +73,12 @@ async function doLogin() {
 function switchToApp() {
   hide("#login-view"); show("#app-view");
   const lv = document.getElementById("login-view"); if (lv) lv.remove();
-  try {
-    const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
-    $("#profile").textContent = p.label ? "• " + p.label : "";
-  } catch {}
+  try { const p = JSON.parse(localStorage.getItem("luna_profile")||"{}");
+        $("#profile").textContent = p.label ? "• " + p.label : ""; } catch {}
   loadChats();
 }
 
-function ensureRoute(){
-  if (jwt()) switchToApp();
-  else { show("#login-view"); hide("#app-view"); }
-}
+function ensureRoute(){ if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
 
 /* =======================
    CHATS
@@ -115,8 +94,6 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items : [];
     if (!items.length) { list.innerHTML = "<div class='hint'>Nenhum chat encontrado</div>"; return; }
     renderChats(items);
-
-    // enriquece primeiros 50 (limit)
     enrichChatsBatched(items.slice(0, 50));
   } catch (e) {
     console.error(e);
@@ -137,85 +114,51 @@ function renderChats(chats){
     el.className = "chat-item";
     el.dataset.chatid = chatid;
     el.onclick = () => openChat(ch);
-
     el.innerHTML = `
       <div class="avatar"><span>${(baseName||'?').slice(0,2).toUpperCase()}</span></div>
       <div class="chat-main">
-        <div class="row1">
-          <div class="name">${esc(baseName)}</div>
-          <div class="time">${esc(t)}</div>
-        </div>
-        <div class="row2">
-          <div class="preview">${esc(prev)}</div>
-          ${unread > 0 ? `<div class="badge">${unread}</div>` : ``}
-        </div>
+        <div class="row1"><div class="name">${esc(baseName)}</div><div class="time">${esc(t)}</div></div>
+        <div class="row2"><div class="preview">${esc(prev)}</div>${unread>0?`<div class="badge">${unread}</div>`:``}</div>
       </div>`;
     list.appendChild(el);
 
-    if (ENRICH_CACHE.has(chatid)) applyNameImage(el, ENRICH_CACHE.get(chatid));
+    if ( ENRICH_CACHE.has(chatid) ) applyNameImage(el, ENRICH_CACHE.get(chatid));
   });
 }
 
-/* ---------- Enriquecimento de nome/foto (POST /api/chat/GetNameAndImageURL) ---------- */
+/* ---------- Enriquecimento (POST /api/chat/GetNameAndImageURL) ---------- */
 async function enrichChatsBatched(chats){
-  const batchSize = 5;
-  for (let i = 0; i < chats.length; i += batchSize) {
-    const slice = chats.slice(i, i + batchSize);
-    await Promise.allSettled(slice.map(ch => enrichOne(ch)));
+  const batch = 5;
+  for (let i=0;i<chats.length;i+=batch){
+    await Promise.allSettled(chats.slice(i,i+batch).map(enrichOne));
   }
 }
-
 async function enrichOne(ch){
   const chatid = getChatId(ch);
   if (!chatid || ENRICH_CACHE.has(chatid)) return;
-
-  try {
+  try{
     const number = normalizeNumber(chatid);
-    console.log("[enrich] req", number);
     const infoRaw = await api("/api/chat/GetNameAndImageURL", {
       method: "POST",
-      body: JSON.stringify({ number, preview: true })
+      body: JSON.stringify({ number, preview:true })
     });
     const info = infoRaw?.data && typeof infoRaw.data === "object" ? infoRaw.data : infoRaw;
-    console.log("[enrich] resp", infoRaw);
-
-    const mapped = {
-      name: info?.wa_name || info?.name || "",
-      imageUrl: info?.imagePreview || info?.image || ""
-    };
-
+    const mapped = { name: info?.wa_name || info?.name || "", imageUrl: info?.imagePreview || info?.image || "" };
     if (!mapped.name && !mapped.imageUrl) return;
-
     ENRICH_CACHE.set(chatid, mapped);
-
     const row = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
     if (row) applyNameImage(row, mapped);
-  } catch (e) {
-    console.warn("[enrich] fail", e?.message || e);
-  }
+  }catch(e){ console.warn("[enrich] fail", e?.message||e); }
 }
-
 function applyNameImage(row, info){
   if (!row || !info) return;
-  const nm = cleanName(info.name || "");
-  if (nm) {
-    const nameEl = row.querySelector(".name");
-    if (nameEl) nameEl.textContent = nm;
-  }
-  const url = info.imageUrl || "";
-  if (url) {
-    const a = row.querySelector(".avatar");
-    if (a) {
-      a.innerHTML = "";
-      const img = document.createElement("img");
-      img.src = url;
-      img.alt = "avatar";
-      img.loading = "lazy";
-      img.style.width = "100%";
-      img.style.height = "100%";
-      img.style.objectFit = "cover";
-      a.appendChild(img);
-    }
+  const nm = cleanName(info.name||"");
+  if (nm){ const n = row.querySelector(".name"); if (n) n.textContent = nm; }
+  const url = info.imageUrl||"";
+  if (url){
+    const a = row.querySelector(".avatar"); if (a){ a.innerHTML=""; const img=document.createElement("img");
+      img.src=url; img.alt="avatar"; img.loading="lazy"; img.style.width="100%"; img.style.height="100%"; img.style.objectFit="cover";
+      a.appendChild(img); }
   }
 }
 
@@ -226,7 +169,6 @@ async function openChat(ch){
   window.__CURRENT_CHAT__ = ch;
   const chatid = getChatId(ch);
   $("#chat-header").textContent = cleanName(ch.wa_contactName || ch.name || chatid || "Chat");
-
   if (window.matchMedia("(max-width:1023px)").matches){
     document.body.classList.add("is-mobile-chat");
     document.body.classList.remove("is-mobile-list");
@@ -237,22 +179,22 @@ async function openChat(ch){
 async function loadMessages(chatid){
   const pane = $("#messages");
   pane.innerHTML = "<div class='hint'>Carregando...</div>";
-  try {
+  try{
     const data = await api("/api/messages", {
       method: "POST",
-      body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" })
+      body: JSON.stringify({ chatid, limit:100, sort:"-messageTimestamp" })
     });
-    const items = Array.isArray(data?.items) ? data.items : [];
+    const items = Array.isArray(data?.items)?data.items:[];
     renderMessages(items);
-  } catch (e) {
+  }catch(e){
     console.error(e);
     pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${e.message}</div>`;
   }
 }
 
 function renderMessages(msgs){
-  const pane = $("#messages"); pane.innerHTML = "";
-  msgs.forEach(m => {
+  const pane = $("#messages"); pane.innerHTML="";
+  msgs.forEach(m=>{
     const me = m.fromMe || m.fromme || m.from_me || false;
     const el = document.createElement("div");
     el.className = "msg " + (me ? "me" : "you");
