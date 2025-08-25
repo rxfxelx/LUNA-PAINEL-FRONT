@@ -1,11 +1,8 @@
 /* ========================================================================
- * LUNA – FRONTEND APP.JS (COMPLETO)
- * - Login robusto (pega o botão/inputs mesmo que mudem os IDs/classes)
- * - Carrega lista de chats com foto/nome/última mensagem/hora/badge de não lidas
- * - Abre chat e renderiza mensagens (texto, mídia com placeholders)
- * - Envia texto (se a barra estiver no HTML)
- * - Busca nome/foto por /api/name-image com cache + revalidação
- * - Mobile friendly: alterna lista/chat em telas menores
+ * LUNA – FRONTEND APP.JS (COMPLETO / ATUALIZADO)
+ * 1) Previews na lista com “…” (usa CSS + contém só 1 linha no .preview)
+ * 2) Previews carregam SOZINHAS logo após listar os chats (prefetch)
+ * 3) Mantém tudo que já funcionava: login, lista, abrir chat, enviar, fotos, etc.
  * ===================================================================== */
 
 /* -------------------- CONFIG & HELPERS -------------------- */
@@ -31,8 +28,8 @@ function showApp()   { $(".login")?.classList.add("hidden"); $(".app")?.classLis
 
 function fmtTime(ts) {
   if (!ts) return "";
-  // ts pode vir como epoch em segundos ou string; normaliza
   const n = typeof ts === "number" ? ts : parseInt(ts, 10);
+  if (Number.isNaN(n)) return "";
   const d = new Date((n > 1e12 ? n : n * 1000));
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -47,7 +44,6 @@ async function api(path, opts = {}) {
     ...opts
   });
   if (res.status === 401) {
-    // Não apaga o token automaticamente; mostra erro e volta ao login para o usuário decidir
     const t = await res.text().catch(() => "");
     showLogin();
     throw new Error(`401 Unauthorized: ${t || "Reautentique-se."}`);
@@ -130,7 +126,6 @@ async function fetchNameImage(chatid, { preview = true, force = false } = {}) {
     state.profiles.set(chatid, prof);
     return prof;
   } catch (e) {
-    // Se URL assinada expirada foi detectada pelo backend, tente revalidar
     if (/expired|signature/i.test(String(e.message))) {
       try {
         const data = await api("/api/name-image", {
@@ -144,7 +139,7 @@ async function fetchNameImage(chatid, { preview = true, force = false } = {}) {
         };
         state.profiles.set(chatid, prof);
         return prof;
-      } catch { /* ignora */ }
+      } catch { /* ignore */ }
     }
     return state.profiles.get(chatid) || { name: null, image: null, imagePreview: null };
   }
@@ -152,10 +147,8 @@ async function fetchNameImage(chatid, { preview = true, force = false } = {}) {
 
 /* -------------------- CHATS -------------------- */
 function normalizeChat(c) {
-  // nome
   const name =
     c.wa_contactName || c.wa_name || c.name || c.title || c.wa_chatid || "Contato";
-  // última mensagem/horário
   const lastText = c.wa_lastMessageText || c.lead_lastMsgText || c.lastMessage || "";
   const lastTs = c.wa_lastMsgTimestamp || c.lastMsgTimestamp || c.updatedAt || c.timestamp || "";
   const unread = c.wa_unreadCount ?? c.unreadCount ?? 0;
@@ -182,6 +175,9 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items.map(normalizeChat) : [];
     state.chats = items;
     if (list) renderChats(items);
+
+    // PREFETCH das últimas mensagens para cards que vieram sem preview
+    prefetchPreviews(items);
   } catch (e) {
     console.error(e);
     if (list) list.innerHTML = `<div class='error'>Falha ao carregar chats: ${escapeHtml(e.message)}</div>`;
@@ -229,8 +225,10 @@ function renderChats(chats) {
     const row2 = document.createElement("div");
     row2.className = "row2";
     const preview = document.createElement("div");
-    preview.className = "preview";
-    preview.textContent = c.lastText || state.lastMsg.get(c.chatid) || "";
+    preview.className = "preview"; // CSS já faz: uma linha + “...”
+    const pvText = c.lastText || state.lastMsg.get(c.chatid) || "";
+    preview.textContent = pvText;
+    preview.title = pvText; // mostrar inteiro no hover
     const badge = document.createElement("span");
     badge.className = "badge";
     badge.textContent = c.unread > 0 ? String(c.unread) : "";
@@ -245,6 +243,42 @@ function renderChats(chats) {
   });
 }
 
+/* -------------------- PREFETCH de previews --------------------
+ * Busca a ÚLTIMA mensagem (limit=1) para todos os chats que vieram sem
+ * wa_lastMessageText, assim o card já mostra o preview sem precisar abrir.
+ * Fazemos em lotes para não sobrecarregar o backend.
+ * ------------------------------------------------------------- */
+async function prefetchPreviews(chats) {
+  const targets = chats.filter(c => !(c.lastText && c.lastText.trim()));
+
+  const BATCH = 6;                      // até 6 requisições simultâneas
+  for (let i = 0; i < targets.length; i += BATCH) {
+    const slice = targets.slice(i, i + BATCH);
+    await Promise.all(slice.map(async (c) => {
+      try {
+        const data = await api("/api/messages", {
+          method: "POST",
+          body: JSON.stringify({ chatid: c.chatid, limit: 1, sort: "-messageTimestamp" })
+        });
+        const last = Array.isArray(data?.items) && data.items[0];
+        if (!last) return;
+
+        const previewText =
+          last.text || last.caption || last?.message?.text || last?.message?.conversation || last?.body || "";
+        state.lastMsg.set(c.chatid, previewText);
+
+        const card = $(`.chat-item[data-chatid="${CSS.escape(c.chatid)}"]`);
+        const pv = card?.querySelector(".preview");
+        const tm = card?.querySelector(".time");
+        if (pv) { pv.textContent = previewText; pv.title = previewText; }
+        if (tm) tm.textContent = fmtTime(last.messageTimestamp || last.timestamp || last.date);
+      } catch (e) {
+        // silencioso; melhor não poluir o console
+      }
+    }));
+  }
+}
+
 /* -------------------- MESSAGES -------------------- */
 function renderMessages(msgs) {
   const pane = $("#messages");
@@ -256,11 +290,9 @@ function renderMessages(msgs) {
     const bubble = document.createElement("div");
     bubble.className = "msg " + (me ? "me" : "you");
 
-    // conteúdo: tenta várias chaves comuns
+    // conteúdo
     let text =
       m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "";
-
-    // placeholders simples para mídia se não houver texto
     if (!text) {
       if (m.type === "image" || m?.message?.imageMessage) text = "📷 Foto";
       else if (m.type === "video" || m?.message?.videoMessage) text = "🎥 Vídeo";
@@ -271,6 +303,7 @@ function renderMessages(msgs) {
     const who = m.senderName || m.pushName || (me ? "Você" : "");
     const ts = m.messageTimestamp || m.timestamp || m.date || "";
 
+    // BOLHA continua normal (quebra linha), o preview na LISTA é que fica “...”
     bubble.innerHTML = `${escapeHtml(text)}<small>${escapeHtml(who)} • ${fmtTime(ts)}</small>`;
     pane.appendChild(bubble);
   });
@@ -297,9 +330,12 @@ async function loadMessages(chatid) {
       state.lastMsg.set(chatid, previewText);
 
       const card = $(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
-      card?.querySelector(".preview") && (card.querySelector(".preview").textContent = previewText);
+      const pv = card?.querySelector(".preview");
+      const tm = card?.querySelector(".time");
+      if (pv) { pv.textContent = previewText; pv.title = previewText; }
       const ts = last.messageTimestamp || last.timestamp || last.date;
-      card?.querySelector(".time") && (card.querySelector(".time").textContent = fmtTime(ts));
+      if (tm) tm.textContent = fmtTime(ts);
+
       // zerar badge de não lidas do card aberto
       const badge = card?.querySelector(".badge");
       if (badge) { badge.textContent = ""; badge.style.display = "none"; }
@@ -315,15 +351,12 @@ async function loadMessages(chatid) {
 async function openChat(chatid, displayName) {
   state.currentChatId = chatid;
 
-  // título
   const header = $("#chat-header") || $(".chat-title");
   if (header) header.textContent = displayName || chatid;
 
-  // número na barra de envio (se existir)
   const numInput = $("#send-number");
   if (numInput) numInput.value = (chatid || "").replace("@s.whatsapp.net", "").replace("@g.us", "");
 
-  // mobile
   if (window.matchMedia("(max-width: 1023px)").matches) {
     document.body.classList.remove("is-mobile-list");
     document.body.classList.add("is-mobile-chat");
@@ -343,7 +376,6 @@ async function sendNow() {
       body: JSON.stringify({ number, text })
     });
     $("#send-text").value = "";
-    // reload msgs se o chat atual bate com o number
     const cid = (state.currentChatId || "").replace("@s.whatsapp.net", "").replace("@g.us", "");
     if (cid === number) await loadMessages(state.currentChatId);
   } catch (e) {
@@ -353,7 +385,6 @@ async function sendNow() {
 
 /* -------------------- BOOTSTRAP -------------------- */
 document.addEventListener("DOMContentLoaded", () => {
-  // Bind do botão Login
   const loginRoot = $(".login") || document;
   const btnLogin =
     $("#btn-login", loginRoot) ||
@@ -369,25 +400,20 @@ document.addEventListener("DOMContentLoaded", () => {
     $('input', loginRoot);
   tokenInput?.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin(); } });
 
-  // Logout
   $("#btn-logout")?.addEventListener("click", () => { clearJWT(); showLogin(); });
 
-  // Refresh (recarrega chat atual ou lista)
   $("#btn-refresh")?.addEventListener("click", () => {
     if (state.currentChatId) loadMessages(state.currentChatId);
     else loadChats();
   });
 
-  // Enviar (se a barra existir)
   $("#btn-send")?.addEventListener("click", (e) => { e.preventDefault(); sendNow(); });
 
-  // Back mobile
   $(".btn.back")?.addEventListener("click", () => {
     document.body.classList.remove("is-mobile-chat");
     document.body.classList.add("is-mobile-list");
   });
 
-  // Estado inicial
   if (getJWT()) { showApp(); loadChats(); }
   else { showLogin(); }
 });
