@@ -71,6 +71,113 @@ const state = {
   loadingChats: false,
 }
 
+/* ========= CRM (ACRÉSCIMOS) ========= */
+const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
+
+async function apiCRMViews(){ return api("/api/crm/views") }
+async function apiCRMList(stage, limit=100, offset=0){
+  const qs = new URLSearchParams({stage,limit,offset}).toString()
+  return api("/api/crm/list?"+qs)
+}
+async function apiCRMSetStatus(chatid, stage, notes=""){
+  return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
+}
+
+function ensureCRMBar(){
+  const host = document.querySelector(".topbar")
+  if(!host || host.querySelector(".crm-tabs")) return
+
+  const wrap = document.createElement("div")
+  wrap.className = "crm-tabs"
+  wrap.style.display = "flex"
+  wrap.style.gap = "8px"
+  wrap.style.alignItems = "center"
+
+  const btnAll = document.createElement("button")
+  btnAll.className = "btn"
+  btnAll.textContent = "Geral"
+  btnAll.onclick = () => loadChats()
+  wrap.appendChild(btnAll)
+
+  CRM_STAGES.forEach(st=>{
+    const b=document.createElement("button")
+    b.className="btn"
+    b.dataset.stage=st
+    b.textContent=st.replace("_"," ")
+    b.onclick=()=>loadCRMStage(st)
+    wrap.appendChild(b)
+  })
+
+  const counters=document.createElement("div")
+  counters.className="crm-counters"
+  counters.style.fontSize="12px"
+  counters.style.color="var(--sub2)"
+  counters.style.marginLeft="8px"
+
+  host.appendChild(wrap)
+  host.appendChild(counters)
+  refreshCRMCounters()
+}
+
+async function refreshCRMCounters(){
+  try{
+    const data=await apiCRMViews()
+    const counts=data?.counts||{}
+    const el=document.querySelector(".crm-counters")
+    if(el){
+      const parts=CRM_STAGES.map(s=>`${s.replace("_"," ")}: ${counts[s]||0}`)
+      el.textContent=parts.join(" • ")
+    }
+  }catch{}
+}
+
+async function loadCRMStage(stage){
+  const list=$("#chat-list")
+  list.innerHTML="<div class='hint'>Carregando visão CRM...</div>"
+  try{
+    const data=await apiCRMList(stage,100,0)
+    const items=[]
+    for(const it of (data?.items||[])){
+      const ch=it.chat||{}
+      if(!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid=it.crm.chatid
+      items.push(ch)
+    }
+    await progressiveRenderChats(items)
+    await prefetchCards(items)
+  }catch(e){
+    list.innerHTML=`<div class='error'>Falha ao carregar CRM: ${escapeHtml(e.message||"")}</div>`
+  }finally{
+    refreshCRMCounters()
+  }
+}
+
+function attachCRMControlsToCard(cardEl, chatObj){
+  const row1=cardEl.querySelector(".row1")
+  if(!row1) return
+  if(row1.querySelector(".btn-crm-gear")) return
+
+  const gear=document.createElement("button")
+  gear.className="btn btn-crm-gear"
+  gear.title="Mudar estágio CRM"
+  gear.style.marginLeft="6px"
+  gear.style.padding="2px 6px"
+  gear.textContent="⚙"
+  gear.onclick=async(ev)=>{
+    ev.stopPropagation()
+    const chatid=chatObj.wa_chatid||chatObj.chatid||""
+    if(!chatid) return
+    const st=prompt("Estágio (novo, sem_resposta, interessado, em_negociacao, fechou, descartado):","interessado")
+    if(!st) return
+    if(!CRM_STAGES.includes(st)){ alert("Estágio inválido."); return }
+    try{
+      await apiCRMSetStatus(chatid,st,"")
+      await refreshCRMCounters()
+      gear.textContent="✅"; setTimeout(()=>gear.textContent="⚙",1200)
+    }catch(e){ alert("Falha ao definir estágio: "+(e.message||"")) }
+  }
+  row1.appendChild(gear)
+}
+
 /* ========= LOGIN ========= */
 async function doLogin() {
   const token = $("#token").value.trim()
@@ -110,6 +217,7 @@ function switchToApp() {
   hide("#login-view")
   show("#app-view")
   setMobileMode("list")
+  ensureCRMBar()       // ADIÇÃO
   loadChats()
 }
 
@@ -239,6 +347,9 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(avatar)
   el.appendChild(main)
   list.appendChild(el)
+
+  // CRM: botão por card (sem alterar layout existente)
+  try { attachCRMControlsToCard(el, ch) } catch(e) {}
 }
 
 // Atualiza um card com foto/nome do cache (quando disponível)
