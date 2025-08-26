@@ -270,6 +270,16 @@ async function loadChats() {
 
     // Prefetch paralelo (limitado) para completar fotos/nomes sem travar a UI
     await prefetchCards(items)
+
+    // --- CRM: sincroniza automaticamente os registros faltantes ---
+    try {
+      await api("/api/crm/sync", {
+        method: "POST",
+        body: JSON.stringify({ limit: 500 }),
+      })
+      refreshCRMCounters()
+    } catch (e) { /* silencioso */ }
+
   } catch (e) {
     console.error(e)
     list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`
