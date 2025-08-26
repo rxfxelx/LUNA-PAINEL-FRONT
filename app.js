@@ -35,8 +35,12 @@ function setMobileMode(mode) {
   if (mode === "chat") document.body.classList.add("is-mobile-chat")
 }
 
-function jwt() { return localStorage.getItem("luna_jwt") || "" }
-function authHeaders() { return { Authorization: "Bearer " + jwt() } }
+function jwt() {
+  return localStorage.getItem("luna_jwt") || ""
+}
+function authHeaders() {
+  return { Authorization: "Bearer " + jwt() }
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
@@ -51,8 +55,9 @@ async function api(path, opts = {}) {
 }
 
 function escapeHtml(s) {
-  return String(s || "").replace(/[&<>"']/g, (m) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]),
+  return String(s || "").replace(
+    /[&<>"']/g,
+    (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[m],
   )
 }
 
@@ -67,6 +72,7 @@ const state = {
 
   // NOVO: classificação automática em memória + cache local
   aiStage: new Map(),     // chatid => { stage, confidence, reason, ts }
+  currentTab: "Geral",    // "Geral" | "Lead" | "Lead Qualificado" | "Lead Quente" | "Prospectivo Cliente" | "Cliente"
 }
 
 function aiCacheKey(chatid){ return `luna_ai_stage::${chatid}` }
@@ -81,7 +87,8 @@ function writeAIToLocal(chatid, obj){
   try { localStorage.setItem(aiCacheKey(chatid), JSON.stringify({ ...obj, ts: Date.now() })) } catch {}
 }
 
-/* ========= CRM (mantido como no-op) ========= */
+/* ========= CRM (ACRÉSCIMOS) ========= */
+// Mantidos para compatibilidade, mas não usamos aqui como fonte das abas
 const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
 async function apiCRMViews(){ return api("/api/crm/views") }
 async function apiCRMList(stage, limit=100, offset=0){
@@ -91,17 +98,117 @@ async function apiCRMList(stage, limit=100, offset=0){
 async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
-/* ======= DESATIVADO: não renderiza a barra CRM ======= */
-function ensureCRMBar(){ /* no-op: escondido por padrão */ }
-async function refreshCRMCounters(){ try{
-  const data=await apiCRMViews()
-  const counts=data?.counts||{}
-  const el=document.querySelector(".crm-counters")
-  if(el){
-    const parts=CRM_STAGES.map(s=>`${s.replace("_"," ")}: ${counts[s]||0}`)
-    el.textContent=parts.join(" • ")
+
+/* ======= BARRA DE ABAS (VISÍVEL) ======= */
+function ensureCRMBar(){
+  const host = document.querySelector(".topbar")
+  if(!host) return
+
+  // se já existir, não recria
+  if (host.querySelector(".crm-tabs")) return
+
+  const wrap = document.createElement("div")
+  wrap.className = "crm-tabs"
+  wrap.style.display = "flex"
+  wrap.style.gap = "8px"
+  wrap.style.alignItems = "center"
+
+  // Helper p/ criar botão com mesmo design (.btn)
+  function makeBtn(label){
+    const b = document.createElement("button")
+    b.className = "btn"
+    b.textContent = label
+    b.dataset.tab = label
+    b.onclick = () => {
+      selectTab(label)
+    }
+    return b
   }
-}catch{}}
+
+  // Abas: Geral + 5 estágios da IA
+  const tabs = ["Geral","Lead","Lead Qualificado","Lead Quente","Prospectivo Cliente","Cliente"]
+  tabs.forEach(t => wrap.appendChild(makeBtn(t)))
+
+  // contador opcional (não obrigatório)
+  const counters = document.createElement("div")
+  counters.className = "crm-counters"
+  counters.style.fontSize = "12px"
+  counters.style.color = "var(--sub2)"
+  counters.style.marginLeft = "8px"
+
+  host.appendChild(wrap)
+  host.appendChild(counters)
+
+  // marca "Geral" como ativo inicialmente
+  setActiveTab("Geral")
+}
+
+// altera visual ativo e renderiza
+function selectTab(name){
+  state.currentTab = name || "Geral"
+  setActiveTab(state.currentTab)
+  if (state.currentTab === "Geral") {
+    // re-render da lista geral (mantendo seu fluxo)
+    renderChatsFiltered(null)
+  } else {
+    // render filtrado pela classificação da IA
+    renderChatsFiltered(state.currentTab)
+  }
+}
+
+function setActiveTab(name){
+  document.querySelectorAll(".crm-tabs .btn").forEach(btn => {
+    if (btn.dataset.tab === name) {
+      btn.classList.add("active")
+    } else {
+      btn.classList.remove("active")
+    }
+  })
+}
+
+function getAIStageForChat(chatid){
+  const inMem = state.aiStage.get(chatid)
+  if (inMem && inMem.stage) return inMem.stage
+  const cached = readAIFromLocal(chatid)
+  if (cached && cached.stage) return cached.stage
+  return null
+}
+
+// Re-render da lista levando em conta a aba ativa
+async function renderChatsFiltered(stageLabel){
+  const list = $("#chat-list")
+  // se não há chats carregados ainda, ignora
+  if (!Array.isArray(state.chats) || !state.chats.length) return
+
+  // filtra se necessário
+  let items = state.chats.slice()
+  if (stageLabel) {
+    items = items.filter(ch => {
+      const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+      const s = getAIStageForChat(chatid)
+      return s === stageLabel
+    })
+  }
+
+  // render progressivo dos itens filtrados
+  list.innerHTML = "<div class='hint'>Carregando...</div>"
+  await progressiveRenderChats(items)
+  await prefetchCards(items)
+}
+
+/* ======= (Antigos counters do CRM remoto — mantidos, mas opcionais) ======= */
+async function refreshCRMCounters(){
+  try{
+    const data=await apiCRMViews()
+    const counts=data?.counts||{}
+    const el=document.querySelector(".crm-counters")
+    if(el){
+      const parts=CRM_STAGES.map(s=>`${s.replace("_"," ")}: ${counts[s]||0}`)
+      el.textContent=parts.join(" • ")
+    }
+  }catch{}
+}
+
 async function loadCRMStage(stage){
   const list=$("#chat-list")
   list.innerHTML="<div class='hint'>Carregando visão CRM...</div>"
@@ -117,10 +224,15 @@ async function loadCRMStage(stage){
     await prefetchCards(items)
   }catch(e){
     list.innerHTML=`<div class='error'>Falha ao carregar CRM: ${escapeHtml(e.message||"")}</div>`
-  }finally{ refreshCRMCounters() }
+  }finally{
+    refreshCRMCounters()
+  }
 }
+
 /* ======= DESATIVADO: não cria botões no card ======= */
-function attachCRMControlsToCard(cardEl, chatObj){ return } // no-op
+function attachCRMControlsToCard(cardEl, chatObj){
+  return; // no-op: sem botões extras nos cards
+}
 
 /* ========= LOGIN ========= */
 async function doLogin() {
@@ -128,7 +240,10 @@ async function doLogin() {
   const msgEl = $("#msg")
   const btnEl = $("#btn-login")
 
-  if (!token) { msgEl.textContent = "Por favor, cole o token da instância"; return }
+  if (!token) {
+    msgEl.textContent = "Por favor, cole o token da instância"
+    return
+  }
 
   msgEl.textContent = ""
   btnEl.disabled = true
@@ -136,35 +251,53 @@ async function doLogin() {
 
   try {
     const r = await fetch(BACKEND() + "/api/auth/login", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
     })
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json()
     localStorage.setItem("luna_jwt", data.jwt)
     switchToApp()
   } catch (e) {
-    console.error(e); msgEl.textContent = "Token inválido. Verifique e tente novamente."
+    console.error(e)
+    msgEl.textContent = "Token inválido. Verifique e tente novamente."
   } finally {
     btnEl.disabled = false
-    btnEl.innerHTML = '<span>Entrar no Sistema</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'
+    btnEl.innerHTML =
+      '<span>Entrar no Sistema</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'
   }
 }
 
 function switchToApp() {
-  hide("#login-view"); show("#app-view"); setMobileMode("list"); ensureCRMBar(); loadChats()
+  hide("#login-view")
+  show("#app-view")
+  setMobileMode("list")
+  ensureCRMBar() // agora cria as abas
+  loadChats()
 }
+
 function ensureRoute() {
   if (jwt()) switchToApp()
-  else { show("#login-view"); hide("#app-view") }
+  else {
+    show("#login-view")
+    hide("#app-view")
+  }
 }
 
 /* ========= AVATAR/NAME-IMAGE ========= */
 async function fetchNameImage(chatid, preview = true) {
   try {
-    const resp = await api("/api/name-image", { method: "POST", body: JSON.stringify({ number: chatid, preview }) })
+    const resp = await api("/api/name-image", {
+      method: "POST",
+      body: JSON.stringify({ number: chatid, preview }),
+    })
     return resp // {name,image,imagePreview}
-  } catch { return { name: null, image: null, imagePreview: null } }
+  } catch (e) {
+    return { name: null, image: null, imagePreview: null }
+  }
 }
+
 function initialsOf(str) {
   const s = (str || "").trim()
   if (!s) return "??"
@@ -188,9 +321,14 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items : []
     state.chats = items
 
-    await progressiveRenderChats(items)     // mostra os cards rápido
-    await prefetchCards(items)              // completa avatar/preview
-    await autoClassifyAll(items)            // <<< CLASSIFICAÇÃO AUTOMÁTICA (NÃO BLOQUEIA UI)
+    // Mostra a lista de acordo com a aba atual (Geral inicialmente)
+    await renderChatsFiltered(state.currentTab === "Geral" ? null : state.currentTab)
+
+    // Completa avatar/preview
+    await prefetchCards(items)
+
+    // Classifica automaticamente (não bloqueia)
+    await autoClassifyAll(items)
   } catch (e) {
     console.error(e)
     list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`
@@ -204,14 +342,18 @@ async function progressiveRenderChats(chats) {
   const list = $("#chat-list")
   list.innerHTML = ""
 
-  if (chats.length === 0) { list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>"; return }
+  if (chats.length === 0) {
+    list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>"
+    return
+  }
 
-  const BATCH = 14
+  const BATCH = 14 // ligeiro aumento pra encher a tela mais rápido
   for (let i = 0; i < chats.length; i += BATCH) {
     const slice = chats.slice(i, i + BATCH)
     slice.forEach((ch) => appendChatSkeleton(list, ch))
     await new Promise((r) => rIC(r))
   }
+
   chats.forEach((ch) => hydrateChatCard(ch))
 }
 
@@ -237,7 +379,8 @@ function appendChatSkeleton(list, ch) {
   tm.className = "time"
   const lastTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ""
   tm.textContent = lastTs ? formatTime(lastTs) : ""
-  top.appendChild(nm); top.appendChild(tm)
+  top.appendChild(nm)
+  top.appendChild(tm)
 
   const bottom = document.createElement("div")
   bottom.className = "row2"
@@ -250,11 +393,16 @@ function appendChatSkeleton(list, ch) {
   const unread = document.createElement("span")
   unread.className = "badge"
   const count = state.unread.get(el.dataset.chatid) || ch.wa_unreadCount || 0
-  if (count > 0) unread.textContent = count; else unread.style.display = "none"
+  if (count > 0) unread.textContent = count
+  else unread.style.display = "none"
 
-  bottom.appendChild(preview); bottom.appendChild(unread)
-  main.appendChild(top); main.appendChild(bottom)
-  el.appendChild(avatar); el.appendChild(main)
+  bottom.appendChild(preview)
+  bottom.appendChild(unread)
+
+  main.appendChild(top)
+  main.appendChild(bottom)
+  el.appendChild(avatar)
+  el.appendChild(main)
   list.appendChild(el)
 
   attachCRMControlsToCard(el, ch) // no-op
@@ -264,6 +412,7 @@ function hydrateChatCard(ch) {
   const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
   const cache = state.nameCache.get(chatid)
   if (!chatid || !cache) return
+
   const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
   if (!el) return
 
@@ -280,7 +429,7 @@ function hydrateChatCard(ch) {
   }
   if (cache.name) nameEl.textContent = cache.name
 
-  // Se já houver classificação em cache local, mostra um mini-rótulo no card (opcional)
+  // badge do estágio (se já houver cache IA)
   const cached = readAIFromLocal(chatid)
   if (cached?.stage) upsertAICardBadge(el, cached.stage)
 }
@@ -307,13 +456,20 @@ async function prefetchCards(items) {
           const last = Array.isArray(data?.items) ? data.items[0] : null
           if (last) {
             const pv = (
-              last.text || last.caption || last?.message?.text ||
-              last?.message?.conversation || last?.body || ""
+              last.text ||
+              last.caption ||
+              last?.message?.text ||
+              last?.message?.conversation ||
+              last?.body ||
+              ""
             ).replace(/\s+/g, " ").trim()
             state.lastMsg.set(chatid, pv)
 
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`)
-            if (card) { card.textContent = pv || "Sem mensagens"; card.title = pv }
+            if (card) {
+              card.textContent = pv || "Sem mensagens"
+              card.title = pv
+            }
             const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`)
             if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "")
           }
@@ -322,15 +478,15 @@ async function prefetchCards(items) {
     }
   })
 
-  const CHUNK = 16
+  const CHUNK = 16 // um pouco maior pra reduzir “idas e vindas”
   for (let i = 0; i < tasks.length; i += CHUNK) {
     const slice = tasks.slice(i, i + CHUNK)
-    await runLimited(slice, 8)
+    await runLimited(slice, 8) // limite levemente maior
     await new Promise((r) => rIC(r))
   }
 }
 
-// <<< NOVO: classificar todos os chats em paralelo (limitado), sem travar a UI
+// Classificar todos os chats em paralelo (limitado), sem travar a UI
 async function autoClassifyAll(items){
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
@@ -342,6 +498,8 @@ async function autoClassifyAll(items){
         state.aiStage.set(chatid, cached)
         const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
         if (el) upsertAICardBadge(el, cached.stage)
+        // se uma aba filtrada está ativa, re-render para incluir esse card
+        if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
         return
       }
 
@@ -379,6 +537,9 @@ async function autoClassifyAll(items){
           const curId = state.current.wa_chatid || state.current.chatid || ""
           if (curId === chatid) upsertAIPill(data.stage, data.confidence, data.reason)
         }
+
+        // atualiza a aba filtrada (se não for Geral)
+        if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
       } catch (e) { /* silencioso */ }
     }
   })
@@ -403,7 +564,9 @@ function formatTime(timestamp) {
     if (hours < 24) return `${hours}h`
     if (hours < 48) return "Ontem"
     return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
-  } catch (e) { return timestamp }
+  } catch (e) {
+    return timestamp
+  }
 }
 
 /* ========= OPEN CHAT / MESSAGES ========= */
@@ -434,14 +597,18 @@ async function loadMessages(chatid) {
   pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>"
 
   try {
-    // mais contexto para IA/pill
-    const data = await api("/api/messages", { method: "POST", body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }) })
+    // ↑↑ agora pedimos até 200 para IA ter mais contexto
+    const data = await api("/api/messages", {
+      method: "POST",
+      body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
+    })
     const items = Array.isArray(data?.items) ? data.items : []
     await progressiveRenderMessages(items.slice().reverse())
 
     const last = items[0]
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "")
-      .replace(/\s+/g, " ").trim()
+      .replace(/\s+/g, " ")
+      .trim()
     state.lastMsg.set(chatid, pv)
 
     // se não tínhamos classificação ainda, tenta agora (não bloqueia)
@@ -470,7 +637,7 @@ async function progressiveRenderMessages(msgs) {
     return
   }
 
-  const BATCH = 12
+  const BATCH = 12 // um pouco maior = menos repaints
   for (let i = 0; i < msgs.length; i += BATCH) {
     const slice = msgs.slice(i, i + BATCH)
     slice.forEach((m) => appendMessageBubble(pane, m))
@@ -565,6 +732,9 @@ async function classifyCurrentChatFromItems(chatid, items){
 
   const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
   if (card) upsertAICardBadge(card, data.stage)
+
+  // se aba filtrada estiver ativa, re-render p/ refletir inclusão/remoção
+  if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
 }
 
 /* ========= SUA renderização “clássica” (mantida) ========= */
@@ -614,13 +784,18 @@ async function sendNow() {
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'
 
   try {
-    await api("/api/send-text", { method: "POST", body: JSON.stringify({ number, text }) })
+    await api("/api/send-text", {
+      method: "POST",
+      body: JSON.stringify({ number, text }),
+    })
     $("#send-text").value = ""
+
     if (state.current && (state.current.wa_chatid || state.current.chatid) === number) {
       setTimeout(() => loadMessages(number), 500)
     }
-  } catch (e) { alert(e.message || "Falha ao enviar mensagem") }
-  finally {
+  } catch (e) {
+    alert(e.message || "Falha ao enviar mensagem")
+  } finally {
     btnEl.disabled = false
     btnEl.innerHTML =
       '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>'
@@ -630,7 +805,10 @@ async function sendNow() {
 /* ========= BOOT ========= */
 document.addEventListener("DOMContentLoaded", () => {
   $("#btn-login").onclick = doLogin
-  $("#btn-logout").onclick = () => { localStorage.clear(); location.reload() }
+  $("#btn-logout").onclick = () => {
+    localStorage.clear()
+    location.reload()
+  }
   $("#btn-send").onclick = sendNow
   $("#btn-refresh").onclick = () => {
     if (state.current) {
@@ -645,11 +823,17 @@ document.addEventListener("DOMContentLoaded", () => {
   if (backBtn) backBtn.onclick = () => setMobileMode("list")
 
   $("#send-text").addEventListener("keypress", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendNow() }
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      sendNow()
+    }
   })
 
   $("#token").addEventListener("keypress", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); doLogin() }
+    if (e.key === "Enter") {
+      e.preventDefault()
+      doLogin()
+    }
   })
 
   ensureRoute()
