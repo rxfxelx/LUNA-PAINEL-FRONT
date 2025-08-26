@@ -236,7 +236,7 @@ async function progressiveRenderChats(chats) {
     return
   }
 
-  const BATCH = 12
+  const BATCH = 14 // ligeiro aumento pra encher a tela mais rápido
   for (let i = 0; i < chats.length; i += BATCH) {
     const slice = chats.slice(i, i + BATCH)
     slice.forEach((ch) => appendChatSkeleton(list, ch))
@@ -363,10 +363,10 @@ async function prefetchCards(items) {
     }
   })
 
-  const CHUNK = 10
+  const CHUNK = 16 // um pouco maior pra reduzir “idas e vindas”
   for (let i = 0; i < tasks.length; i += CHUNK) {
     const slice = tasks.slice(i, i + CHUNK)
-    await runLimited(slice, 6)
+    await runLimited(slice, 8) // limite levemente maior
     await new Promise((r) => rIC(r))
   }
 }
@@ -411,9 +411,10 @@ async function loadMessages(chatid) {
   pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>"
 
   try {
+    // ↑↑ agora pedimos até 200 para IA ter mais contexto
     const data = await api("/api/messages", {
       method: "POST",
-      body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" }),
+      body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
     })
     const items = Array.isArray(data?.items) ? data.items : []
     await progressiveRenderMessages(items.slice().reverse())
@@ -450,7 +451,7 @@ async function progressiveRenderMessages(msgs) {
     return
   }
 
-  const BATCH = 10
+  const BATCH = 12 // um pouco maior = menos repaints
   for (let i = 0; i < msgs.length; i += BATCH) {
     const slice = msgs.slice(i, i + BATCH)
     slice.forEach((m) => appendMessageBubble(pane, m))
@@ -502,9 +503,23 @@ function upsertAIPill(stage, confidence, reason) {
   pill.title = reason || "";
 }
 
+// Busca mais histórico (se precisar) e chama IA
 async function classifyCurrentChatFromItems(chatid, items){
-  // Constrói histórico compacto (até 20 msgs) p/ IA
-  const history = (Array.isArray(items) ? items.slice(0, 20) : []).map(m => ({
+  // Se veio pouco histórico por algum motivo, tenta completar (até 200)
+  let full = Array.isArray(items) ? items.slice() : []
+  if (full.length < 150) {
+    try {
+      const extra = await api("/api/messages", {
+        method: "POST",
+        body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" })
+      })
+      const arr = Array.isArray(extra?.items) ? extra.items : []
+      if (arr.length > full.length) full = arr
+    } catch {}
+  }
+
+  // compacta até 200 entradas do mais recente ao mais antigo
+  const history = full.slice(0, 200).map(m => ({
     role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
     content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
   })).filter(x => x.content);
