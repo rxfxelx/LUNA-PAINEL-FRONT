@@ -28,19 +28,14 @@ function isMobile() {
   return window.matchMedia("(max-width:1023px)").matches
 }
 function setMobileMode(mode) {
-  // "list" | "chat" | ""
   document.body.classList.remove("is-mobile-list", "is-mobile-chat")
   if (!isMobile()) return
   if (mode === "list") document.body.classList.add("is-mobile-list")
   if (mode === "chat") document.body.classList.add("is-mobile-chat")
 }
 
-function jwt() {
-  return localStorage.getItem("luna_jwt") || ""
-}
-function authHeaders() {
-  return { Authorization: "Bearer " + jwt() }
-}
+function jwt() { return localStorage.getItem("luna_jwt") || "" }
+function authHeaders() { return { Authorization: "Bearer " + jwt() } }
 
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
@@ -64,34 +59,28 @@ function escapeHtml(s) {
 /* ========= STATE ========= */
 const state = {
   chats: [],
-  current: null, // objeto do chat aberto
-  lastMsg: new Map(), // chatid => preview da última mensagem
-  nameCache: new Map(), // chatid => {name,image,imagePreview}
-  unread: new Map(), // chatid => count
+  current: null,
+  lastMsg: new Map(),
+  nameCache: new Map(),
+  unread: new Map(),
   loadingChats: false,
 
   // IA
-  aiStage: new Map(),                // chatid => { stage, confidence, reason, ts }
-  currentTab: "Geral",               // "Geral" | "Contatos" | "Lead" | "Lead Quente"
+  aiStage: new Map(),
+  currentTab: "Geral",
 }
 
 // ===== cache IA em localStorage (TTL curto) =====
-const AI_TTL_MS = 10 * 60 * 1000 // 10 minutos
-
+const AI_TTL_MS = 10 * 60 * 1000
 function aiCacheKey(chatid){ return `luna_ai_stage::${chatid}` }
-
-// migração de rótulos antigos p/ novos
 function migrateStageLabel(s){
   if (!s) return s
-  // antes: "Lead" -> agora "Contatos"; "Lead Quente" -> "Lead"; "Cliente" -> "Lead Quente"
   if (s === "Cliente") return "Lead Quente"
   if (s === "Lead Quente") return "Lead"
   if (s === "Lead") return "Contatos"
-  // se já for dos novos, mantém
   if (s === "Contatos" || s === "Lead" || s === "Lead Quente") return s
   return "Contatos"
 }
-
 function readAIFromLocal(chatid){
   try {
     const raw = localStorage.getItem(aiCacheKey(chatid))
@@ -105,7 +94,7 @@ function writeAIToLocal(chatid, obj){
   try { localStorage.setItem(aiCacheKey(chatid), JSON.stringify({ ...obj, ts: Date.now() })) } catch {}
 }
 
-/* ========= CRM (mantido p/ compat) ========= */
+/* ========= CRM (compat) ========= */
 const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
 async function apiCRMViews(){ return api("/api/crm/views") }
 async function apiCRMList(stage, limit=100, offset=0){
@@ -116,7 +105,7 @@ async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
 
-/* ======= ABAS VISÍVEIS (Geral / Contatos / Lead / Lead Quente) ======= */
+/* ======= ABAS (Geral / Contatos / Lead / Lead Quente) ======= */
 function ensureCRMBar(){
   const host = document.querySelector(".topbar")
   if(!host) return
@@ -136,9 +125,7 @@ function ensureCRMBar(){
     b.onclick = () => { selectTab(label) }
     return b
   }
-
-  const tabs = ["Geral","Contatos","Lead","Lead Quente"]
-  tabs.forEach(t => wrap.appendChild(makeBtn(t)))
+  ;["Geral","Contatos","Lead","Lead Quente"].forEach(t => wrap.appendChild(makeBtn(t)))
 
   const counters = document.createElement("div")
   counters.className = "crm-counters"
@@ -157,7 +144,6 @@ function selectTab(name){
   setActiveTab(state.currentTab)
   renderChatsFiltered(state.currentTab === "Geral" ? null : state.currentTab)
 }
-
 function setActiveTab(name){
   document.querySelectorAll(".crm-tabs .btn").forEach(btn => {
     if (btn.dataset.tab === name) btn.classList.add("active")
@@ -191,7 +177,6 @@ async function renderChatsFiltered(stageLabel){
   await prefetchCards(items)
 }
 
-/* ======= Counters antigos (opcional) ======= */
 async function refreshCRMCounters(){
   try{
     const data=await apiCRMViews()
@@ -203,28 +188,6 @@ async function refreshCRMCounters(){
     }
   }catch{}
 }
-
-async function loadCRMStage(stage){
-  const list=$("#chat-list")
-  list.innerHTML="<div class='hint'>Carregando visão CRM...</div>"
-  try{
-    const data=await apiCRMList(stage,100,0)
-    const items=[]
-    for(const it of (data?.items||[])){
-      const ch=it.chat||{}
-      if(!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid=it.crm.chatid
-      items.push(ch)
-    }
-    await progressiveRenderChats(items)
-    await prefetchCards(items)
-  }catch(e){
-    list.innerHTML=`<div class='error'>Falha ao carregar CRM: ${escapeHtml(e.message||"")}</div>`
-  }finally{
-    refreshCRMCounters()
-  }
-}
-
-/* ======= Sem botões extras nos cards ======= */
 function attachCRMControlsToCard(){ return }
 
 /* ========= LOGIN ========= */
@@ -232,11 +195,7 @@ async function doLogin() {
   const token = $("#token").value.trim()
   const msgEl = $("#msg")
   const btnEl = $("#btn-login")
-
-  if (!token) {
-    msgEl.textContent = "Por favor, cole o token da instância"
-    return
-  }
+  if (!token) { msgEl.textContent = "Por favor, cole o token da instância"; return }
 
   msgEl.textContent = ""
   btnEl.disabled = true
@@ -269,13 +228,9 @@ function switchToApp() {
   ensureCRMBar()
   loadChats()
 }
-
 function ensureRoute() {
   if (jwt()) switchToApp()
-  else {
-    show("#login-view")
-    hide("#app-view")
-  }
+  else { show("#login-view"); hide("#app-view") }
 }
 
 /* ========= AVATAR/NAME-IMAGE ========= */
@@ -285,12 +240,9 @@ async function fetchNameImage(chatid, preview = true) {
       method: "POST",
       body: JSON.stringify({ number: chatid, preview }),
     })
-    return resp // {name,image,imagePreview}
-  } catch (e) {
-    return { name: null, image: null, imagePreview: null }
-  }
+    return resp
+  } catch { return { name: null, image: null, imagePreview: null } }
 }
-
 function initialsOf(str) {
   const s = (str || "").trim()
   if (!s) return "??"
@@ -302,7 +254,6 @@ function initialsOf(str) {
 async function loadChats() {
   if (state.loadingChats) return
   state.loadingChats = true
-
   const list = $("#chat-list")
   list.innerHTML = "<div class='hint'>Carregando conversas...</div>"
 
@@ -314,13 +265,10 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items : []
     state.chats = items
 
-    // Mostra conforme aba atual
     await renderChatsFiltered(state.currentTab === "Geral" ? null : state.currentTab)
-
-    // Completa avatar/preview
     await prefetchCards(items)
 
-    // Classifica todos automaticamente (não bloqueia UI)
+    // Classificação automática de TODAS (com heurística rápida)
     await autoClassifyAll(items)
   } catch (e) {
     console.error(e)
@@ -330,15 +278,10 @@ async function loadChats() {
   }
 }
 
-// Renderiza chats em lotes
 async function progressiveRenderChats(chats) {
   const list = $("#chat-list")
   list.innerHTML = ""
-
-  if (chats.length === 0) {
-    list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>"
-    return
-  }
+  if (chats.length === 0) { list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>"; return }
 
   const BATCH = 14
   for (let i = 0; i < chats.length; i += BATCH) {
@@ -346,7 +289,6 @@ async function progressiveRenderChats(chats) {
     slice.forEach((ch) => appendChatSkeleton(list, ch))
     await new Promise((r) => rIC(r))
   }
-
   chats.forEach((ch) => hydrateChatCard(ch))
 }
 
@@ -372,8 +314,7 @@ function appendChatSkeleton(list, ch) {
   tm.className = "time"
   const lastTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ""
   tm.textContent = lastTs ? formatTime(lastTs) : ""
-  top.appendChild(nm)
-  top.appendChild(tm)
+  top.appendChild(nm); top.appendChild(tm)
 
   const bottom = document.createElement("div")
   bottom.className = "row2"
@@ -397,8 +338,6 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(avatar)
   el.appendChild(main)
   list.appendChild(el)
-
-  attachCRMControlsToCard(el, ch)
 }
 
 function hydrateChatCard(ch) {
@@ -426,7 +365,6 @@ function hydrateChatCard(ch) {
   if (cached?.stage) upsertAICardBadge(el, cached.stage)
 }
 
-// Prefetch paralelo limitado
 async function prefetchCards(items) {
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
@@ -458,10 +396,7 @@ async function prefetchCards(items) {
             state.lastMsg.set(chatid, pv)
 
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`)
-            if (card) {
-              card.textContent = pv || "Sem mensagens"
-              card.title = pv
-            }
+            if (card) { card.textContent = pv || "Sem mensagens"; card.title = pv }
             const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`)
             if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "")
           }
@@ -478,7 +413,28 @@ async function prefetchCards(items) {
   }
 }
 
-// Classificar todas as conversas (não trava UI; cache 10min)
+/* ===== HEURÍSTICO RÁPIDO (pré-IA) ===== */
+function quickHeuristicStage(history){
+  // history: [{role, content}]
+  if (!Array.isArray(history) || !history.length) return null
+  const last30 = history.slice(-30)
+  const userTexts = last30.filter(m=>m.role==="user").map(m=>m.content.toLowerCase())
+  const agentTexts = last30.filter(m=>m.role!=="user").map(m=>m.content.toLowerCase())
+
+  const interestRe = /(como funciona|como que funciona|me mostra|pode mostrar|quais os valores|preço|valor|condições|funciona com|tem integração|como contratar|me explica|é possível|é possivel|você consegue|vc consegue|pode enviar|manda catálogo|catálogo|catalogo|tem demo|demonstração)/i
+  const handoffRe = /(vou te passar|vou passar você|vou encaminhar|vou transferir|encaminhei|transferi|minha equipe vai|o comercial vai|alguém do setor|setor .* vai te|time .* vai falar|vou pedir para .* entrar em contato|alguém vai entrar em contato)/i
+
+  const hasHandoff = agentTexts.some(t => handoffRe.test(t))
+  if (hasHandoff) return { stage: "Lead Quente", confidence: 0.9, reason: "Handoff detectado." }
+
+  const interestCount = userTexts.reduce((acc,t)=> acc + (interestRe.test(t)?1:0), 0)
+  if (interestCount >= 1) return { stage: "Lead", confidence: 0.8, reason: "Perguntas de interesse detectadas." }
+
+  // se não há interesse, cai para Contatos
+  return { stage: "Contatos", confidence: 0.6, reason: "Sem sinais claros de interesse." }
+}
+
+/* ===== Classificar TODAS ===== */
 async function autoClassifyAll(items){
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
@@ -492,43 +448,56 @@ async function autoClassifyAll(items){
         if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
         return
       }
-      // histórico
-      let hist
+
+      // pega histórico suficiente p/ heurística e IA
+      let histItems = []
       try {
         const data = await api("/api/messages", {
           method: "POST",
-          body: JSON.stringify({ chatid, limit: 150, sort: "-messageTimestamp" }),
+          body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
         })
-        const arr = Array.isArray(data?.items) ? data.items : []
-        hist = arr.slice(0, 150).map(m => ({
-          role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
-          content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
-        })).filter(x => x.content)
-      } catch { hist = [] }
-
-      try {
-        const r = await fetch(BACKEND() + "/api/ai/classify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", ...authHeaders() },
-          body: JSON.stringify(hist.length ? { history: hist } : { text: (state.lastMsg.get(chatid)||"").toString() }),
-        })
-        if (!r.ok) throw new Error(await r.text())
-        const data = await r.json() // {stage, confidence, reason}
-        // MIGRAÇÃO de eventual rótulo antigo:
-        data.stage = migrateStageLabel(data.stage)
-
-        state.aiStage.set(chatid, data)
-        writeAIToLocal(chatid, data)
-
-        const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
-        if (el) upsertAICardBadge(el, data.stage)
-
-        if (state.current) {
-          const curId = state.current.wa_chatid || state.current.chatid || ""
-          if (curId === chatid) upsertAIPill(data.stage, data.confidence, data.reason)
-        }
-        if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
+        histItems = Array.isArray(data?.items) ? data.items : []
       } catch {}
+
+      const history = histItems.slice(0, 200).map(m => ({
+        role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
+        content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
+      })).filter(x => x.content)
+
+      // heurística primeiro
+      let best = quickHeuristicStage(history)
+
+      // chama IA se a heurística não marcou Lead/Lead Quente com boa confiança
+      const needAI = !(best && (best.stage === "Lead Quente" || best.stage === "Lead") && best.confidence >= 0.75)
+      if (needAI) {
+        try {
+          const r = await fetch(BACKEND() + "/api/ai/classify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...authHeaders() },
+            body: JSON.stringify(history.length ? { history } : { text: (state.lastMsg.get(chatid)||"").toString() }),
+          })
+          if (r.ok) {
+            const data = await r.json()
+            data.stage = migrateStageLabel(data.stage)
+            // escolhe o melhor entre heurística e IA (maior confiança)
+            if (!best || (data.confidence || 0) > (best.confidence || 0)) best = data
+          }
+        } catch {}
+      }
+
+      if (!best) best = { stage:"Contatos", confidence:0.6, reason:"Fallback" }
+
+      state.aiStage.set(chatid, best)
+      writeAIToLocal(chatid, best)
+
+      const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
+      if (el) upsertAICardBadge(el, best.stage)
+
+      if (state.current) {
+        const curId = state.current.wa_chatid || state.current.chatid || ""
+        if (curId === chatid) upsertAIPill(best.stage, best.confidence, best.reason)
+      }
+      if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
     }
   })
 
@@ -551,9 +520,7 @@ function formatTime(timestamp) {
     if (hours < 24) return `${hours}h`
     if (hours < 48) return "Ontem"
     return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
-  } catch (e) {
-    return timestamp
-  }
+  } catch (e) { return timestamp }
 }
 
 /* ========= OPEN CHAT / MESSAGES ========= */
@@ -585,15 +552,15 @@ async function loadMessages(chatid) {
   try {
     const data = await api("/api/messages", {
       method: "POST",
-      body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
+      // ↑ traz bastante histórico para evitar “falhas” de contexto
+      body: JSON.stringify({ chatid, limit: 250, sort: "-messageTimestamp" }),
     })
     const items = Array.isArray(data?.items) ? data.items : []
     await progressiveRenderMessages(items.slice().reverse())
 
     const last = items[0]
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "")
-      .replace(/\s+/g, " ")
-      .trim()
+      .replace(/\s+/g, " ").trim()
     state.lastMsg.set(chatid, pv)
 
     if (!state.aiStage.has(chatid) && !readAIFromLocal(chatid)) {
@@ -630,16 +597,26 @@ async function progressiveRenderMessages(msgs) {
   }
 }
 
+/* === AJUSTE: placeholder para mensagens sem texto (anexos/botões etc.) === */
 function appendMessageBubble(pane, m) {
   const me = m.fromMe || m.fromme || m.from_me || false
   const el = document.createElement("div")
   el.className = "msg " + (me ? "me" : "you")
-  const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || ""
+  let text = (
+    m.text || m.message?.text || m.caption ||
+    m?.message?.conversation || m?.body || ""
+  )
+
+  if (!text || !text.trim()) {
+    // mostra tipo básico se existir (melhora casos de “mensagem sumida”)
+    text = m.type || m.message?.messageStubType || "[mensagem]"
+  }
+
   const who = m.senderName || m.pushName || ""
   const ts = m.messageTimestamp || m.timestamp || ""
 
   el.innerHTML = `
-    ${escapeHtml(text)}
+    ${escapeHtml(String(text))}
     <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
   `
   pane.appendChild(el)
@@ -663,7 +640,6 @@ function upsertAIPill(stage, confidence, reason) {
   pill.textContent = `${stage} • conf ${(confidence * 100).toFixed(0)}%`;
   pill.title = reason || "";
 }
-
 function upsertAICardBadge(cardEl, stage){
   if (!cardEl) return
   let tag = cardEl.querySelector(".ai-badge")
@@ -689,43 +665,52 @@ async function classifyCurrentChatFromItems(chatid, items){
     try {
       const extra = await api("/api/messages", {
         method: "POST",
-        body: JSON.stringify({ chatid, limit: 150, sort: "-messageTimestamp" })
+        body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" })
       })
       const arr = Array.isArray(extra?.items) ? extra.items : []
       if (arr.length > full.length) full = arr
     } catch {}
   }
 
-  const history = full.slice(0, 150).map(m => ({
+  const history = full.slice(0, 200).map(m => ({
     role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
     content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
   })).filter(x => x.content)
 
-  const r = await fetch(BACKEND() + "/api/ai/classify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify(history.length ? { history } : { text: (state.lastMsg.get(chatid)||"").toString() }),
-  })
-  if (!r.ok) throw new Error(await r.text())
-  const data = await r.json()
+  // heurística primeiro
+  let best = quickHeuristicStage(history)
 
-  data.stage = migrateStageLabel(data.stage)
+  const needAI = !(best && (best.stage === "Lead Quente" || best.stage === "Lead") && best.confidence >= 0.75)
 
-  state.aiStage.set(chatid, data)
-  writeAIToLocal(chatid, data)
-  upsertAIPill(data.stage, data.confidence, data.reason)
+  if (needAI) {
+    const r = await fetch(BACKEND() + "/api/ai/classify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify(history.length ? { history } : { text: (state.lastMsg.get(chatid)||"").toString() }),
+    })
+    if (r.ok) {
+      const data = await r.json()
+      data.stage = migrateStageLabel(data.stage)
+      if (!best || (data.confidence || 0) > (best.confidence || 0)) best = data
+    }
+  }
+
+  if (!best) best = { stage:"Contatos", confidence:0.6, reason:"Fallback" }
+
+  state.aiStage.set(chatid, best)
+  writeAIToLocal(chatid, best)
+  upsertAIPill(best.stage, best.confidence, best.reason)
 
   const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
-  if (card) upsertAICardBadge(card, data.stage)
+  if (card) upsertAICardBadge(card, best.stage)
 
   if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
 }
 
-/* ========= SUA renderização “clássica” (mantida) ========= */
+/* ========= RENDER “CLÁSSICO” ========= */
 function renderMessages(msgs) {
   const pane = $("#messages")
   pane.innerHTML = ""
-
   if (msgs.length === 0) {
     pane.innerHTML = `
       <div class="empty-state">
@@ -736,31 +721,24 @@ function renderMessages(msgs) {
     `
     return
   }
-
   msgs.forEach((m) => {
     const me = m.fromMe || m.fromme || m.from_me || false
     const el = document.createElement("div")
     el.className = "msg " + (me ? "me" : "you")
-    const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || ""
+    const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "[mensagem]"
     const who = m.senderName || m.pushName || ""
     const ts = m.messageTimestamp || m.timestamp || ""
-
-    el.innerHTML = `
-      ${escapeHtml(text)}
-      <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
-    `
+    el.innerHTML = `${escapeHtml(text)}<small>${escapeHtml(who)} • ${formatTime(ts)}</small>`
     pane.appendChild(el)
   })
-
   pane.scrollTop = pane.scrollHeight
 }
 
-/* ========= SEND (mantido) ========= */
+/* ========= SEND ========= */
 async function sendNow() {
   const number = $("#send-number").value.trim()
   const text = $("#send-text").value.trim()
   const btnEl = $("#btn-send")
-
   if (!number || !text) return
 
   btnEl.disabled = true
@@ -768,12 +746,8 @@ async function sendNow() {
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'
 
   try {
-    await api("/api/send-text", {
-      method: "POST",
-      body: JSON.stringify({ number, text }),
-    })
+    await api("/api/send-text", { method: "POST", body: JSON.stringify({ number, text }) })
     $("#send-text").value = ""
-
     if (state.current && (state.current.wa_chatid || state.current.chatid) === number) {
       setTimeout(() => loadMessages(number), 500)
     }
@@ -789,10 +763,7 @@ async function sendNow() {
 /* ========= BOOT ========= */
 document.addEventListener("DOMContentLoaded", () => {
   $("#btn-login").onclick = doLogin
-  $("#btn-logout").onclick = () => {
-    localStorage.clear()
-    location.reload()
-  }
+  $("#btn-logout").onclick = () => { localStorage.clear(); location.reload() }
   $("#btn-send").onclick = sendNow
   $("#btn-refresh").onclick = () => {
     if (state.current) {
@@ -807,17 +778,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if (backBtn) backBtn.onclick = () => setMobileMode("list")
 
   $("#send-text").addEventListener("keypress", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      sendNow()
-    }
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendNow() }
   })
-
   $("#token").addEventListener("keypress", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault()
-      doLogin()
-    }
+    if (e.key === "Enter") { e.preventDefault(); doLogin() }
   })
 
   ensureRoute()
