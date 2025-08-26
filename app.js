@@ -83,41 +83,8 @@ async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
 
-function ensureCRMBar(){
-  const host = document.querySelector(".topbar")
-  if(!host || host.querySelector(".crm-tabs")) return
-
-  const wrap = document.createElement("div")
-  wrap.className = "crm-tabs"
-  wrap.style.display = "flex"
-  wrap.style.gap = "8px"
-  wrap.style.alignItems = "center"
-
-  const btnAll = document.createElement("button")
-  btnAll.className = "btn"
-  btnAll.textContent = "Geral"
-  btnAll.onclick = () => loadChats()
-  wrap.appendChild(btnAll)
-
-  CRM_STAGES.forEach(st=>{
-    const b=document.createElement("button")
-    b.className="btn"
-    b.dataset.stage=st
-    b.textContent=st.replace("_"," ")
-    b.onclick=()=>loadCRMStage(st)
-    wrap.appendChild(b)
-  })
-
-  const counters=document.createElement("div")
-  counters.className="crm-counters"
-  counters.style.fontSize="12px"
-  counters.style.color="var(--sub2)"
-  counters.style.marginLeft="8px"
-
-  host.appendChild(wrap)
-  host.appendChild(counters)
-  refreshCRMCounters()
-}
+/* ======= DESATIVADO: não renderiza a barra CRM ======= */
+function ensureCRMBar(){ /* no-op: escondido por padrão */ }
 
 async function refreshCRMCounters(){
   try{
@@ -151,55 +118,9 @@ async function loadCRMStage(stage){
   }
 }
 
+/* ======= DESATIVADO: não cria botões no card ======= */
 function attachCRMControlsToCard(cardEl, chatObj){
-  const row1=cardEl.querySelector(".row1")
-  if(!row1) return
-  if(row1.querySelector(".btn-crm-gear")) return
-
-  // engrenagem: muda estágio manualmente
-  const gear=document.createElement("button")
-  gear.className="btn btn-crm-gear"
-  gear.title="Mudar estágio CRM"
-  gear.style.marginLeft="6px"
-  gear.style.padding="2px 6px"
-  gear.textContent="⚙"
-  gear.onclick=async(ev)=>{
-    ev.stopPropagation()
-    const chatid=chatObj.wa_chatid||chatObj.chatid||""
-    if(!chatid) return
-    const st=prompt("Estágio (novo, sem_resposta, interessado, em_negociacao, fechou, descartado):","interessado")
-    if(!st) return
-    if(!CRM_STAGES.includes(st)){ alert("Estágio inválido."); return }
-    try{
-      await apiCRMSetStatus(chatid,st,"")
-      await refreshCRMCounters()
-      gear.textContent="✅"; setTimeout(()=>gear.textContent="⚙",1200)
-    }catch(e){ alert("Falha ao definir estágio: "+(e.message||"")) }
-  }
-  row1.appendChild(gear)
-
-  // 🤖 IA: classificar automaticamente
-  const aiBtn=document.createElement("button")
-  aiBtn.className="btn btn-crm-ai"
-  aiBtn.title="Classificar com IA"
-  aiBtn.style.marginLeft="4px"
-  aiBtn.style.padding="2px 6px"
-  aiBtn.textContent="🤖"
-  aiBtn.onclick=async(ev)=>{
-    ev.stopPropagation()
-    const chatid=chatObj.wa_chatid||chatObj.chatid||""
-    if(!chatid) return
-    aiBtn.disabled=true; const old=aiBtn.textContent; aiBtn.textContent="…"
-    try{
-      await autoClassify(chatid) // chama IA e aplica no CRM
-      await refreshCRMCounters()
-      aiBtn.textContent="✅"; setTimeout(()=>aiBtn.textContent="🤖",1200)
-    }catch(e){
-      console.error(e); alert(e.message||"Falha IA")
-      aiBtn.textContent=old
-    }finally{ aiBtn.disabled=false }
-  }
-  row1.appendChild(aiBtn)
+  return; // no-op: você não quer os botões visíveis
 }
 
 /* ========= LOGIN ========= */
@@ -241,7 +162,7 @@ function switchToApp() {
   hide("#login-view")
   show("#app-view")
   setMobileMode("list")
-  ensureCRMBar()
+  ensureCRMBar() // no-op
   loadChats()
 }
 
@@ -292,7 +213,7 @@ async function loadChats() {
     await progressiveRenderChats(items)
     await prefetchCards(items)
 
-    // dispara uma sincronização CRM (opcional/leve)
+    // opcional: sincroniza contadores CRM (silencioso)
     try {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 500 }) })
       refreshCRMCounters()
@@ -373,7 +294,7 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(main)
   list.appendChild(el)
 
-  attachCRMControlsToCard(el, ch)
+  attachCRMControlsToCard(el, ch) // no-op
 }
 
 function hydrateChatCard(ch) {
@@ -502,6 +423,11 @@ async function loadMessages(chatid) {
       .replace(/\s+/g, " ")
       .trim()
     state.lastMsg.set(chatid, pv)
+
+    /* === IA: classificar automaticamente, mostrar pill e salvar no CRM === */
+    try {
+      await classifyCurrentChatFromItems(chatid, items)
+    } catch {}
   } catch (e) {
     console.error(e)
     pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`
@@ -548,28 +474,60 @@ function appendMessageBubble(pane, m) {
   pane.appendChild(el)
 }
 
-/* ========= IA — classificação automática ========= */
-async function autoClassify(chatid){
-  // pega um pedaço de histórico para contexto
-  const hist = await api("/api/messages", {
+/* ========= IA — PILL + CLASSIFICAÇÃO ========= */
+function upsertAIPill(stage, confidence, reason) {
+  let pill = document.getElementById("ai-pill");
+  if (!pill) {
+    pill = document.createElement("span");
+    pill.id = "ai-pill";
+    pill.style.marginLeft = "8px";
+    pill.style.padding = "4px 8px";
+    pill.style.borderRadius = "999px";
+    pill.style.fontSize = "12px";
+    pill.style.background = "var(--muted)";
+    pill.style.color = "var(--text)";
+    const header = document.querySelector(".chatbar") || document.querySelector(".chat-title") || document.body;
+    header.appendChild(pill);
+  }
+  const map = {
+    novo: "Lead",
+    sem_resposta: "Lead sem resposta",
+    interessado: "Lead qualificado",
+    em_negociacao: "Lead quente (em negociação)",
+    fechou: "Cliente",
+    descartado: "Descartado"
+  };
+  const label = map[stage] || stage;
+  pill.textContent = `${label} • conf ${(confidence * 100).toFixed(0)}%`;
+  pill.title = reason || "";
+}
+
+async function classifyCurrentChatFromItems(chatid, items){
+  // Constrói histórico compacto (até 20 msgs) p/ IA
+  const history = (Array.isArray(items) ? items.slice(0, 20) : []).map(m => ({
+    role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
+    content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
+  })).filter(x => x.content);
+
+  let payload;
+  if (history.length) payload = { history };
+  else payload = { text: (state.lastMsg.get(chatid) || "").toString() };
+
+  const r = await fetch(BACKEND() + "/api/ai/classify", {
     method: "POST",
-    body: JSON.stringify({ chatid, limit: 30, sort: "-messageTimestamp" })
-  })
-  const items = Array.isArray(hist?.items) ? hist.items : []
-  // manda transcript (como está) para o backend
-  const out = await api("/api/ai/classify", {
-    method: "POST",
-    body: JSON.stringify({
-      chatid,
-      transcript: items, // o backend já sabe extrair texto/role
-      apply: false       // aplicamos pelo próprio front abaixo
-    })
-  })
-  const stage = out?.stage_mapped || "novo"
-  const reason = out?.reason || ""
-  // grava no CRM
-  await apiCRMSetStatus(chatid, stage, `[IA] ${reason}`.slice(0, 280))
-  return out
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  const data = await r.json();
+
+  // Mostra pill
+  upsertAIPill(data.stage, data.confidence, data.reason);
+
+  // Atualiza CRM automaticamente (silencioso)
+  try {
+    await apiCRMSetStatus(chatid, data.stage, `[IA] ${data.reason}`.slice(0, 280));
+  } catch {}
 }
 
 /* ========= SUA renderização “clássica” (mantida) ========= */
