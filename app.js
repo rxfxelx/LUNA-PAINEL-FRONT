@@ -72,18 +72,40 @@ const state = {
 
   // IA
   aiStage: new Map(),                // chatid => { stage, confidence, reason, ts }
-  currentTab: "Geral",               // "Geral" | "Lead" | "Lead Quente" | "Cliente"
+  currentTab: "Geral",               // "Geral" | "Contatos" | "Lead" | "Lead Quente"
 }
 
+// ===== cache IA em localStorage (TTL curto) =====
+const AI_TTL_MS = 10 * 60 * 1000 // 10 minutos
+
 function aiCacheKey(chatid){ return `luna_ai_stage::${chatid}` }
+
+// migração de rótulos antigos p/ novos
+function migrateStageLabel(s){
+  if (!s) return s
+  // antes: "Lead" -> agora "Contatos"; "Lead Quente" -> "Lead"; "Cliente" -> "Lead Quente"
+  if (s === "Cliente") return "Lead Quente"
+  if (s === "Lead Quente") return "Lead"
+  if (s === "Lead") return "Contatos"
+  // se já for dos novos, mantém
+  if (s === "Contatos" || s === "Lead" || s === "Lead Quente") return s
+  return "Contatos"
+}
+
 function readAIFromLocal(chatid){
-  try { const raw = localStorage.getItem(aiCacheKey(chatid)); return raw ? JSON.parse(raw) : null } catch { return null }
+  try {
+    const raw = localStorage.getItem(aiCacheKey(chatid))
+    if (!raw) return null
+    const obj = JSON.parse(raw)
+    if (obj && obj.stage) obj.stage = migrateStageLabel(obj.stage)
+    return obj
+  } catch { return null }
 }
 function writeAIToLocal(chatid, obj){
   try { localStorage.setItem(aiCacheKey(chatid), JSON.stringify({ ...obj, ts: Date.now() })) } catch {}
 }
 
-/* ========= CRM (mantido p/ compat, não usado para abas) ========= */
+/* ========= CRM (mantido p/ compat) ========= */
 const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
 async function apiCRMViews(){ return api("/api/crm/views") }
 async function apiCRMList(stage, limit=100, offset=0){
@@ -94,7 +116,7 @@ async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
 
-/* ======= BARRA DE ABAS (VISÍVEL) ======= */
+/* ======= ABAS VISÍVEIS (Geral / Contatos / Lead / Lead Quente) ======= */
 function ensureCRMBar(){
   const host = document.querySelector(".topbar")
   if(!host) return
@@ -115,8 +137,7 @@ function ensureCRMBar(){
     return b
   }
 
-  // Somente 3 categorias
-  const tabs = ["Geral","Lead","Lead Quente","Cliente"]
+  const tabs = ["Geral","Contatos","Lead","Lead Quente"]
   tabs.forEach(t => wrap.appendChild(makeBtn(t)))
 
   const counters = document.createElement("div")
@@ -146,9 +167,9 @@ function setActiveTab(name){
 
 function getAIStageForChat(chatid){
   const inMem = state.aiStage.get(chatid)
-  if (inMem && inMem.stage) return inMem.stage
+  if (inMem && inMem.stage) return migrateStageLabel(inMem.stage)
   const cached = readAIFromLocal(chatid)
-  if (cached && cached.stage) return cached.stage
+  if (cached && cached.stage) return migrateStageLabel(cached.stage)
   return null
 }
 
@@ -457,14 +478,14 @@ async function prefetchCards(items) {
   }
 }
 
-// Classificar todas as conversas (sem travar UI, com cache local de 24h)
+// Classificar todas as conversas (não trava UI; cache 10min)
 async function autoClassifyAll(items){
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     return async () => {
       if (!chatid) return
       const cached = readAIFromLocal(chatid)
-      if (cached && Date.now() - (cached.ts||0) < 24*60*60*1000) {
+      if (cached && (Date.now() - (cached.ts||0) < AI_TTL_MS)) {
         state.aiStage.set(chatid, cached)
         const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
         if (el) upsertAICardBadge(el, cached.stage)
@@ -476,10 +497,10 @@ async function autoClassifyAll(items){
       try {
         const data = await api("/api/messages", {
           method: "POST",
-          body: JSON.stringify({ chatid, limit: 120, sort: "-messageTimestamp" }),
+          body: JSON.stringify({ chatid, limit: 150, sort: "-messageTimestamp" }),
         })
         const arr = Array.isArray(data?.items) ? data.items : []
-        hist = arr.slice(0, 120).map(m => ({
+        hist = arr.slice(0, 150).map(m => ({
           role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
           content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
         })).filter(x => x.content)
@@ -493,6 +514,9 @@ async function autoClassifyAll(items){
         })
         if (!r.ok) throw new Error(await r.text())
         const data = await r.json() // {stage, confidence, reason}
+        // MIGRAÇÃO de eventual rótulo antigo:
+        data.stage = migrateStageLabel(data.stage)
+
         state.aiStage.set(chatid, data)
         writeAIToLocal(chatid, data)
 
@@ -661,18 +685,18 @@ function upsertAICardBadge(cardEl, stage){
 
 async function classifyCurrentChatFromItems(chatid, items){
   let full = Array.isArray(items) ? items.slice() : []
-  if (full.length < 120) {
+  if (full.length < 150) {
     try {
       const extra = await api("/api/messages", {
         method: "POST",
-        body: JSON.stringify({ chatid, limit: 120, sort: "-messageTimestamp" })
+        body: JSON.stringify({ chatid, limit: 150, sort: "-messageTimestamp" })
       })
       const arr = Array.isArray(extra?.items) ? extra.items : []
       if (arr.length > full.length) full = arr
     } catch {}
   }
 
-  const history = full.slice(0, 120).map(m => ({
+  const history = full.slice(0, 150).map(m => ({
     role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
     content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
   })).filter(x => x.content)
@@ -684,6 +708,8 @@ async function classifyCurrentChatFromItems(chatid, items){
   })
   if (!r.ok) throw new Error(await r.text())
   const data = await r.json()
+
+  data.stage = migrateStageLabel(data.stage)
 
   state.aiStage.set(chatid, data)
   writeAIToLocal(chatid, data)
