@@ -442,7 +442,7 @@ body {
 .chatbar {
   background: var(--card);
   border-bottom: 1px solid var(--border);
-  padding: 16px 20px;
+  padding: 12px 20px;
   display: flex;
   align-items: center;
   gap: 16px;
