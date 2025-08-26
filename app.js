@@ -156,6 +156,7 @@ function attachCRMControlsToCard(cardEl, chatObj){
   if(!row1) return
   if(row1.querySelector(".btn-crm-gear")) return
 
+  // engrenagem: muda estágio manualmente
   const gear=document.createElement("button")
   gear.className="btn btn-crm-gear"
   gear.title="Mudar estágio CRM"
@@ -176,6 +177,29 @@ function attachCRMControlsToCard(cardEl, chatObj){
     }catch(e){ alert("Falha ao definir estágio: "+(e.message||"")) }
   }
   row1.appendChild(gear)
+
+  // 🤖 IA: classificar automaticamente
+  const aiBtn=document.createElement("button")
+  aiBtn.className="btn btn-crm-ai"
+  aiBtn.title="Classificar com IA"
+  aiBtn.style.marginLeft="4px"
+  aiBtn.style.padding="2px 6px"
+  aiBtn.textContent="🤖"
+  aiBtn.onclick=async(ev)=>{
+    ev.stopPropagation()
+    const chatid=chatObj.wa_chatid||chatObj.chatid||""
+    if(!chatid) return
+    aiBtn.disabled=true; const old=aiBtn.textContent; aiBtn.textContent="…"
+    try{
+      await autoClassify(chatid) // chama IA e aplica no CRM
+      await refreshCRMCounters()
+      aiBtn.textContent="✅"; setTimeout(()=>aiBtn.textContent="🤖",1200)
+    }catch(e){
+      console.error(e); alert(e.message||"Falha IA")
+      aiBtn.textContent=old
+    }finally{ aiBtn.disabled=false }
+  }
+  row1.appendChild(aiBtn)
 }
 
 /* ========= LOGIN ========= */
@@ -217,7 +241,7 @@ function switchToApp() {
   hide("#login-view")
   show("#app-view")
   setMobileMode("list")
-  ensureCRMBar()       // ADIÇÃO
+  ensureCRMBar()
   loadChats()
 }
 
@@ -265,21 +289,14 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items : []
     state.chats = items
 
-    // Renderização progressiva dos cards (mostra rápido)
     await progressiveRenderChats(items)
-
-    // Prefetch paralelo (limitado) para completar fotos/nomes sem travar a UI
     await prefetchCards(items)
 
-    // --- CRM: sincroniza automaticamente os registros faltantes ---
+    // dispara uma sincronização CRM (opcional/leve)
     try {
-      await api("/api/crm/sync", {
-        method: "POST",
-        body: JSON.stringify({ limit: 500 }),
-      })
+      await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 500 }) })
       refreshCRMCounters()
-    } catch (e) { /* silencioso */ }
-
+    } catch {}
   } catch (e) {
     console.error(e)
     list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`
@@ -305,11 +322,9 @@ async function progressiveRenderChats(chats) {
     await new Promise((r) => rIC(r))
   }
 
-  // após skeletons, tentamos preencher com cache existente (se já houver)
   chats.forEach((ch) => hydrateChatCard(ch))
 }
 
-// Cria item básico rapidamente (skeleton com nome bruto)
 function appendChatSkeleton(list, ch) {
   const el = document.createElement("div")
   el.className = "chat-item"
@@ -358,11 +373,9 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(main)
   list.appendChild(el)
 
-  // CRM: botão por card (sem alterar layout existente)
-  try { attachCRMControlsToCard(el, ch) } catch(e) {}
+  attachCRMControlsToCard(el, ch)
 }
 
-// Atualiza um card com foto/nome do cache (quando disponível)
 function hydrateChatCard(ch) {
   const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
   const cache = state.nameCache.get(chatid)
@@ -385,14 +398,12 @@ function hydrateChatCard(ch) {
   if (cache.name) nameEl.textContent = cache.name
 }
 
-// Prefetch paralelo limitado: name-image + última mensagem (para preview)
+// Prefetch paralelo limitado
 async function prefetchCards(items) {
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     return async () => {
       if (!chatid) return
-
-      // 1) name-image
       if (!state.nameCache.has(chatid)) {
         try {
           const resp = await fetchNameImage(chatid)
@@ -400,8 +411,6 @@ async function prefetchCards(items) {
           hydrateChatCard(ch)
         } catch {}
       }
-
-      // 2) última mensagem (para quem não tem)
       if (!state.lastMsg.has(chatid) && !ch.wa_lastMessageText) {
         try {
           const data = await api("/api/messages", {
@@ -433,7 +442,6 @@ async function prefetchCards(items) {
     }
   })
 
-  // Executa com limite de concorrência e cedendo tempo à UI
   const CHUNK = 10
   for (let i = 0; i < tasks.length; i += CHUNK) {
     const slice = tasks.slice(i, i + CHUNK)
@@ -449,7 +457,6 @@ function formatTime(timestamp) {
     const now = new Date()
     const diff = now - date
     const hours = Math.floor(diff / (1000 * 60 * 60))
-
     if (hours < 1) return "Agora"
     if (hours < 24) return `${hours}h`
     if (hours < 48) return "Ontem"
@@ -466,7 +473,6 @@ async function openChat(ch) {
   const status = $(".chat-status")
   const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
 
-  // name-image preferencial
   const cache = state.nameCache.get(chatid) || {}
   const nm = (cache.name || ch.wa_contactName || ch.name || chatid || "Chat").toString()
 
@@ -489,12 +495,9 @@ async function loadMessages(chatid) {
       body: JSON.stringify({ chatid, limit: 100, sort: "-messageTimestamp" }),
     })
     const items = Array.isArray(data?.items) ? data.items : []
-
-    // renderização progressiva (do mais antigo -> mais recente) em lotes menores (mais responsivo)
     await progressiveRenderMessages(items.slice().reverse())
 
-    // Atualiza preview do card após abrir
-    const last = items[0] // mais recente no array original
+    const last = items[0]
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "")
       .replace(/\s+/g, " ")
       .trim()
@@ -543,6 +546,30 @@ function appendMessageBubble(pane, m) {
     <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
   `
   pane.appendChild(el)
+}
+
+/* ========= IA — classificação automática ========= */
+async function autoClassify(chatid){
+  // pega um pedaço de histórico para contexto
+  const hist = await api("/api/messages", {
+    method: "POST",
+    body: JSON.stringify({ chatid, limit: 30, sort: "-messageTimestamp" })
+  })
+  const items = Array.isArray(hist?.items) ? hist.items : []
+  // manda transcript (como está) para o backend
+  const out = await api("/api/ai/classify", {
+    method: "POST",
+    body: JSON.stringify({
+      chatid,
+      transcript: items, // o backend já sabe extrair texto/role
+      apply: false       // aplicamos pelo próprio front abaixo
+    })
+  })
+  const stage = out?.stage_mapped || "novo"
+  const reason = out?.reason || ""
+  // grava no CRM
+  await apiCRMSetStatus(chatid, stage, `[IA] ${reason}`.slice(0, 280))
+  return out
 }
 
 /* ========= SUA renderização “clássica” (mantida) ========= */
