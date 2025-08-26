@@ -71,8 +71,11 @@ const state = {
   loadingChats: false,
 }
 
-/* ========= CRM (ACRÉSCIMOS) ========= */
-const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
+/* ========= CRM =========
+   OBS: removidos “sem_resposta” e “descartado” conforme pedido
+   Labels visíveis: Geral • prospectivo cliente • lead • lead qualificado • lead quente • cliente
+*/
+const CRM_STAGES = ["novo", "interessado", "em_negociacao", "fechou"]
 
 async function apiCRMViews(){ return api("/api/crm/views") }
 async function apiCRMList(stage, limit=100, offset=0){
@@ -83,7 +86,7 @@ async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
 
-/* ======= BARRA CRM (com rótulos pedidos) ======= */
+/* ======= BARRA CRM (layout igual, rótulos corrigidos) ======= */
 function ensureCRMBar(){
   const host = document.querySelector(".topbar")
   if(!host || host.querySelector(".crm-tabs")) return
@@ -95,36 +98,32 @@ function ensureCRMBar(){
   wrap.style.alignItems = "center"
   wrap.style.marginLeft = "16px"
 
-  // "Geral"
+  // Geral
   const btnAll = document.createElement("button")
   btnAll.className = "btn"
   btnAll.textContent = "Geral"
   btnAll.onclick = () => loadChats()
   wrap.appendChild(btnAll)
 
-  // Mapeia estágios -> rótulos
-  const LABELS = {
-    novo: "lead",
-    sem_resposta: "sem resposta",
-    interessado: "lead qualificado",
-    em_negociacao: "lead quente",
-    fechou: "cliente",
-    descartado: "descartado",
-  }
-
-  // Botão “prospectivo cliente” (interessado ∪ em_negociacao)
+  // Prospectivo (interessado ∪ em_negociacao)
   const btnProspect = document.createElement("button")
   btnProspect.className = "btn"
   btnProspect.textContent = "prospectivo cliente"
   btnProspect.onclick = () => loadCRMCombo(["interessado","em_negociacao"])
   wrap.appendChild(btnProspect)
 
-  // Abas por estágio
+  // Estágios individuais com os rótulos solicitados
+  const LABELS = {
+    novo: "lead",
+    interessado: "lead qualificado",
+    em_negociacao: "lead quente",
+    fechou: "cliente",
+  }
   CRM_STAGES.forEach(st=>{
     const b=document.createElement("button")
     b.className="btn"
     b.dataset.stage=st
-    b.textContent=LABELS[st] || st.replace("_"," ")
+    b.textContent=LABELS[st]
     b.onclick=()=>loadCRMStage(st)
     wrap.appendChild(b)
   })
@@ -140,36 +139,26 @@ function ensureCRMBar(){
   refreshCRMCounters()
 }
 
-// União de estágios (para “prospectivo cliente”)
-async function loadCRMCombo(stages){
-  const list=$("#chat-list")
-  list.innerHTML="<div class='hint'>Carregando prospectivo cliente...</div>"
-  try{
-    const all=[]
-    for(const st of stages){
-      const r=await apiCRMList(st,100,0)
-      ;(r?.items||[]).forEach(it=>all.push(it.chat || { wa_chatid: it?.crm?.chatid }))
-    }
-    const items=all.filter(Boolean)
-    await progressiveRenderChats(items)
-    await prefetchCards(items)
-  }catch(e){
-    list.innerHTML=`<div class='error'>Falha ao carregar: ${escapeHtml(e.message||"")}</div>`
-  }
-}
-
 async function refreshCRMCounters(){
   try{
     const data=await apiCRMViews()
-    const counts=data?.counts||{}
+    const c=data?.counts||{}
     const el=document.querySelector(".crm-counters")
     if(el){
-      const parts=CRM_STAGES.map(s=>`${s.replace("_"," ")}: ${counts[s]||0}`)
+      const pct = (c["interessado"]||0) + (c["em_negociacao"]||0)
+      const parts=[
+        `lead: ${c["novo"]||0}`,
+        `lead qualificado: ${c["interessado"]||0}`,
+        `lead quente: ${c["em_negociacao"]||0}`,
+        `cliente: ${c["fechou"]||0}`,
+        `prospectivo: ${pct}`
+      ]
       el.textContent=parts.join(" • ")
     }
   }catch{}
 }
 
+/* Carrega um estágio (ajustado p/ payload do backend) */
 async function loadCRMStage(stage){
   const list=$("#chat-list")
   list.innerHTML="<div class='hint'>Carregando visão CRM...</div>"
@@ -177,9 +166,10 @@ async function loadCRMStage(stage){
     const data=await apiCRMList(stage,100,0)
     const items=[]
     for(const it of (data?.items||[])){
-      const ch=it.chat||{}
-      if(!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid=it.crm.chatid
-      items.push(ch)
+      // crm.list retorna registros com “chatid”; montamos um objeto de chat válido
+      const cid = it.chatid || it.wa_chatid || it.number || ""
+      if(!cid) continue
+      items.push({ wa_chatid: cid, wa_lastMsgTimestamp: it.updated_at || Date.now() })
     }
     await progressiveRenderChats(items)
     await prefetchCards(items)
@@ -190,10 +180,28 @@ async function loadCRMStage(stage){
   }
 }
 
-/* ======= Botões no card (mantém no-op) ======= */
-function attachCRMControlsToCard(cardEl, chatObj){
-  return; // no-op
+/* União de estágios -> “prospectivo cliente” */
+async function loadCRMCombo(stages){
+  const list=$("#chat-list")
+  list.innerHTML="<div class='hint'>Carregando prospectivo cliente...</div>"
+  try{
+    const all=[]
+    for(const st of stages){
+      const r=await apiCRMList(st,100,0)
+      for(const it of (r?.items||[])){
+        const cid = it.chatid || it.wa_chatid || it.number || ""
+        if(cid) all.push({ wa_chatid: cid, wa_lastMsgTimestamp: it.updated_at || Date.now() })
+      }
+    }
+    await progressiveRenderChats(all)
+    await prefetchCards(all)
+  }catch(e){
+    list.innerHTML=`<div class='error'>Falha ao carregar: ${escapeHtml(e.message||"")}</div>`
+  }
 }
+
+/* ======= sem botões extras no card ======= */
+function attachCRMControlsToCard(cardEl, chatObj){ return }
 
 /* ========= LOGIN ========= */
 async function doLogin() {
@@ -285,7 +293,6 @@ async function loadChats() {
     await progressiveRenderChats(items)
     await prefetchCards(items)
 
-    // opcional: sincroniza contadores CRM (silencioso)
     try {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 500 }) })
       refreshCRMCounters()
@@ -308,7 +315,7 @@ async function progressiveRenderChats(chats) {
     return
   }
 
-  const BATCH = 14 // ligeiro aumento pra encher a tela mais rápido
+  const BATCH = 14
   for (let i = 0; i < chats.length; i += BATCH) {
     const slice = chats.slice(i, i + BATCH)
     slice.forEach((ch) => appendChatSkeleton(list, ch))
@@ -321,8 +328,8 @@ async function progressiveRenderChats(chats) {
 function appendChatSkeleton(list, ch) {
   const el = document.createElement("div")
   el.className = "chat-item"
-  el.dataset.chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
-  el.onclick = () => openChat(ch)
+  el.dataset.chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ch.id || ""
+  el.onclick = () => { if(el.dataset.chatid) openChat(ch) }
 
   const avatar = document.createElement("div")
   avatar.className = "avatar"
@@ -366,11 +373,11 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(main)
   list.appendChild(el)
 
-  attachCRMControlsToCard(el, ch) // no-op
+  attachCRMControlsToCard(el, ch)
 }
 
 function hydrateChatCard(ch) {
-  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ch.id || ""
   const cache = state.nameCache.get(chatid)
   if (!chatid || !cache) return
 
@@ -394,7 +401,7 @@ function hydrateChatCard(ch) {
 // Prefetch paralelo limitado
 async function prefetchCards(items) {
   const tasks = items.map((ch) => {
-    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ch.id || ""
     return async () => {
       if (!chatid) return
       if (!state.nameCache.has(chatid)) {
@@ -435,10 +442,10 @@ async function prefetchCards(items) {
     }
   })
 
-  const CHUNK = 16 // um pouco maior pra reduzir “idas e vindas”
+  const CHUNK = 16
   for (let i = 0; i < tasks.length; i += CHUNK) {
     const slice = tasks.slice(i, i + CHUNK)
-    await runLimited(slice, 8) // limite levemente maior
+    await runLimited(slice, 8)
     await new Promise((r) => rIC(r))
   }
 }
@@ -464,7 +471,9 @@ async function openChat(ch) {
   state.current = ch
   const title = $("#chat-header")
   const status = $(".chat-status")
-  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ch.id || ""
+
+  if(!chatid){ return } // evita erro 400 quando item não tem id ainda
 
   const cache = state.nameCache.get(chatid) || {}
   const nm = (cache.name || ch.wa_contactName || ch.name || chatid || "Chat").toString()
@@ -483,7 +492,6 @@ async function loadMessages(chatid) {
   pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>"
 
   try {
-    // ↑↑ agora pedimos até 200 para IA ter mais contexto
     const data = await api("/api/messages", {
       method: "POST",
       body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
@@ -497,10 +505,7 @@ async function loadMessages(chatid) {
       .trim()
     state.lastMsg.set(chatid, pv)
 
-    /* === IA: classificar automaticamente, mostrar pill e salvar no CRM === */
-    try {
-      await classifyCurrentChatFromItems(chatid, items)
-    } catch {}
+    try { await classifyCurrentChatFromItems(chatid, items) } catch {}
   } catch (e) {
     console.error(e)
     pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`
@@ -523,7 +528,7 @@ async function progressiveRenderMessages(msgs) {
     return
   }
 
-  const BATCH = 12 // um pouco maior = menos repaints
+  const BATCH = 12
   for (let i = 0; i < msgs.length; i += BATCH) {
     const slice = msgs.slice(i, i + BATCH)
     slice.forEach((m) => appendMessageBubble(pane, m))
@@ -564,20 +569,16 @@ function upsertAIPill(stage, confidence, reason) {
   }
   const map = {
     novo: "Lead",
-    sem_resposta: "Lead sem resposta",
     interessado: "Lead qualificado",
     em_negociacao: "Lead quente (em negociação)",
     fechou: "Cliente",
-    descartado: "Descartado"
   };
   const label = map[stage] || stage;
   pill.textContent = `${label} • conf ${(confidence * 100).toFixed(0)}%`;
   pill.title = reason || "";
 }
 
-// Busca mais histórico (se precisar) e chama IA
 async function classifyCurrentChatFromItems(chatid, items){
-  // Se veio pouco histórico por algum motivo, tenta completar (até 200)
   let full = Array.isArray(items) ? items.slice() : []
   if (full.length < 150) {
     try {
@@ -590,34 +591,27 @@ async function classifyCurrentChatFromItems(chatid, items){
     } catch {}
   }
 
-  // compacta até 200 entradas do mais recente ao mais antigo
   const history = full.slice(0, 200).map(m => ({
     role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
     content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
   })).filter(x => x.content);
 
-  let payload;
-  if (history.length) payload = { history };
-  else payload = { text: (state.lastMsg.get(chatid) || "").toString() };
+  const payload = history.length ? { history } : { text: (state.lastMsg.get(chatid) || "").toString() }
 
   const r = await fetch(BACKEND() + "/api/ai/classify", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  const data = await r.json();
+  })
+  if (!r.ok) throw new Error(await r.text())
+  const data = await r.json()
 
-  // Mostra pill
-  upsertAIPill(data.stage, data.confidence, data.reason);
+  upsertAIPill(data.stage, data.confidence, data.reason)
 
-  // Atualiza CRM automaticamente (silencioso)
-  try {
-    await apiCRMSetStatus(chatid, data.stage, `[IA] ${data.reason}`.slice(0, 280));
-  } catch {}
+  try { await apiCRMSetStatus(chatid, data.stage, `[IA] ${data.reason}`.slice(0, 280)) } catch {}
 }
 
-/* ========= SUA renderização “clássica” (mantida) ========= */
+/* ========= renderização clássica (mantida) ========= */
 function renderMessages(msgs) {
   const pane = $("#messages")
   pane.innerHTML = ""
@@ -692,8 +686,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-send").onclick = sendNow
   $("#btn-refresh").onclick = () => {
     if (state.current) {
-      const chatid = state.current.wa_chatid || state.current.chatid
-      loadMessages(chatid)
+      const chatid = state.current.wa_chatid || state.current.chatid || state.current.id
+      if (chatid) loadMessages(chatid); else loadChats()
     } else {
       loadChats()
     }
