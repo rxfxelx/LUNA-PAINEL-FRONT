@@ -83,8 +83,80 @@ async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
 
-/* ======= DESATIVADO: não renderiza a barra CRM ======= */
-function ensureCRMBar(){ /* no-op: escondido por padrão */ }
+/* ======= BARRA CRM (com rótulos pedidos) ======= */
+function ensureCRMBar(){
+  const host = document.querySelector(".topbar")
+  if(!host || host.querySelector(".crm-tabs")) return
+
+  const wrap = document.createElement("div")
+  wrap.className = "crm-tabs"
+  wrap.style.display = "flex"
+  wrap.style.gap = "8px"
+  wrap.style.alignItems = "center"
+  wrap.style.marginLeft = "16px"
+
+  // "Geral"
+  const btnAll = document.createElement("button")
+  btnAll.className = "btn"
+  btnAll.textContent = "Geral"
+  btnAll.onclick = () => loadChats()
+  wrap.appendChild(btnAll)
+
+  // Mapeia estágios -> rótulos
+  const LABELS = {
+    novo: "lead",
+    sem_resposta: "sem resposta",
+    interessado: "lead qualificado",
+    em_negociacao: "lead quente",
+    fechou: "cliente",
+    descartado: "descartado",
+  }
+
+  // Botão “prospectivo cliente” (interessado ∪ em_negociacao)
+  const btnProspect = document.createElement("button")
+  btnProspect.className = "btn"
+  btnProspect.textContent = "prospectivo cliente"
+  btnProspect.onclick = () => loadCRMCombo(["interessado","em_negociacao"])
+  wrap.appendChild(btnProspect)
+
+  // Abas por estágio
+  CRM_STAGES.forEach(st=>{
+    const b=document.createElement("button")
+    b.className="btn"
+    b.dataset.stage=st
+    b.textContent=LABELS[st] || st.replace("_"," ")
+    b.onclick=()=>loadCRMStage(st)
+    wrap.appendChild(b)
+  })
+
+  const counters=document.createElement("div")
+  counters.className="crm-counters"
+  counters.style.fontSize="12px"
+  counters.style.color="var(--sub2)"
+  counters.style.marginLeft="12px"
+
+  host.appendChild(wrap)
+  host.appendChild(counters)
+  refreshCRMCounters()
+}
+
+// União de estágios (para “prospectivo cliente”)
+async function loadCRMCombo(stages){
+  const list=$("#chat-list")
+  list.innerHTML="<div class='hint'>Carregando prospectivo cliente...</div>"
+  try{
+    const all=[]
+    for(const st of stages){
+      const r=await apiCRMList(st,100,0)
+      ;(r?.items||[]).forEach(it=>all.push(it.chat || { wa_chatid: it?.crm?.chatid }))
+    }
+    const items=all.filter(Boolean)
+    await progressiveRenderChats(items)
+    await prefetchCards(items)
+  }catch(e){
+    list.innerHTML=`<div class='error'>Falha ao carregar: ${escapeHtml(e.message||"")}</div>`
+  }
+}
 
 async function refreshCRMCounters(){
   try{
@@ -118,9 +190,9 @@ async function loadCRMStage(stage){
   }
 }
 
-/* ======= DESATIVADO: não cria botões no card ======= */
+/* ======= Botões no card (mantém no-op) ======= */
 function attachCRMControlsToCard(cardEl, chatObj){
-  return; // no-op: você não quer os botões visíveis
+  return; // no-op
 }
 
 /* ========= LOGIN ========= */
@@ -162,7 +234,7 @@ function switchToApp() {
   hide("#login-view")
   show("#app-view")
   setMobileMode("list")
-  ensureCRMBar() // no-op
+  ensureCRMBar()
   loadChats()
 }
 
