@@ -69,13 +69,24 @@ const state = {
   nameCache: new Map(), // chatid => {name,image,imagePreview}
   unread: new Map(), // chatid => count
   loadingChats: false,
+  currentStage: null, // null = Geral (todos); ou uma das keys CRM
 }
 
-/* ========= CRM =========
-   OBS: removidos “sem_resposta” e “descartado” conforme pedido
-   Labels visíveis: Geral • prospectivo cliente • lead • lead qualificado • lead quente • cliente
-*/
-const CRM_STAGES = ["novo", "interessado", "em_negociacao", "fechou"]
+/* ========= CRM ========= */
+// estágios internos (mantidos para o backend)
+const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
+
+// abas visíveis e mapeamento p/ estágios internos
+const VISIBLE_TABS = [
+  { key: null,            label: "Geral" },                 // lista "normal" (todos)
+  { key: "interessado",   label: "prospectivo cliente" },   // pedido pelo usuário
+  { key: "novo",          label: "lead" },
+  { key: "sem_resposta",  label: "lead qualificado" },      // reuso do slot: você pediu o rótulo, mantendo a key interna
+  { key: "em_negociacao", label: "lead quente" },
+  { key: "fechou",        label: "cliente" },
+]
+// OBS: “sem_resposta/descartado” NÃO aparecem como abas; descartado foi removido.
+//      Aqui “lead qualificado” usa a key interna sem_resposta, apenas como rótulo.
 
 async function apiCRMViews(){ return api("/api/crm/views") }
 async function apiCRMList(stage, limit=100, offset=0){
@@ -86,56 +97,61 @@ async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
 
-/* ======= BARRA CRM (layout igual, rótulos corrigidos) ======= */
+/* ========= TOP BAR CRM – ABAS ========= */
 function ensureCRMBar(){
-  const host = document.querySelector(".topbar")
-  if(!host || host.querySelector(".crm-tabs")) return
+  let host = document.querySelector(".topbar") || document.querySelector(".header") || document.body
+  if (!host) return
+
+  // remove barra antiga se existir (evita duplicar)
+  const old = host.querySelector(".crm-tabs")
+  if (old) old.remove()
 
   const wrap = document.createElement("div")
   wrap.className = "crm-tabs"
   wrap.style.display = "flex"
-  wrap.style.gap = "8px"
+  wrap.style.gap = "12px"
   wrap.style.alignItems = "center"
   wrap.style.marginLeft = "16px"
 
-  // Geral
-  const btnAll = document.createElement("button")
-  btnAll.className = "btn"
-  btnAll.textContent = "Geral"
-  btnAll.onclick = () => loadChats()
-  wrap.appendChild(btnAll)
+  VISIBLE_TABS.forEach(tab => {
+    const b = document.createElement("button")
+    b.className = "btn" // usa o mesmo estilo dos seus botões
+    b.dataset.stage = tab.key === null ? "" : tab.key
+    b.textContent = tab.label
+    b.onclick = async () => {
+      // ativa visualmente
+      for (const el of wrap.querySelectorAll("button")) el.classList.remove("active")
+      b.classList.add("active")
 
-  // Prospectivo (interessado ∪ em_negociacao)
-  const btnProspect = document.createElement("button")
-  btnProspect.className = "btn"
-  btnProspect.textContent = "prospectivo cliente"
-  btnProspect.onclick = () => loadCRMCombo(["interessado","em_negociacao"])
-  wrap.appendChild(btnProspect)
-
-  // Estágios individuais com os rótulos solicitados
-  const LABELS = {
-    novo: "lead",
-    interessado: "lead qualificado",
-    em_negociacao: "lead quente",
-    fechou: "cliente",
-  }
-  CRM_STAGES.forEach(st=>{
-    const b=document.createElement("button")
-    b.className="btn"
-    b.dataset.stage=st
-    b.textContent=LABELS[st]
-    b.onclick=()=>loadCRMStage(st)
+      state.currentStage = tab.key
+      if (tab.key === null) {
+        // “Geral” = lista normal
+        await loadChats()
+      } else {
+        await loadCRMStage(tab.key)
+      }
+    }
     wrap.appendChild(b)
   })
 
-  const counters=document.createElement("div")
-  counters.className="crm-counters"
-  counters.style.fontSize="12px"
-  counters.style.color="var(--sub2)"
-  counters.style.marginLeft="12px"
+  const counters = document.createElement("div")
+  counters.className = "crm-counters"
+  counters.style.fontSize = "12px"
+  counters.style.color   = "var(--sub2)"
+  counters.style.marginLeft = "8px"
 
-  host.appendChild(wrap)
-  host.appendChild(counters)
+  const container = document.createElement("div")
+  container.style.display = "flex"
+  container.style.alignItems = "center"
+  container.appendChild(wrap)
+  container.appendChild(counters)
+
+  // injeta logo após os botões padrão do seu topo
+  host.appendChild(container)
+
+  // ativa “Geral” inicialmente
+  wrap.querySelector("button")?.classList.add("active")
+
   refreshCRMCounters()
 }
 
@@ -143,34 +159,37 @@ async function refreshCRMCounters(){
   try{
     const data=await apiCRMViews()
     const c=data?.counts||{}
+    // string resumida no topo, no mesmo formato que você já usa
+    const s = `lead: ${c.novo||0} • lead qualificado: ${c.sem_resposta||0} • lead quente: ${c.em_negociacao||0} • cliente: ${c.fechou||0} • prospectivo: ${c.interessado||0}`
     const el=document.querySelector(".crm-counters")
-    if(el){
-      const pct = (c["interessado"]||0) + (c["em_negociacao"]||0)
-      const parts=[
-        `lead: ${c["novo"]||0}`,
-        `lead qualificado: ${c["interessado"]||0}`,
-        `lead quente: ${c["em_negociacao"]||0}`,
-        `cliente: ${c["fechou"]||0}`,
-        `prospectivo: ${pct}`
-      ]
-      el.textContent=parts.join(" • ")
-    }
+    if(el) el.textContent = s
   }catch{}
 }
 
-/* Carrega um estágio (ajustado p/ payload do backend) */
 async function loadCRMStage(stage){
+  state.current = null // limpa chat aberto
+  const title = $("#chat-header"); if (title) title.textContent = ""
+  const status = $(".chat-status"); if (status) status.textContent = "Online"
+  const pane = $("#messages"); if (pane) pane.innerHTML = `
+    <div class="empty-state">
+      <div class="empty-icon">💬</div>
+      <h3>Nenhuma conversa selecionada</h3>
+      <p>Escolha um chat da lista para visualizar as mensagens</p>
+    </div>`
+
   const list=$("#chat-list")
   list.innerHTML="<div class='hint'>Carregando visão CRM...</div>"
   try{
     const data=await apiCRMList(stage,100,0)
     const items=[]
     for(const it of (data?.items||[])){
-      // crm.list retorna registros com “chatid”; montamos um objeto de chat válido
-      const cid = it.chatid || it.wa_chatid || it.number || ""
-      if(!cid) continue
-      items.push({ wa_chatid: cid, wa_lastMsgTimestamp: it.updated_at || Date.now() })
+      // it.chat pode vir resumido; garantimos um objeto com wa_chatid
+      const ch=it.chat||{}
+      const fromCrm = it.chatid || it.crm?.chatid || ch.wa_chatid || ch.chatid || ""
+      if (!ch.wa_chatid && fromCrm) ch.wa_chatid = fromCrm
+      items.push(ch)
     }
+    state.chats = items
     await progressiveRenderChats(items)
     await prefetchCards(items)
   }catch(e){
@@ -180,28 +199,8 @@ async function loadCRMStage(stage){
   }
 }
 
-/* União de estágios -> “prospectivo cliente” */
-async function loadCRMCombo(stages){
-  const list=$("#chat-list")
-  list.innerHTML="<div class='hint'>Carregando prospectivo cliente...</div>"
-  try{
-    const all=[]
-    for(const st of stages){
-      const r=await apiCRMList(st,100,0)
-      for(const it of (r?.items||[])){
-        const cid = it.chatid || it.wa_chatid || it.number || ""
-        if(cid) all.push({ wa_chatid: cid, wa_lastMsgTimestamp: it.updated_at || Date.now() })
-      }
-    }
-    await progressiveRenderChats(all)
-    await prefetchCards(all)
-  }catch(e){
-    list.innerHTML=`<div class='error'>Falha ao carregar: ${escapeHtml(e.message||"")}</div>`
-  }
-}
-
-/* ======= sem botões extras no card ======= */
-function attachCRMControlsToCard(cardEl, chatObj){ return }
+/* ======= Sem botões por card (gear/IA) – mantido vazio ======= */
+function attachCRMControlsToCard(cardEl, chatObj){ /* no-op */ }
 
 /* ========= LOGIN ========= */
 async function doLogin() {
@@ -293,6 +292,7 @@ async function loadChats() {
     await progressiveRenderChats(items)
     await prefetchCards(items)
 
+    // sincroniza contadores CRM (silencioso)
     try {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 500 }) })
       refreshCRMCounters()
@@ -328,8 +328,8 @@ async function progressiveRenderChats(chats) {
 function appendChatSkeleton(list, ch) {
   const el = document.createElement("div")
   el.className = "chat-item"
-  el.dataset.chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ch.id || ""
-  el.onclick = () => { if(el.dataset.chatid) openChat(ch) }
+  el.dataset.chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+  el.onclick = () => openChat(ch)
 
   const avatar = document.createElement("div")
   avatar.className = "avatar"
@@ -373,11 +373,11 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(main)
   list.appendChild(el)
 
-  attachCRMControlsToCard(el, ch)
+  attachCRMControlsToCard(el, ch) // no-op
 }
 
 function hydrateChatCard(ch) {
-  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ch.id || ""
+  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
   const cache = state.nameCache.get(chatid)
   if (!chatid || !cache) return
 
@@ -401,7 +401,7 @@ function hydrateChatCard(ch) {
 // Prefetch paralelo limitado
 async function prefetchCards(items) {
   const tasks = items.map((ch) => {
-    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ch.id || ""
+    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     return async () => {
       if (!chatid) return
       if (!state.nameCache.has(chatid)) {
@@ -468,17 +468,19 @@ function formatTime(timestamp) {
 
 /* ========= OPEN CHAT / MESSAGES ========= */
 async function openChat(ch) {
+  // garante um chatid válido antes de prosseguir
+  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+  if (!chatid) return
+
   state.current = ch
   const title = $("#chat-header")
   const status = $(".chat-status")
-  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ch.id || ""
 
-  if(!chatid){ return } // evita erro 400 quando item não tem id ainda
-
+  // name-image preferencial
   const cache = state.nameCache.get(chatid) || {}
   const nm = (cache.name || ch.wa_contactName || ch.name || chatid || "Chat").toString()
 
-  title.textContent = nm
+  if (title) title.textContent = nm
   if (status) status.textContent = "Carregando mensagens..."
 
   setMobileMode("chat")
@@ -488,6 +490,8 @@ async function openChat(ch) {
 }
 
 async function loadMessages(chatid) {
+  if (!chatid) return // evita erro 400 no backend
+
   const pane = $("#messages")
   pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>"
 
@@ -505,7 +509,10 @@ async function loadMessages(chatid) {
       .trim()
     state.lastMsg.set(chatid, pv)
 
-    try { await classifyCurrentChatFromItems(chatid, items) } catch {}
+    // IA: classificar (se você tiver a rota ligada)
+    try {
+      await classifyCurrentChatFromItems(chatid, items)
+    } catch {}
   } catch (e) {
     console.error(e)
     pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`
@@ -569,16 +576,20 @@ function upsertAIPill(stage, confidence, reason) {
   }
   const map = {
     novo: "Lead",
-    interessado: "Lead qualificado",
-    em_negociacao: "Lead quente (em negociação)",
-    fechou: "Cliente",
+    sem_resposta: "Lead qualificado",
+    interessado: "prospectivo cliente",
+    em_negociacao: "lead quente",
+    fechou: "cliente",
+    descartado: "Descartado"
   };
   const label = map[stage] || stage;
   pill.textContent = `${label} • conf ${(confidence * 100).toFixed(0)}%`;
   pill.title = reason || "";
 }
 
+// Busca mais histórico (se precisar) e chama IA
 async function classifyCurrentChatFromItems(chatid, items){
+  if (!chatid) return
   let full = Array.isArray(items) ? items.slice() : []
   if (full.length < 150) {
     try {
@@ -603,7 +614,7 @@ async function classifyCurrentChatFromItems(chatid, items){
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(payload),
   })
-  if (!r.ok) throw new Error(await r.text())
+  if (!r.ok) return
   const data = await r.json()
 
   upsertAIPill(data.stage, data.confidence, data.reason)
@@ -611,7 +622,7 @@ async function classifyCurrentChatFromItems(chatid, items){
   try { await apiCRMSetStatus(chatid, data.stage, `[IA] ${data.reason}`.slice(0, 280)) } catch {}
 }
 
-/* ========= renderização clássica (mantida) ========= */
+/* ========= SUA renderização “clássica” (mantida) ========= */
 function renderMessages(msgs) {
   const pane = $("#messages")
   pane.innerHTML = ""
@@ -664,8 +675,11 @@ async function sendNow() {
     })
     $("#send-text").value = ""
 
-    if (state.current && (state.current.wa_chatid || state.current.chatid) === number) {
-      setTimeout(() => loadMessages(number), 500)
+    if (state.current) {
+      const currentId = state.current.wa_chatid || state.current.chatid
+      if (currentId && currentId === number) {
+        setTimeout(() => loadMessages(number), 500)
+      }
     }
   } catch (e) {
     alert(e.message || "Falha ao enviar mensagem")
@@ -686,10 +700,11 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-send").onclick = sendNow
   $("#btn-refresh").onclick = () => {
     if (state.current) {
-      const chatid = state.current.wa_chatid || state.current.chatid || state.current.id
-      if (chatid) loadMessages(chatid); else loadChats()
+      const chatid = state.current.wa_chatid || state.current.chatid
+      if (chatid) loadMessages(chatid)
     } else {
-      loadChats()
+      if (state.currentStage === null) loadChats()
+      else loadCRMStage(state.currentStage)
     }
   }
 
