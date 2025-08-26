@@ -1,59 +1,63 @@
 /* ========= CONFIG/HELPERS ========= */
-const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "")
-const $ = (s) => document.querySelector(s)
-const show = (sel) => $(sel).classList.remove("hidden")
-const hide = (sel) => $(sel).classList.add("hidden")
+const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
+const $ = (s) => document.querySelector(s);
+const show = (sel) => $(sel).classList.remove("hidden");
+const hide = (sel) => $(sel).classList.add("hidden");
 
 // Idle callback (não bloqueia UI)
 const rIC = (cb) =>
   (window.requestIdleCallback
     ? window.requestIdleCallback(cb, { timeout: 200 })
-    : setTimeout(cb, 0))
+    : setTimeout(cb, 0));
 
 // Limitador de concorrência simples
 async function runLimited(tasks, limit = 8) {
-  const results = []
-  let i = 0
+  const results = [];
+  let i = 0;
   const workers = new Array(Math.min(limit, tasks.length)).fill(0).map(async () => {
     while (i < tasks.length) {
-      const cur = i++
+      const cur = i++;
       try { results[cur] = await tasks[cur]() } catch (e) { results[cur] = undefined }
     }
-  })
-  await Promise.all(workers)
-  return results
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 function isMobile() {
-  return window.matchMedia("(max-width:1023px)").matches
+  return window.matchMedia("(max-width:1023px)").matches;
 }
 function setMobileMode(mode) {
-  document.body.classList.remove("is-mobile-list", "is-mobile-chat")
-  if (!isMobile()) return
-  if (mode === "list") document.body.classList.add("is-mobile-list")
-  if (mode === "chat") document.body.classList.add("is-mobile-chat")
+  document.body.classList.remove("is-mobile-list", "is-mobile-chat");
+  if (!isMobile()) return;
+  if (mode === "list") document.body.classList.add("is-mobile-list");
+  if (mode === "chat") document.body.classList.add("is-mobile-chat");
 }
 
-function jwt() { return localStorage.getItem("luna_jwt") || "" }
-function authHeaders() { return { Authorization: "Bearer " + jwt() } }
+function jwt() {
+  return localStorage.getItem("luna_jwt") || "";
+}
+function authHeaders() {
+  return { Authorization: "Bearer " + jwt() };
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
     headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers || {}) },
     ...opts,
-  })
+  });
   if (!res.ok) {
-    const t = await res.text().catch(() => "")
-    throw new Error(`HTTP ${res.status}: ${t}`)
+    const t = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status}: ${t}`);
   }
-  return res.json()
+  return res.json();
 }
 
 function escapeHtml(s) {
   return String(s || "").replace(
     /[&<>"']/g,
     (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[m],
-  )
+  );
 }
 
 /* ========= STATE ========= */
@@ -65,172 +69,175 @@ const state = {
   unread: new Map(),
   loadingChats: false,
 
-  // IA
-  aiStage: new Map(),
-  currentTab: "Geral",
-}
+  // === Classificação (persistente) ===
+  aiStage: new Map(),           // chatid -> {stage, confidence, reason, at}
+  aiStageLoaded: false,
+};
 
-// ===== cache IA em localStorage (TTL curto) =====
-const AI_TTL_MS = 10 * 60 * 1000
-function aiCacheKey(chatid){ return `luna_ai_stage::${chatid}` }
-function migrateStageLabel(s){
-  if (!s) return s
-  if (s === "Cliente") return "Lead Quente"
-  if (s === "Lead Quente") return "Lead"
-  if (s === "Lead") return "Contatos"
-  if (s === "Contatos" || s === "Lead" || s === "Lead Quente") return s
-  return "Contatos"
+const STAGES = ["contatos", "lead", "lead_quente"];
+const STAGE_LABEL = {
+  contatos: "Contatos",
+  lead: "Lead",
+  lead_quente: "Lead Quente",
+};
+const STAGE_RANK = { contatos: 0, lead: 1, lead_quente: 2 };
+function normalizeStage(s) {
+  const k = String(s || "").toLowerCase().trim();
+  if (k === "contato" || k === "contatos") return "contatos";
+  if (k === "lead_quente" || k === "leadquente" || k === "quente") return "lead_quente";
+  if (k === "lead") return "lead";
+  return "contatos";
 }
-function readAIFromLocal(chatid){
+function maxStage(a, b) {
+  a = normalizeStage(a); b = normalizeStage(b);
+  return STAGE_RANK[b] > STAGE_RANK[a] ? b : a;
+}
+function loadStageCache() {
+  if (state.aiStageLoaded) return;
   try {
-    const raw = localStorage.getItem(aiCacheKey(chatid))
-    if (!raw) return null
-    const obj = JSON.parse(raw)
-    if (obj && obj.stage) obj.stage = migrateStageLabel(obj.stage)
-    return obj
-  } catch { return null }
+    const raw = localStorage.getItem("luna_ai_stage") || "{}";
+    const obj = JSON.parse(raw);
+    Object.entries(obj).forEach(([chatid, v]) => state.aiStage.set(chatid, v));
+  } catch {}
+  state.aiStageLoaded = true;
 }
-function writeAIToLocal(chatid, obj){
-  try { localStorage.setItem(aiCacheKey(chatid), JSON.stringify({ ...obj, ts: Date.now() })) } catch {}
+function saveStageCache() {
+  const obj = {};
+  state.aiStage.forEach((v, k) => { obj[k] = v; });
+  localStorage.setItem("luna_ai_stage", JSON.stringify(obj));
 }
-
-/* ========= CRM (compat) ========= */
-const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
-async function apiCRMViews(){ return api("/api/crm/views") }
-async function apiCRMList(stage, limit=100, offset=0){
-  const qs = new URLSearchParams({stage,limit,offset}).toString()
-  return api("/api/crm/list?"+qs)
+function getStage(chatid) {
+  loadStageCache();
+  return state.aiStage.get(chatid) || null;
 }
-async function apiCRMSetStatus(chatid, stage, notes=""){
-  return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
-}
-
-/* ======= ABAS (Geral / Contatos / Lead / Lead Quente) ======= */
-function ensureCRMBar(){
-  const host = document.querySelector(".topbar")
-  if(!host) return
-  if (host.querySelector(".crm-tabs")) return
-
-  const wrap = document.createElement("div")
-  wrap.className = "crm-tabs"
-  wrap.style.display = "flex"
-  wrap.style.gap = "8px"
-  wrap.style.alignItems = "center"
-
-  function makeBtn(label){
-    const b = document.createElement("button")
-    b.className = "btn"
-    b.textContent = label
-    b.dataset.tab = label
-    b.onclick = () => { selectTab(label) }
-    return b
+function setStage(chatid, next) {
+  loadStageCache();
+  const cur = state.aiStage.get(chatid);
+  if (!cur) {
+    state.aiStage.set(chatid, { ...next, at: Date.now() });
+  } else {
+    // não rebaixa
+    const merged = {
+      stage: maxStage(cur.stage, next.stage),
+      confidence: Math.max(cur.confidence || 0, next.confidence || 0),
+      reason: next.reason || cur.reason || "",
+      at: Date.now(),
+    };
+    state.aiStage.set(chatid, merged);
   }
-  ;["Geral","Contatos","Lead","Lead Quente"].forEach(t => wrap.appendChild(makeBtn(t)))
-
-  const counters = document.createElement("div")
-  counters.className = "crm-counters"
-  counters.style.fontSize = "12px"
-  counters.style.color = "var(--sub2)"
-  counters.style.marginLeft = "8px"
-
-  host.appendChild(wrap)
-  host.appendChild(counters)
-
-  setActiveTab("Geral")
+  saveStageCache();
 }
 
-function selectTab(name){
-  state.currentTab = name || "Geral"
-  setActiveTab(state.currentTab)
-  renderChatsFiltered(state.currentTab === "Geral" ? null : state.currentTab)
-}
-function setActiveTab(name){
-  document.querySelectorAll(".crm-tabs .btn").forEach(btn => {
-    if (btn.dataset.tab === name) btn.classList.add("active")
-    else btn.classList.remove("active")
-  })
-}
+/* ========= TOP TABS ========= */
+function ensureStageTabs() {
+  const host = document.querySelector(".topbar") || document.querySelector(".tabs") || document.querySelector("header");
+  if (!host || host.querySelector(".stage-tabs")) return;
 
-function getAIStageForChat(chatid){
-  const inMem = state.aiStage.get(chatid)
-  if (inMem && inMem.stage) return migrateStageLabel(inMem.stage)
-  const cached = readAIFromLocal(chatid)
-  if (cached && cached.stage) return migrateStageLabel(cached.stage)
-  return null
+  const wrap = document.createElement("div");
+  wrap.className = "stage-tabs";
+  wrap.style.display = "flex";
+  wrap.style.gap = "8px";
+  wrap.style.alignItems = "center";
+
+  const btnGeral = document.createElement("button");
+  btnGeral.className = "btn";
+  btnGeral.textContent = "Geral";
+  btnGeral.onclick = () => loadChats();
+  wrap.appendChild(btnGeral);
+
+  ["contatos","lead","lead_quente"].forEach(st => {
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.dataset.stage = st;
+    b.textContent = STAGE_LABEL[st];
+    b.onclick = () => loadStageView(st);
+    wrap.appendChild(b);
+  });
+
+  const counters = document.createElement("div");
+  counters.className = "stage-counters";
+  counters.style.marginLeft = "8px";
+  counters.style.fontSize = "12px";
+  counters.style.opacity = "0.8";
+
+  host.appendChild(wrap);
+  host.appendChild(counters);
+
+  refreshStageCounters();
 }
-
-async function renderChatsFiltered(stageLabel){
-  const list = $("#chat-list")
-  if (!Array.isArray(state.chats) || !state.chats.length) return
-
-  let items = state.chats.slice()
-  if (stageLabel) {
-    items = items.filter(ch => {
-      const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
-      const s = getAIStageForChat(chatid)
-      return s === stageLabel
-    })
-  }
-
-  list.innerHTML = "<div class='hint'>Carregando...</div>"
-  await progressiveRenderChats(items)
-  await prefetchCards(items)
+function refreshStageCounters() {
+  loadStageCache();
+  const counts = { contatos: 0, lead: 0, lead_quente: 0 };
+  state.chats.forEach(ch => {
+    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
+    const st = getStage(chatid)?.stage || "contatos";
+    if (counts[st] !== undefined) counts[st]++;
+  });
+  const el = document.querySelector(".stage-counters");
+  if (el) el.textContent = `contatos: ${counts.contatos} • lead: ${counts.lead} • lead quente: ${counts.lead_quente}`;
 }
-
-async function refreshCRMCounters(){
-  try{
-    const data=await apiCRMViews()
-    const counts=data?.counts||{}
-    const el=document.querySelector(".crm-counters")
-    if(el){
-      const parts=CRM_STAGES.map(s=>`${s.replace("_"," ")}: ${counts[s]||0}`)
-      el.textContent=parts.join(" • ")
-    }
-  }catch{}
+async function loadStageView(stage) {
+  const list = $("#chat-list");
+  list.innerHTML = "<div class='hint'>Carregando…</div>";
+  await rIC(() => {});
+  loadStageCache();
+  const selected = state.chats.filter(ch => {
+    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
+    return (getStage(chatid)?.stage || "contatos") === stage;
+  });
+  await progressiveRenderChats(selected);
+  await prefetchCards(selected);
 }
-function attachCRMControlsToCard(){ return }
 
 /* ========= LOGIN ========= */
 async function doLogin() {
-  const token = $("#token").value.trim()
-  const msgEl = $("#msg")
-  const btnEl = $("#btn-login")
-  if (!token) { msgEl.textContent = "Por favor, cole o token da instância"; return }
+  const token = $("#token").value.trim();
+  const msgEl = $("#msg");
+  const btnEl = $("#btn-login");
 
-  msgEl.textContent = ""
-  btnEl.disabled = true
-  btnEl.innerHTML = "<span>Conectando...</span>"
+  if (!token) {
+    msgEl.textContent = "Por favor, cole o token da instância";
+    return;
+  }
+
+  msgEl.textContent = "";
+  btnEl.disabled = true;
+  btnEl.innerHTML = "<span>Conectando...</span>";
 
   try {
     const r = await fetch(BACKEND() + "/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
-    })
-    if (!r.ok) throw new Error(await r.text())
-    const data = await r.json()
-    localStorage.setItem("luna_jwt", data.jwt)
-    switchToApp()
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json();
+    localStorage.setItem("luna_jwt", data.jwt);
+    switchToApp();
   } catch (e) {
-    console.error(e)
-    msgEl.textContent = "Token inválido. Verifique e tente novamente."
+    console.error(e);
+    msgEl.textContent = "Token inválido. Verifique e tente novamente.";
   } finally {
-    btnEl.disabled = false
+    btnEl.disabled = false;
     btnEl.innerHTML =
-      '<span>Entrar no Sistema</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'
+      '<span>Entrar no Sistema</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
   }
 }
 
 function switchToApp() {
-  hide("#login-view")
-  show("#app-view")
-  setMobileMode("list")
-  ensureCRMBar()
-  loadChats()
+  hide("#login-view");
+  show("#app-view");
+  setMobileMode("list");
+  ensureStageTabs();
+  loadChats();
 }
+
 function ensureRoute() {
-  if (jwt()) switchToApp()
-  else { show("#login-view"); hide("#app-view") }
+  if (jwt()) switchToApp();
+  else {
+    show("#login-view");
+    hide("#app-view");
+  }
 }
 
 /* ========= AVATAR/NAME-IMAGE ========= */
@@ -239,142 +246,150 @@ async function fetchNameImage(chatid, preview = true) {
     const resp = await api("/api/name-image", {
       method: "POST",
       body: JSON.stringify({ number: chatid, preview }),
-    })
-    return resp
-  } catch { return { name: null, image: null, imagePreview: null } }
+    });
+    return resp;
+  } catch (e) {
+    return { name: null, image: null, imagePreview: null };
+  }
 }
+
 function initialsOf(str) {
-  const s = (str || "").trim()
-  if (!s) return "??"
-  const parts = s.split(/\s+/).slice(0, 2)
-  return parts.map((p) => p[0]?.toUpperCase() || "").join("") || "??"
+  const s = (str || "").trim();
+  if (!s) return "??";
+  const parts = s.split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]?.toUpperCase() || "").join("") || "??";
 }
 
 /* ========= CHATS ========= */
 async function loadChats() {
-  if (state.loadingChats) return
-  state.loadingChats = true
-  const list = $("#chat-list")
-  list.innerHTML = "<div class='hint'>Carregando conversas...</div>"
+  if (state.loadingChats) return;
+  state.loadingChats = true;
+
+  const list = $("#chat-list");
+  list.innerHTML = "<div class='hint'>Carregando conversas...</div>";
 
   try {
     const data = await api("/api/chats", {
       method: "POST",
       body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 100, offset: 0 }),
-    })
-    const items = Array.isArray(data?.items) ? data.items : []
-    state.chats = items
+    });
+    const items = Array.isArray(data?.items) ? data.items : [];
+    state.chats = items;
 
-    await renderChatsFiltered(state.currentTab === "Geral" ? null : state.currentTab)
-    await prefetchCards(items)
+    await progressiveRenderChats(items);
+    await prefetchCards(items);
 
-    // Classificação automática de TODAS (com heurística rápida)
-    await autoClassifyAll(items)
+    // Classificação em background de TODAS as conversas (sem rebaixar e com cache)
+    classifyAllChatsInBackground(items).then(() => refreshStageCounters());
   } catch (e) {
-    console.error(e)
-    list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`
+    console.error(e);
+    list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`;
   } finally {
-    state.loadingChats = false
+    state.loadingChats = false;
   }
 }
 
 async function progressiveRenderChats(chats) {
-  const list = $("#chat-list")
-  list.innerHTML = ""
-  if (chats.length === 0) { list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>"; return }
+  const list = $("#chat-list");
+  list.innerHTML = "";
 
-  const BATCH = 14
-  for (let i = 0; i < chats.length; i += BATCH) {
-    const slice = chats.slice(i, i + BATCH)
-    slice.forEach((ch) => appendChatSkeleton(list, ch))
-    await new Promise((r) => rIC(r))
+  if (chats.length === 0) {
+    list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>";
+    return;
   }
-  chats.forEach((ch) => hydrateChatCard(ch))
+
+  const BATCH = 14;
+  for (let i = 0; i < chats.length; i += BATCH) {
+    const slice = chats.slice(i, i + BATCH);
+    slice.forEach((ch) => appendChatSkeleton(list, ch));
+    await new Promise((r) => rIC(r));
+  }
+
+  chats.forEach((ch) => hydrateChatCard(ch));
 }
 
 function appendChatSkeleton(list, ch) {
-  const el = document.createElement("div")
-  el.className = "chat-item"
-  el.dataset.chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
-  el.onclick = () => openChat(ch)
+  const el = document.createElement("div");
+  el.className = "chat-item";
+  el.dataset.chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
+  el.onclick = () => openChat(ch);
 
-  const avatar = document.createElement("div")
-  avatar.className = "avatar"
-  avatar.textContent = "··"
+  const avatar = document.createElement("div");
+  avatar.className = "avatar";
+  avatar.textContent = "··";
 
-  const main = document.createElement("div")
-  main.className = "chat-main"
+  const main = document.createElement("div");
+  main.className = "chat-main";
 
-  const top = document.createElement("div")
-  top.className = "row1"
-  const nm = document.createElement("div")
-  nm.className = "name"
-  nm.textContent = (ch.wa_contactName || ch.name || el.dataset.chatid || "Contato").toString()
-  const tm = document.createElement("div")
-  tm.className = "time"
-  const lastTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ""
-  tm.textContent = lastTs ? formatTime(lastTs) : ""
-  top.appendChild(nm); top.appendChild(tm)
+  const top = document.createElement("div");
+  top.className = "row1";
+  const nm = document.createElement("div");
+  nm.className = "name";
+  nm.textContent = (ch.wa_contactName || ch.name || el.dataset.chatid || "Contato").toString();
+  const tm = document.createElement("div");
+  tm.className = "time";
+  const lastTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || "";
+  tm.textContent = lastTs ? formatTime(lastTs) : "";
+  top.appendChild(nm);
+  top.appendChild(tm);
 
-  const bottom = document.createElement("div")
-  bottom.className = "row2"
-  const preview = document.createElement("div")
-  preview.className = "preview"
-  const pvText = (state.lastMsg.get(el.dataset.chatid) || ch.wa_lastMessageText || "").replace(/\s+/g, " ").trim()
-  preview.textContent = pvText || "Carregando..."
-  preview.title = pvText
+  const bottom = document.createElement("div");
+  bottom.className = "row2";
+  const preview = document.createElement("div");
+  preview.className = "preview";
+  const pvText = (state.lastMsg.get(el.dataset.chatid) || ch.wa_lastMessageText || "").replace(/\s+/g, " ").trim();
+  preview.textContent = pvText || "Carregando...";
+  preview.title = pvText;
 
-  const unread = document.createElement("span")
-  unread.className = "badge"
-  const count = state.unread.get(el.dataset.chatid) || ch.wa_unreadCount || 0
-  if (count > 0) unread.textContent = count
-  else unread.style.display = "none"
+  const unread = document.createElement("span");
+  unread.className = "badge";
+  const count = state.unread.get(el.dataset.chatid) || ch.wa_unreadCount || 0;
+  if (count > 0) unread.textContent = count;
+  else unread.style.display = "none";
 
-  bottom.appendChild(preview)
-  bottom.appendChild(unread)
+  bottom.appendChild(preview);
+  bottom.appendChild(unread);
 
-  main.appendChild(top)
-  main.appendChild(bottom)
-  el.appendChild(avatar)
-  el.appendChild(main)
-  list.appendChild(el)
+  main.appendChild(top);
+  main.appendChild(bottom);
+  el.appendChild(avatar);
+  el.appendChild(main);
+  list.appendChild(el);
 }
 
 function hydrateChatCard(ch) {
-  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
-  const cache = state.nameCache.get(chatid)
-  if (!chatid || !cache) return
+  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
+  const cache = state.nameCache.get(chatid);
+  if (!chatid || !cache) return;
 
-  const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
-  if (!el) return
+  const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
+  if (!el) return;
 
-  const avatar = el.querySelector(".avatar")
-  const nameEl = el.querySelector(".name")
+  const avatar = el.querySelector(".avatar");
+  const nameEl = el.querySelector(".name");
   if (cache.imagePreview || cache.image) {
-    avatar.innerHTML = ""
-    const img = document.createElement("img")
-    img.src = cache.imagePreview || cache.image
-    img.alt = "avatar"
-    avatar.appendChild(img)
+    avatar.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = cache.imagePreview || cache.image;
+    img.alt = "avatar";
+    avatar.appendChild(img);
   } else {
-    avatar.textContent = initialsOf(cache.name || nameEl.textContent)
+    avatar.textContent = initialsOf(cache.name || nameEl.textContent);
   }
-  if (cache.name) nameEl.textContent = cache.name
-
-  const cached = readAIFromLocal(chatid)
-  if (cached?.stage) upsertAICardBadge(el, cached.stage)
+  if (cache.name) nameEl.textContent = cache.name;
 }
 
+// Prefetch paralelo limitado
 async function prefetchCards(items) {
   const tasks = items.map((ch) => {
-    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
     return async () => {
-      if (!chatid) return
+      if (!chatid) return;
       if (!state.nameCache.has(chatid)) {
         try {
-          const resp = await fetchNameImage(chatid)
-          state.nameCache.set(chatid, resp)
-          hydrateChatCard(ch)
+          const resp = await fetchNameImage(chatid);
+          state.nameCache.set(chatid, resp);
+          hydrateChatCard(ch);
         } catch {}
       }
       if (!state.lastMsg.has(chatid) && !ch.wa_lastMessageText) {
@@ -382,8 +397,8 @@ async function prefetchCards(items) {
           const data = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid, limit: 1, sort: "-messageTimestamp" }),
-          })
-          const last = Array.isArray(data?.items) ? data.items[0] : null
+          });
+          const last = Array.isArray(data?.items) ? data.items[0] : null;
           if (last) {
             const pv = (
               last.text ||
@@ -392,190 +407,102 @@ async function prefetchCards(items) {
               last?.message?.conversation ||
               last?.body ||
               ""
-            ).replace(/\s+/g, " ").trim()
-            state.lastMsg.set(chatid, pv)
+            ).replace(/\s+/g, " ").trim();
+            state.lastMsg.set(chatid, pv);
 
-            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`)
-            if (card) { card.textContent = pv || "Sem mensagens"; card.title = pv }
-            const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`)
-            if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "")
+            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
+            if (card) {
+              card.textContent = pv || "Sem mensagens";
+              card.title = pv;
+            }
+            const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`);
+            if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
           }
         } catch {}
       }
-    }
-  })
+    };
+  });
 
-  const CHUNK = 16
+  const CHUNK = 16;
   for (let i = 0; i < tasks.length; i += CHUNK) {
-    const slice = tasks.slice(i, i + CHUNK)
-    await runLimited(slice, 8)
-    await new Promise((r) => rIC(r))
-  }
-}
-
-/* ===== HEURÍSTICO RÁPIDO (pré-IA) ===== */
-function quickHeuristicStage(history){
-  // history: [{role, content}]
-  if (!Array.isArray(history) || !history.length) return null
-  const last30 = history.slice(-30)
-  const userTexts = last30.filter(m=>m.role==="user").map(m=>m.content.toLowerCase())
-  const agentTexts = last30.filter(m=>m.role!=="user").map(m=>m.content.toLowerCase())
-
-  const interestRe = /(como funciona|como que funciona|me mostra|pode mostrar|quais os valores|preço|valor|condições|funciona com|tem integração|como contratar|me explica|é possível|é possivel|você consegue|vc consegue|pode enviar|manda catálogo|catálogo|catalogo|tem demo|demonstração)/i
-  const handoffRe = /(vou te passar|vou passar você|vou encaminhar|vou transferir|encaminhei|transferi|minha equipe vai|o comercial vai|alguém do setor|setor .* vai te|time .* vai falar|vou pedir para .* entrar em contato|alguém vai entrar em contato)/i
-
-  const hasHandoff = agentTexts.some(t => handoffRe.test(t))
-  if (hasHandoff) return { stage: "Lead Quente", confidence: 0.9, reason: "Handoff detectado." }
-
-  const interestCount = userTexts.reduce((acc,t)=> acc + (interestRe.test(t)?1:0), 0)
-  if (interestCount >= 1) return { stage: "Lead", confidence: 0.8, reason: "Perguntas de interesse detectadas." }
-
-  // se não há interesse, cai para Contatos
-  return { stage: "Contatos", confidence: 0.6, reason: "Sem sinais claros de interesse." }
-}
-
-/* ===== Classificar TODAS ===== */
-async function autoClassifyAll(items){
-  const tasks = items.map((ch) => {
-    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
-    return async () => {
-      if (!chatid) return
-      const cached = readAIFromLocal(chatid)
-      if (cached && (Date.now() - (cached.ts||0) < AI_TTL_MS)) {
-        state.aiStage.set(chatid, cached)
-        const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
-        if (el) upsertAICardBadge(el, cached.stage)
-        if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
-        return
-      }
-
-      // pega histórico suficiente p/ heurística e IA
-      let histItems = []
-      try {
-        const data = await api("/api/messages", {
-          method: "POST",
-          body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
-        })
-        histItems = Array.isArray(data?.items) ? data.items : []
-      } catch {}
-
-      const history = histItems.slice(0, 200).map(m => ({
-        role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
-        content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
-      })).filter(x => x.content)
-
-      // heurística primeiro
-      let best = quickHeuristicStage(history)
-
-      // chama IA se a heurística não marcou Lead/Lead Quente com boa confiança
-      const needAI = !(best && (best.stage === "Lead Quente" || best.stage === "Lead") && best.confidence >= 0.75)
-      if (needAI) {
-        try {
-          const r = await fetch(BACKEND() + "/api/ai/classify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", ...authHeaders() },
-            body: JSON.stringify(history.length ? { history } : { text: (state.lastMsg.get(chatid)||"").toString() }),
-          })
-          if (r.ok) {
-            const data = await r.json()
-            data.stage = migrateStageLabel(data.stage)
-            // escolhe o melhor entre heurística e IA (maior confiança)
-            if (!best || (data.confidence || 0) > (best.confidence || 0)) best = data
-          }
-        } catch {}
-      }
-
-      if (!best) best = { stage:"Contatos", confidence:0.6, reason:"Fallback" }
-
-      state.aiStage.set(chatid, best)
-      writeAIToLocal(chatid, best)
-
-      const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
-      if (el) upsertAICardBadge(el, best.stage)
-
-      if (state.current) {
-        const curId = state.current.wa_chatid || state.current.chatid || ""
-        if (curId === chatid) upsertAIPill(best.stage, best.confidence, best.reason)
-      }
-      if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
-    }
-  })
-
-  const CH = 10
-  for (let i = 0; i < tasks.length; i += CH) {
-    const slice = tasks.slice(i, i + CH)
-    await runLimited(slice, 6)
-    await new Promise((r) => rIC(r))
+    const slice = tasks.slice(i, i + CHUNK);
+    await runLimited(slice, 8);
+    await new Promise((r) => rIC(r));
   }
 }
 
 function formatTime(timestamp) {
-  if (!timestamp) return ""
+  if (!timestamp) return "";
   try {
-    const date = new Date(timestamp)
-    const now = new Date()
-    const diff = now - date
-    const hours = Math.floor(diff / (1000 * 60 * 60))
-    if (hours < 1) return "Agora"
-    if (hours < 24) return `${hours}h`
-    if (hours < 48) return "Ontem"
-    return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" })
-  } catch (e) { return timestamp }
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = now - date;
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    if (hours < 1) return "Agora";
+    if (hours < 24) return `${hours}h`;
+    if (hours < 48) return "Ontem";
+    return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  } catch (e) {
+    return timestamp;
+  }
 }
 
 /* ========= OPEN CHAT / MESSAGES ========= */
 async function openChat(ch) {
-  state.current = ch
-  const title = $("#chat-header")
-  const status = $(".chat-status")
-  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+  state.current = ch;
+  const title = $("#chat-header");
+  const status = $(".chat-status");
+  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
 
-  const cache = state.nameCache.get(chatid) || {}
-  const nm = (cache.name || ch.wa_contactName || ch.name || chatid || "Chat").toString()
+  const cache = state.nameCache.get(chatid) || {};
+  const nm = (cache.name || ch.wa_contactName || ch.name || chatid || "Chat").toString();
 
-  title.textContent = nm
-  if (status) status.textContent = "Carregando mensagens..."
+  title.textContent = nm;
+  if (status) status.textContent = "Carregando mensagens...";
 
-  setMobileMode("chat")
-  await loadMessages(chatid)
+  setMobileMode("chat");
+  await loadMessages(chatid);
 
-  if (status) status.textContent = "Online"
+  // mostra pill com estágio atual (do cache), sem rodar IA de novo
+  const st = getStage(chatid);
+  if (st) upsertAIPill(st.stage, st.confidence, st.reason);
 
-  const cached = readAIFromLocal(chatid)
-  if (cached?.stage) upsertAIPill(cached.stage, cached.confidence || 0.5, cached.reason || "")
+  if (status) status.textContent = "Online";
 }
 
 async function loadMessages(chatid) {
-  const pane = $("#messages")
-  pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>"
+  const pane = $("#messages");
+  pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>";
 
   try {
     const data = await api("/api/messages", {
       method: "POST",
-      // ↑ traz bastante histórico para evitar “falhas” de contexto
-      body: JSON.stringify({ chatid, limit: 250, sort: "-messageTimestamp" }),
-    })
-    const items = Array.isArray(data?.items) ? data.items : []
-    await progressiveRenderMessages(items.slice().reverse())
+      body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
+    });
+    const items = Array.isArray(data?.items) ? data.items : [];
+    await progressiveRenderMessages(items.slice().reverse());
 
-    const last = items[0]
+    const last = items[0];
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "")
-      .replace(/\s+/g, " ").trim()
-    state.lastMsg.set(chatid, pv)
+      .replace(/\s+/g, " ")
+      .trim();
+    state.lastMsg.set(chatid, pv);
 
-    if (!state.aiStage.has(chatid) && !readAIFromLocal(chatid)) {
-      classifyCurrentChatFromItems(chatid, items).catch(()=>{})
+    // não roda IA aqui (já roda no background). Apenas se nunca classificado:
+    if (!getStage(chatid)) {
+      await classifyAndPersist(chatid, items);
+      refreshStageCounters();
     }
   } catch (e) {
-    console.error(e)
-    pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`
+    console.error(e);
+    pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`;
   }
 }
 
 /* ========= renderização PROGRESSIVA ========= */
 async function progressiveRenderMessages(msgs) {
-  const pane = $("#messages")
-  pane.innerHTML = ""
+  const pane = $("#messages");
+  pane.innerHTML = "";
 
   if (!msgs.length) {
     pane.innerHTML = `
@@ -584,45 +511,35 @@ async function progressiveRenderMessages(msgs) {
         <h3>Nenhuma mensagem</h3>
         <p>Esta conversa ainda não possui mensagens</p>
       </div>
-    `
-    return
+    `;
+    return;
   }
 
-  const BATCH = 12
+  const BATCH = 12;
   for (let i = 0; i < msgs.length; i += BATCH) {
-    const slice = msgs.slice(i, i + BATCH)
-    slice.forEach((m) => appendMessageBubble(pane, m))
-    await new Promise((r) => rIC(r))
-    pane.scrollTop = pane.scrollHeight
+    const slice = msgs.slice(i, i + BATCH);
+    slice.forEach((m) => appendMessageBubble(pane, m));
+    await new Promise((r) => rIC(r));
+    pane.scrollTop = pane.scrollHeight;
   }
 }
 
-/* === AJUSTE: placeholder para mensagens sem texto (anexos/botões etc.) === */
 function appendMessageBubble(pane, m) {
-  const me = m.fromMe || m.fromme || m.from_me || false
-  const el = document.createElement("div")
-  el.className = "msg " + (me ? "me" : "you")
-  let text = (
-    m.text || m.message?.text || m.caption ||
-    m?.message?.conversation || m?.body || ""
-  )
-
-  if (!text || !text.trim()) {
-    // mostra tipo básico se existir (melhora casos de “mensagem sumida”)
-    text = m.type || m.message?.messageStubType || "[mensagem]"
-  }
-
-  const who = m.senderName || m.pushName || ""
-  const ts = m.messageTimestamp || m.timestamp || ""
+  const me = m.fromMe || m.fromme || m.from_me || false;
+  const el = document.createElement("div");
+  el.className = "msg " + (me ? "me" : "you");
+  const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "";
+  const who = m.senderName || m.pushName || "";
+  const ts = m.messageTimestamp || m.timestamp || "";
 
   el.innerHTML = `
-    ${escapeHtml(String(text))}
+    ${escapeHtml(text)}
     <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
-  `
-  pane.appendChild(el)
+  `;
+  pane.appendChild(el);
 }
 
-/* ========= IA — PILL (header) + BADGE (card) ========= */
+/* ========= IA — pill ========= */
 function upsertAIPill(stage, confidence, reason) {
   let pill = document.getElementById("ai-pill");
   if (!pill) {
@@ -637,152 +554,166 @@ function upsertAIPill(stage, confidence, reason) {
     const header = document.querySelector(".chatbar") || document.querySelector(".chat-title") || document.body;
     header.appendChild(pill);
   }
-  pill.textContent = `${stage} • conf ${(confidence * 100).toFixed(0)}%`;
+  const label = STAGE_LABEL[normalizeStage(stage)] || stage;
+  pill.textContent = `${label} • conf ${(confidence * 100).toFixed(0)}%`;
   pill.title = reason || "";
 }
-function upsertAICardBadge(cardEl, stage){
-  if (!cardEl) return
-  let tag = cardEl.querySelector(".ai-badge")
-  if (!tag) {
-    tag = document.createElement("span")
-    tag.className = "ai-badge"
-    tag.style.marginLeft = "6px"
-    tag.style.fontSize = "11px"
-    tag.style.opacity = "0.85"
-    tag.style.padding = "2px 6px"
-    tag.style.border = "1px solid var(--muted)"
-    tag.style.borderRadius = "999px"
-    tag.style.whiteSpace = "nowrap"
-    const row1 = cardEl.querySelector(".row1")
-    if (row1) row1.appendChild(tag)
+
+/* ========= IA — classificação + persistência ========= */
+
+// heurística leve (barata) antes de chamar IA
+function heuristicStage(items) {
+  // pega até 200 msgs (mais recentes primeiro no array original)
+  const txts = (items || []).map(m =>
+    (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toLowerCase()
+  );
+
+  // lead_quente: evidência de transferência/encaminhamento humano
+  const hotHints = [
+    "vou te passar para",
+    "vou encaminhar",
+    "encaminhando seu contato",
+    "alguém vai falar com você",
+    "o time comercial vai te chamar",
+    "o setor vai entrar em contato",
+    "vou pedir para alguém te chamar",
+    "vou transferir",
+  ];
+  if (txts.some(t => hotHints.some(h => t.includes(h)))) return "lead_quente";
+
+  // lead: perguntas/dúvidas específicas
+  const leadHints = ["como funciona", "preço", "valor", "quanto custa", "parcel", "prazo", "horário", "garantia", "demonstração", "demonstracao", "mostra"];
+  if (txts.some(t => /(\?|como|quanto|quando|onde|por que|porque)/.test(t) || leadHints.some(h => t.includes(h)))) {
+    return "lead";
   }
-  tag.textContent = stage
+
+  return "contatos";
 }
 
-async function classifyCurrentChatFromItems(chatid, items){
-  let full = Array.isArray(items) ? items.slice() : []
-  if (full.length < 150) {
-    try {
-      const extra = await api("/api/messages", {
-        method: "POST",
-        body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" })
-      })
-      const arr = Array.isArray(extra?.items) ? extra.items : []
-      if (arr.length > full.length) full = arr
-    } catch {}
-  }
+async function classifyAndPersist(chatid, items) {
+  // 1) heurística
+  const h = heuristicStage(items);
+  setStage(chatid, { stage: h, confidence: h === "lead_quente" ? 0.7 : (h === "lead" ? 0.6 : 0.4), reason: "Heurística local" });
 
-  const history = full.slice(0, 200).map(m => ({
-    role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
-    content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
-  })).filter(x => x.content)
+  // 2) IA (só se não existir classificação melhor)
+  try {
+    const history = (items || []).slice(0, 200).map(m => ({
+      role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
+      content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
+    })).filter(x => x.content);
 
-  // heurística primeiro
-  let best = quickHeuristicStage(history)
-
-  const needAI = !(best && (best.stage === "Lead Quente" || best.stage === "Lead") && best.confidence >= 0.75)
-
-  if (needAI) {
     const r = await fetch(BACKEND() + "/api/ai/classify", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(history.length ? { history } : { text: (state.lastMsg.get(chatid)||"").toString() }),
-    })
-    if (r.ok) {
-      const data = await r.json()
-      data.stage = migrateStageLabel(data.stage)
-      if (!best || (data.confidence || 0) > (best.confidence || 0)) best = data
+      body: JSON.stringify(history.length ? { history } : { text: state.lastMsg.get(chatid) || "" }),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    const data = await r.json(); // {stage, confidence, reason}
+
+    setStage(chatid, { stage: data.stage, confidence: data.confidence, reason: data.reason });
+
+    // Atualiza pill se o chat atual for este
+    if (state.current && (state.current.wa_chatid || state.current.chatid || state.current.wa_fastid || state.current.wa_id) === chatid) {
+      upsertAIPill(getStage(chatid).stage, getStage(chatid).confidence, getStage(chatid).reason);
     }
+  } catch (e) {
+    console.warn("IA classify falhou:", e?.message || e);
   }
-
-  if (!best) best = { stage:"Contatos", confidence:0.6, reason:"Fallback" }
-
-  state.aiStage.set(chatid, best)
-  writeAIToLocal(chatid, best)
-  upsertAIPill(best.stage, best.confidence, best.reason)
-
-  const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
-  if (card) upsertAICardBadge(card, best.stage)
-
-  if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
 }
 
-/* ========= RENDER “CLÁSSICO” ========= */
-function renderMessages(msgs) {
-  const pane = $("#messages")
-  pane.innerHTML = ""
-  if (msgs.length === 0) {
-    pane.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">💬</div>
-        <h3>Nenhuma mensagem</h3>
-        <p>Esta conversa ainda não possui mensagens</p>
-      </div>
-    `
-    return
+async function classifyAllChatsInBackground(items) {
+  const tasks = (items || []).map(ch => async () => {
+    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
+    if (!chatid) return;
+
+    // se já temos classificação persistida, não reprocessa
+    if (getStage(chatid)) return;
+
+    try {
+      const data = await api("/api/messages", {
+        method: "POST",
+        body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
+      });
+      const msgs = Array.isArray(data?.items) ? data.items : [];
+      await classifyAndPersist(chatid, msgs);
+    } catch (e) {
+      // ignora
+    }
+  });
+
+  // roda com limite e de forma não bloqueante
+  const CHUNK = 10;
+  for (let i = 0; i < tasks.length; i += CHUNK) {
+    const slice = tasks.slice(i, i + CHUNK);
+    await runLimited(slice, 5);
+    await new Promise((r) => rIC(r));
   }
-  msgs.forEach((m) => {
-    const me = m.fromMe || m.fromme || m.from_me || false
-    const el = document.createElement("div")
-    el.className = "msg " + (me ? "me" : "you")
-    const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "[mensagem]"
-    const who = m.senderName || m.pushName || ""
-    const ts = m.messageTimestamp || m.timestamp || ""
-    el.innerHTML = `${escapeHtml(text)}<small>${escapeHtml(who)} • ${formatTime(ts)}</small>`
-    pane.appendChild(el)
-  })
-  pane.scrollTop = pane.scrollHeight
 }
 
 /* ========= SEND ========= */
 async function sendNow() {
-  const number = $("#send-number").value.trim()
-  const text = $("#send-text").value.trim()
-  const btnEl = $("#btn-send")
-  if (!number || !text) return
+  const number = $("#send-number").value.trim();
+  const text = $("#send-text").value.trim();
+  const btnEl = $("#btn-send");
 
-  btnEl.disabled = true
+  if (!number || !text) return;
+
+  btnEl.disabled = true;
   btnEl.innerHTML =
-    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
 
   try {
-    await api("/api/send-text", { method: "POST", body: JSON.stringify({ number, text }) })
-    $("#send-text").value = ""
+    await api("/api/send-text", {
+      method: "POST",
+      body: JSON.stringify({ number, text }),
+    });
+    $("#send-text").value = "";
+
     if (state.current && (state.current.wa_chatid || state.current.chatid) === number) {
-      setTimeout(() => loadMessages(number), 500)
+      setTimeout(() => loadMessages(number), 500);
     }
   } catch (e) {
-    alert(e.message || "Falha ao enviar mensagem")
+    alert(e.message || "Falha ao enviar mensagem");
   } finally {
-    btnEl.disabled = false
+    btnEl.disabled = false;
     btnEl.innerHTML =
-      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>'
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
   }
 }
 
 /* ========= BOOT ========= */
 document.addEventListener("DOMContentLoaded", () => {
-  $("#btn-login").onclick = doLogin
-  $("#btn-logout").onclick = () => { localStorage.clear(); location.reload() }
-  $("#btn-send").onclick = sendNow
+  $("#btn-login").onclick = doLogin;
+  $("#btn-logout").onclick = () => {
+    localStorage.clear();
+    location.reload();
+  };
+  $("#btn-send").onclick = sendNow;
   $("#btn-refresh").onclick = () => {
     if (state.current) {
-      const chatid = state.current.wa_chatid || state.current.chatid
-      loadMessages(chatid)
+      const chatid = state.current.wa_chatid || state.current.chatid;
+      loadMessages(chatid);
     } else {
-      loadChats()
+      loadChats();
     }
-  }
+  };
 
-  const backBtn = document.getElementById("btn-back-mobile")
-  if (backBtn) backBtn.onclick = () => setMobileMode("list")
+  const backBtn = document.getElementById("btn-back-mobile");
+  if (backBtn) backBtn.onclick = () => setMobileMode("list");
 
   $("#send-text").addEventListener("keypress", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendNow() }
-  })
-  $("#token").addEventListener("keypress", (e) => {
-    if (e.key === "Enter") { e.preventDefault(); doLogin() }
-  })
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendNow();
+    }
+  });
 
-  ensureRoute()
-})
+  $("#token").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      doLogin();
+    }
+  });
+
+  ensureRoute();
+});
