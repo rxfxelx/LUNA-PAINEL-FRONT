@@ -156,7 +156,6 @@ async function apiCRMList(stage, limit=100, offset=0){
 async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
-/* ======= DESATIVADO: não renderiza a barra CRM ======= */
 function ensureCRMBar(){ /* no-op: escondido por padrão */ }
 async function refreshCRMCounters(){
   try{
@@ -188,7 +187,6 @@ async function loadCRMStage(stage){
     refreshCRMCounters()
   }
 }
-/* ======= DESATIVADO: não cria botões no card ======= */
 function attachCRMControlsToCard(cardEl, chatObj){ return }
 
 /* ========= LOGIN ========= */
@@ -230,8 +228,8 @@ function switchToApp() {
   hide("#login-view")
   show("#app-view")
   setMobileMode("list")
-  ensureCRMBar() // no-op
-  ensureStageTabs() // abas de classificação
+  ensureCRMBar()
+  ensureStageTabs()
   loadChats()
 }
 
@@ -357,7 +355,6 @@ async function loadChats() {
       refreshStageCounters()
     } catch {}
 
-    // opcional: sincroniza contadores CRM (silencioso)
     try {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 500 }) })
       refreshCRMCounters()
@@ -380,7 +377,7 @@ async function progressiveRenderChats(chats) {
     return
   }
 
-  const BATCH = 14 // ligeiro aumento pra encher a tela mais rápido
+  const BATCH = 14
   for (let i = 0; i < chats.length; i += BATCH) {
     const slice = chats.slice(i, i + BATCH)
     slice.forEach((ch) => appendChatSkeleton(list, ch))
@@ -438,7 +435,7 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(main)
   list.appendChild(el)
 
-  attachCRMControlsToCard(el, ch) // no-op
+  attachCRMControlsToCard(el, ch)
 }
 
 function hydrateChatCard(ch) {
@@ -507,10 +504,10 @@ async function prefetchCards(items) {
     }
   })
 
-  const CHUNK = 16 // um pouco maior pra reduzir “idas e vindas”
+  const CHUNK = 16
   for (let i = 0; i < tasks.length; i += CHUNK) {
     const slice = tasks.slice(i, i + CHUNK)
-    await runLimited(slice, 8) // limite levemente maior
+    await runLimited(slice, 8)
     await new Promise((r) => rIC(r))
   }
 }
@@ -558,7 +555,6 @@ async function loadMessages(chatid) {
   pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>"
 
   try {
-    // ↑↑ agora pedimos até 200 para IA ter mais contexto
     const data = await api("/api/messages", {
       method: "POST",
       body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
@@ -572,7 +568,6 @@ async function loadMessages(chatid) {
       .trim()
     state.lastMsg.set(chatid, pv)
 
-    /* === IA: classificar + histerese + votação e salvar em cache local === */
     try {
       await classifyAndPersist(chatid, items)
       refreshStageCounters()
@@ -599,7 +594,7 @@ async function progressiveRenderMessages(msgs) {
     return
   }
 
-  const BATCH = 12 // um pouco maior = menos repaints
+  const BATCH = 12
   for (let i = 0; i < msgs.length; i += BATCH) {
     const slice = msgs.slice(i, i + BATCH)
     slice.forEach((m) => appendMessageBubble(pane, m))
@@ -623,7 +618,7 @@ function appendMessageBubble(pane, m) {
   pane.appendChild(el)
 }
 
-/* ========= IA — PILL + CLASSIFICAÇÃO (estável) ========= */
+/* ========= IA — PILL + CLASSIFICAÇÃO ========= */
 function upsertAIPill(stage, confidence, reason) {
   let pill = document.getElementById("ai-pill")
   if (!pill) {
@@ -644,7 +639,7 @@ function upsertAIPill(stage, confidence, reason) {
   pill.title = reason || ""
 }
 
-// hash simples do histórico para evitar reprocessar sem mudanças
+// hash simples do histórico
 function makeTranscriptKey(items) {
   if (!Array.isArray(items) || !items.length) return "empty"
   const lastTs = items[0]?.messageTimestamp || items[0]?.timestamp || 0
@@ -653,23 +648,45 @@ function makeTranscriptKey(items) {
   return `${len}:${lastTs}:${tail.length}`
 }
 
-// heurística leve (barata) antes de chamar IA – gera voto
+// === Heurística nova: Contatos só quando sem resposta, ou 1 resposta sem interesse ===
 function heuristicStage(items) {
-  const txts = (items || []).map(m =>
+  const texts = (items || []).map(m =>
     (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toLowerCase()
   )
+  const userMsgs = (items || []).filter(m => !(m.fromMe || m.fromme || m.from_me))
+  const agentMsgs = (items || []).filter(m =>  (m.fromMe || m.fromme || m.from_me))
+
+  const userCount = userMsgs.length
+  const agentCount = agentMsgs.length
 
   const hotHints = [
     "vou te passar para", "vou encaminhar", "encaminhando seu contato",
     "alguém vai falar com você", "o time comercial vai te chamar",
     "o setor vai entrar em contato", "vou pedir para alguém te chamar", "vou transferir",
   ]
-  if (txts.some(t => hotHints.some(h => t.includes(h)))) return { stage: "lead_quente", conf: 0.75 }
+  if (texts.some(t => hotHints.some(h => t.includes(h)))) {
+    return { stage: "lead_quente", conf: 0.80 }
+  }
 
   const qRegex = /(\?|como|quanto|quando|onde|prazo|valor|preço|preco|garantia|demonstra(ç|c)ão|mostra|funciona)/
-  if (txts.some(t => qRegex.test(t))) return { stage: "lead", conf: 0.65 }
+  const interestHints = ["quero", "tenho interesse", "me interessa", "pode enviar", "pode me mostrar", "gostaria"]
 
-  return { stage: "contatos", conf: 0.45 }
+  const userHasQuestion = userMsgs.some(m => {
+    const t = (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toLowerCase()
+    return qRegex.test(t) || interestHints.some(h => t.includes(h))
+  })
+
+  // CONTATOS: sem resposta do cliente, OU apenas 1 resposta e sem interesse
+  if (userCount === 0) return { stage: "contatos", conf: 0.55 }
+  if (userCount === 1 && !userHasQuestion) return { stage: "contatos", conf: 0.52 }
+
+  // LEAD: cliente interagindo (>=2 msgs) OU 1 msg já com pergunta/interesse
+  if (userCount >= 2 || (userCount === 1 && userHasQuestion)) {
+    return { stage: "lead", conf: userHasQuestion ? 0.70 : 0.62 }
+  }
+
+  // fallback
+  return { stage: "contatos", conf: 0.50 }
 }
 
 async function classifyAndPersist(chatid, items) {
@@ -682,7 +699,7 @@ async function classifyAndPersist(chatid, items) {
   const h = heuristicStage(items)
   voteStage(chatid, { stage: h.stage, confidence: h.conf, reason: "Heurística local", key })
 
-  // 2) IA vota (só se mudou)
+  // 2) IA vota
   try {
     const history = (items || []).slice(0, 200).map(m => ({
       role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
