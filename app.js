@@ -70,25 +70,20 @@ const state = {
   unread: new Map(), // chatid => count
   loadingChats: false,
 
-  // NOVO: classificação automática em memória + cache local
-  aiStage: new Map(),     // chatid => { stage, confidence, reason, ts }
-  currentTab: "Geral",    // "Geral" | "Lead" | "Lead Qualificado" | "Lead Quente" | "Prospectivo Cliente" | "Cliente"
+  // IA
+  aiStage: new Map(),                // chatid => { stage, confidence, reason, ts }
+  currentTab: "Geral",               // "Geral" | "Lead" | "Lead Quente" | "Cliente"
 }
 
 function aiCacheKey(chatid){ return `luna_ai_stage::${chatid}` }
 function readAIFromLocal(chatid){
-  try {
-    const raw = localStorage.getItem(aiCacheKey(chatid))
-    if (!raw) return null
-    return JSON.parse(raw)
-  } catch { return null }
+  try { const raw = localStorage.getItem(aiCacheKey(chatid)); return raw ? JSON.parse(raw) : null } catch { return null }
 }
 function writeAIToLocal(chatid, obj){
   try { localStorage.setItem(aiCacheKey(chatid), JSON.stringify({ ...obj, ts: Date.now() })) } catch {}
 }
 
-/* ========= CRM (ACRÉSCIMOS) ========= */
-// Mantidos para compatibilidade, mas não usamos aqui como fonte das abas
+/* ========= CRM (mantido p/ compat, não usado para abas) ========= */
 const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
 async function apiCRMViews(){ return api("/api/crm/views") }
 async function apiCRMList(stage, limit=100, offset=0){
@@ -103,8 +98,6 @@ async function apiCRMSetStatus(chatid, stage, notes=""){
 function ensureCRMBar(){
   const host = document.querySelector(".topbar")
   if(!host) return
-
-  // se já existir, não recria
   if (host.querySelector(".crm-tabs")) return
 
   const wrap = document.createElement("div")
@@ -113,23 +106,19 @@ function ensureCRMBar(){
   wrap.style.gap = "8px"
   wrap.style.alignItems = "center"
 
-  // Helper p/ criar botão com mesmo design (.btn)
   function makeBtn(label){
     const b = document.createElement("button")
     b.className = "btn"
     b.textContent = label
     b.dataset.tab = label
-    b.onclick = () => {
-      selectTab(label)
-    }
+    b.onclick = () => { selectTab(label) }
     return b
   }
 
-  // Abas: Geral + 5 estágios da IA
-  const tabs = ["Geral","Lead","Lead Qualificado","Lead Quente","Prospectivo Cliente","Cliente"]
+  // Somente 3 categorias
+  const tabs = ["Geral","Lead","Lead Quente","Cliente"]
   tabs.forEach(t => wrap.appendChild(makeBtn(t)))
 
-  // contador opcional (não obrigatório)
   const counters = document.createElement("div")
   counters.className = "crm-counters"
   counters.style.fontSize = "12px"
@@ -139,30 +128,19 @@ function ensureCRMBar(){
   host.appendChild(wrap)
   host.appendChild(counters)
 
-  // marca "Geral" como ativo inicialmente
   setActiveTab("Geral")
 }
 
-// altera visual ativo e renderiza
 function selectTab(name){
   state.currentTab = name || "Geral"
   setActiveTab(state.currentTab)
-  if (state.currentTab === "Geral") {
-    // re-render da lista geral (mantendo seu fluxo)
-    renderChatsFiltered(null)
-  } else {
-    // render filtrado pela classificação da IA
-    renderChatsFiltered(state.currentTab)
-  }
+  renderChatsFiltered(state.currentTab === "Geral" ? null : state.currentTab)
 }
 
 function setActiveTab(name){
   document.querySelectorAll(".crm-tabs .btn").forEach(btn => {
-    if (btn.dataset.tab === name) {
-      btn.classList.add("active")
-    } else {
-      btn.classList.remove("active")
-    }
+    if (btn.dataset.tab === name) btn.classList.add("active")
+    else btn.classList.remove("active")
   })
 }
 
@@ -174,13 +152,10 @@ function getAIStageForChat(chatid){
   return null
 }
 
-// Re-render da lista levando em conta a aba ativa
 async function renderChatsFiltered(stageLabel){
   const list = $("#chat-list")
-  // se não há chats carregados ainda, ignora
   if (!Array.isArray(state.chats) || !state.chats.length) return
 
-  // filtra se necessário
   let items = state.chats.slice()
   if (stageLabel) {
     items = items.filter(ch => {
@@ -190,13 +165,12 @@ async function renderChatsFiltered(stageLabel){
     })
   }
 
-  // render progressivo dos itens filtrados
   list.innerHTML = "<div class='hint'>Carregando...</div>"
   await progressiveRenderChats(items)
   await prefetchCards(items)
 }
 
-/* ======= (Antigos counters do CRM remoto — mantidos, mas opcionais) ======= */
+/* ======= Counters antigos (opcional) ======= */
 async function refreshCRMCounters(){
   try{
     const data=await apiCRMViews()
@@ -229,10 +203,8 @@ async function loadCRMStage(stage){
   }
 }
 
-/* ======= DESATIVADO: não cria botões no card ======= */
-function attachCRMControlsToCard(cardEl, chatObj){
-  return; // no-op: sem botões extras nos cards
-}
+/* ======= Sem botões extras nos cards ======= */
+function attachCRMControlsToCard(){ return }
 
 /* ========= LOGIN ========= */
 async function doLogin() {
@@ -273,7 +245,7 @@ function switchToApp() {
   hide("#login-view")
   show("#app-view")
   setMobileMode("list")
-  ensureCRMBar() // agora cria as abas
+  ensureCRMBar()
   loadChats()
 }
 
@@ -321,13 +293,13 @@ async function loadChats() {
     const items = Array.isArray(data?.items) ? data.items : []
     state.chats = items
 
-    // Mostra a lista de acordo com a aba atual (Geral inicialmente)
+    // Mostra conforme aba atual
     await renderChatsFiltered(state.currentTab === "Geral" ? null : state.currentTab)
 
     // Completa avatar/preview
     await prefetchCards(items)
 
-    // Classifica automaticamente (não bloqueia)
+    // Classifica todos automaticamente (não bloqueia UI)
     await autoClassifyAll(items)
   } catch (e) {
     console.error(e)
@@ -337,7 +309,7 @@ async function loadChats() {
   }
 }
 
-// Renderiza chats em lotes pequenos para aparecer rápido
+// Renderiza chats em lotes
 async function progressiveRenderChats(chats) {
   const list = $("#chat-list")
   list.innerHTML = ""
@@ -347,7 +319,7 @@ async function progressiveRenderChats(chats) {
     return
   }
 
-  const BATCH = 14 // ligeiro aumento pra encher a tela mais rápido
+  const BATCH = 14
   for (let i = 0; i < chats.length; i += BATCH) {
     const slice = chats.slice(i, i + BATCH)
     slice.forEach((ch) => appendChatSkeleton(list, ch))
@@ -405,7 +377,7 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(main)
   list.appendChild(el)
 
-  attachCRMControlsToCard(el, ch) // no-op
+  attachCRMControlsToCard(el, ch)
 }
 
 function hydrateChatCard(ch) {
@@ -429,7 +401,6 @@ function hydrateChatCard(ch) {
   }
   if (cache.name) nameEl.textContent = cache.name
 
-  // badge do estágio (se já houver cache IA)
   const cached = readAIFromLocal(chatid)
   if (cached?.stage) upsertAICardBadge(el, cached.stage)
 }
@@ -478,46 +449,42 @@ async function prefetchCards(items) {
     }
   })
 
-  const CHUNK = 16 // um pouco maior pra reduzir “idas e vindas”
+  const CHUNK = 16
   for (let i = 0; i < tasks.length; i += CHUNK) {
     const slice = tasks.slice(i, i + CHUNK)
-    await runLimited(slice, 8) // limite levemente maior
+    await runLimited(slice, 8)
     await new Promise((r) => rIC(r))
   }
 }
 
-// Classificar todos os chats em paralelo (limitado), sem travar a UI
+// Classificar todas as conversas (sem travar UI, com cache local de 24h)
 async function autoClassifyAll(items){
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     return async () => {
       if (!chatid) return
-      // respeita cache local (1 dia)
       const cached = readAIFromLocal(chatid)
       if (cached && Date.now() - (cached.ts||0) < 24*60*60*1000) {
         state.aiStage.set(chatid, cached)
         const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
         if (el) upsertAICardBadge(el, cached.stage)
-        // se uma aba filtrada está ativa, re-render para incluir esse card
         if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
         return
       }
-
-      // pega histórico suficiente para IA
+      // histórico
       let hist
       try {
         const data = await api("/api/messages", {
           method: "POST",
           body: JSON.stringify({ chatid, limit: 120, sort: "-messageTimestamp" }),
         })
-        const items = Array.isArray(data?.items) ? data.items : []
-        hist = items.slice(0, 120).map(m => ({
+        const arr = Array.isArray(data?.items) ? data.items : []
+        hist = arr.slice(0, 120).map(m => ({
           role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
           content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
         })).filter(x => x.content)
       } catch { hist = [] }
 
-      // chama IA
       try {
         const r = await fetch(BACKEND() + "/api/ai/classify", {
           method: "POST",
@@ -532,19 +499,15 @@ async function autoClassifyAll(items){
         const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
         if (el) upsertAICardBadge(el, data.stage)
 
-        // se o chat está aberto, mostra o pill no header
         if (state.current) {
           const curId = state.current.wa_chatid || state.current.chatid || ""
           if (curId === chatid) upsertAIPill(data.stage, data.confidence, data.reason)
         }
-
-        // atualiza a aba filtrada (se não for Geral)
         if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
-      } catch (e) { /* silencioso */ }
+      } catch {}
     }
   })
 
-  // roda com limite e cedendo tempo para UI
   const CH = 10
   for (let i = 0; i < tasks.length; i += CH) {
     const slice = tasks.slice(i, i + CH)
@@ -587,7 +550,6 @@ async function openChat(ch) {
 
   if (status) status.textContent = "Online"
 
-  // se já temos classificação no cache local, mostra no header
   const cached = readAIFromLocal(chatid)
   if (cached?.stage) upsertAIPill(cached.stage, cached.confidence || 0.5, cached.reason || "")
 }
@@ -597,7 +559,6 @@ async function loadMessages(chatid) {
   pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>"
 
   try {
-    // ↑↑ agora pedimos até 200 para IA ter mais contexto
     const data = await api("/api/messages", {
       method: "POST",
       body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
@@ -611,7 +572,6 @@ async function loadMessages(chatid) {
       .trim()
     state.lastMsg.set(chatid, pv)
 
-    // se não tínhamos classificação ainda, tenta agora (não bloqueia)
     if (!state.aiStage.has(chatid) && !readAIFromLocal(chatid)) {
       classifyCurrentChatFromItems(chatid, items).catch(()=>{})
     }
@@ -637,7 +597,7 @@ async function progressiveRenderMessages(msgs) {
     return
   }
 
-  const BATCH = 12 // um pouco maior = menos repaints
+  const BATCH = 12
   for (let i = 0; i < msgs.length; i += BATCH) {
     const slice = msgs.slice(i, i + BATCH)
     slice.forEach((m) => appendMessageBubble(pane, m))
@@ -699,7 +659,6 @@ function upsertAICardBadge(cardEl, stage){
   tag.textContent = stage
 }
 
-// Busca mais histórico (se precisar) e chama IA para o chat aberto (fallback)
 async function classifyCurrentChatFromItems(chatid, items){
   let full = Array.isArray(items) ? items.slice() : []
   if (full.length < 120) {
@@ -733,7 +692,6 @@ async function classifyCurrentChatFromItems(chatid, items){
   const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`)
   if (card) upsertAICardBadge(card, data.stage)
 
-  // se aba filtrada estiver ativa, re-render p/ refletir inclusão/remoção
   if (state.currentTab !== "Geral") renderChatsFiltered(state.currentTab)
 }
 
