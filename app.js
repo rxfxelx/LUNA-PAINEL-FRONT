@@ -226,18 +226,20 @@ function hideSplash() {
 
 /* ========= LOGIN ========= */
 async function doLogin() {
-  const token = $("#token").value.trim()
+  const token = $("#token")?.value?.trim()
   const msgEl = $("#msg")
   const btnEl = $("#btn-login")
 
   if (!token) {
-    msgEl.textContent = "Por favor, cole o token da instância"
+    if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"
     return
   }
 
-  msgEl.textContent = ""
-  btnEl.disabled = true
-  btnEl.innerHTML = "<span>Conectando...</span>"
+  if (msgEl) msgEl.textContent = ""
+  if (btnEl) {
+    btnEl.disabled = true
+    btnEl.innerHTML = "<span>Conectando...</span>"
+  }
 
   try {
     const r = await fetch(BACKEND() + "/api/auth/login", {
@@ -251,11 +253,13 @@ async function doLogin() {
     switchToApp()
   } catch (e) {
     console.error(e)
-    msgEl.textContent = "Token inválido. Verifique e tente novamente."
+    if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
   } finally {
-    btnEl.disabled = false
-    btnEl.innerHTML =
-      '<span>Entrar no Sistema</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'
+    if (btnEl) {
+      btnEl.disabled = false
+      btnEl.innerHTML =
+        '<span>Entrar no Sistema</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'
+    }
   }
 }
 
@@ -723,7 +727,7 @@ function makeTranscriptKey(items) {
   return `${len}:${lastTs}:${tail.length}`
 }
 
-/* ========= CLASSIFICAÇÃO POR REGRAS ========= */
+/* ========= CLASSIFICAÇÃO POR REGRAS (EXPANDIDA) ========= */
 function norm(s) {
   return String(s || "")
     .toLowerCase()
@@ -733,53 +737,104 @@ function norm(s) {
     .trim()
 }
 
-// Regras pedidas:
-// - Lead Quente: quando nós enviamos algo indicando encaminhar/transferir/colocar em contato.
-// - Lead: quando nós enviamos "Sim, pode continuar" (variações).
-// - Contatos: padrão (qualquer outro caso).
+/*
+Regras pedidas (sem IA):
+- Lead Quente (transferência/encaminhamento) quando NÓS (fromMe=true) mandamos algo indicando:
+  transferir, encaminhar, passar contato/número, equipe/time/consultor/especialista vai chamar, abrir chamado etc.
+- Lead quando NÓS mandamos "sim, pode continuar" (e variações).
+- Contatos é o padrão.
+
+Abaixo ampliamos MUITO o vocabulário para reduzir falso negativo/positivo.
+Incluímos grafias alternativas, sem acento, abreviações, erros comuns, e expressões equivalentes.
+Também evitamos falsos positivos de menu/cardápio/catálogos (mensagem automática de link).
+*/
+const HOT_HINTS = [
+  // verbos de encaminhar
+  "vou te passar para", "vou te passar pro", "vou passar voce para", "vou passar você para",
+  "vou passar para o setor", "vou passar para o departamento", "vou passar para o time",
+  "vou passar seu contato", "vou passar o seu contato", "vou passar seu numero",
+  "vou passar o seu numero", "vou repassar seu contato", "repassei seu contato",
+  "enviei seu contato", "vou enviar seu contato", "enviarei seu contato",
+  "vou encaminhar", "encaminhando seu contato", "encaminhei seu contato",
+  "encaminhei seu numero", "encaminhei seu número", "encaminhar seu contato",
+  "estou encaminhando", "encaminharei",
+
+  // colocar em contato / conectar
+  "vou te colocar em contato", "vou colocar voce em contato", "vou colocar você em contato",
+  "colocar voce em contato", "colocar você em contato", "vou te conectar", "vou te por em contato",
+  "te coloco em contato",
+
+  // outra pessoa/area/consultor
+  "o time comercial vai te chamar", "o time vai te chamar", "nossa equipe vai entrar em contato",
+  "a equipe vai entrar em contato", "o setor vai entrar em contato",
+  "o atendente vai falar com voce", "o atendente vai falar com você",
+  "um atendente vai te chamar", "um consultor vai te chamar",
+  "o consultor vai te chamar", "o especialista vai te chamar",
+  "o responsavel vai te chamar", "o responsável vai te chamar",
+  "o pessoal do comercial te chama", "suporte vai te chamar",
+  "vendas vai te chamar", "pre-vendas vai te chamar", "pré-vendas vai te chamar",
+
+  // pedir para alguém chamar
+  "vou pedir para alguem te chamar", "vou pedir para alguém te chamar",
+  "vou pedir pra alguem te chamar", "vou pedir pra alguém te chamar",
+  "vou pedir pro pessoal te chamar", "vou pedir para o time te chamar",
+  "ja pedi para te chamarem", "já pedi para te chamarem",
+
+  // transferir (formas)
+  "vou transferir", "estou transferindo", "transferencia para o setor",
+  "transferência para o setor", "transferi sua solicitacao", "transferi sua solicitação",
+  "direcionei seu contato", "direcionando seu contato", "direcionar seu contato",
+
+  // confirmações
+  "daqui a pouco te chamam", "em breve vao entrar em contato", "em breve vão entrar em contato",
+  "abrirei um chamado", "vou abrir um chamado", "abrir um ticket", "abrirei um ticket",
+].map(norm)
+
+const HOT_NEGATIVE_GUARDS = [
+  // Evitar confundir com mensagens automáticas de cardápio/catálogo/menus
+  "cardapio", "cardápio", "menu", "catalogo", "catálogo", "ver menu", "ver cardapio",
+  "acesse o menu", "acesse o cardapio", "acesse o cardápio", "acesse nosso catalogo",
+  "acesse nosso catálogo", "cardapio online", "link do menu", "nosso menu",
+  "veja o menu", "veja o cardapio", "veja o catálogo",
+].map(norm)
+
+const LEAD_OK_PATTERNS = [
+  // confirmação direta
+  "sim, pode continuar", "sim pode continuar", "pode continuar",
+  "ok, pode continuar", "ok pode continuar", "pode seguir",
+  "sim, pode seguir", "sim pode seguir", "vamos continuar",
+  "podemos continuar", "pode prosseguir", "ok vamos prosseguir",
+  "segue", "segue por favor", "pode mostrar", "pode me mostrar",
+  "pode enviar", "pode mandar",
+  // variações com emojis/complementos
+  "pode continuar 👍", "pode continuar sim", "sim, pode continuar sim",
+  "pode continuar por favor", "pode continuar pf", "pode continuar pff",
+  // abreviações/erros comuns
+  "pode cont", "pode cnt", "pode seg", "pode prosseg", "pode proseguir",
+].map(norm)
+
 function classifyByRules(items) {
   const msgs = Array.isArray(items) ? items : []
   let stage = "contatos"
 
-  const hotHints = [
-    "vou te passar para",
-    "vou te passar pro",
-    "vou encaminhar",
-    "encaminhando seu contato",
-    "colocar voce em contato",
-    "colocar você em contato",
-    "o time comercial vai te chamar",
-    "nossa equipe vai entrar em contato",
-    "o setor vai entrar em contato",
-    "vou pedir para alguem te chamar",
-    "vou transferir",
-    "vou passar seu numero",
-    "vou passar o seu numero",
-    "vou passar seu número",
-    "vou passar o seu número",
-    "vou repassar seu contato",
-    "repassei seu contato",
-  ].map(norm)
-
-  const okPatterns = [
-    "sim, pode continuar",
-    "sim pode continuar",
-    "pode continuar",
-  ].map(norm)
-
   for (const m of msgs) {
     const me = m.fromMe || m.fromme || m.from_me || false
     const text = norm(m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "")
-    if (!text) continue
+    if (!text || !me) continue
 
-    if (me) {
-      if (hotHints.some(h => text.includes(h))) {
-        stage = "lead_quente"
-        break
-      }
-      if (okPatterns.some(p => text === p || text.startsWith(p))) {
-        stage = maxStage(stage, "lead")
-      }
+    // Guard contra "menu/cardápio" para evitar marcar como lead_quente por links automáticos
+    const hasMenuish = HOT_NEGATIVE_GUARDS.some(g => text.includes(g))
+
+    // LEAD QUENTE: qualquer hint de transferência/encaminhamento etc.
+    if (!hasMenuish && HOT_HINTS.some(h => text.includes(h))) {
+      stage = "lead_quente"
+      break
+    }
+
+    // LEAD: confirmação de “pode continuar” e equivalentes (sem exigir exata igualdade)
+    if (LEAD_OK_PATTERNS.some(p => text === p || text.startsWith(p) || text.includes(" " + p + " "))) {
+      stage = maxStage(stage, "lead")
+      // não damos break aqui, pois uma mensagem depois pode indicar lead_quente
     }
   }
 
