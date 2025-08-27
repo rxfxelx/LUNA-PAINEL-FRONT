@@ -61,8 +61,7 @@ function escapeHtml(s) {
   )
 }
 
-/* ======== DETECÇÃO REGRAS — INTERESSE & TRANSFERÊNCIA (NOVO) ======== */
-// util: normaliza texto (tira acentos, baixa caixa, normaliza espaços)
+/* ======== DETECÇÃO REGRAS — INTERESSE & TRANSFERÊNCIA (SEM IA) ======== */
 function norm(s="") {
   return String(s)
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -70,7 +69,6 @@ function norm(s="") {
     .replace(/\s+/g, " ")
     .trim()
 }
-// pega texto "plano" da mensagem
 function msgText(m){
   return norm(
     m?.text || m?.caption || m?.message?.text || m?.message?.conversation || m?.body || ""
@@ -79,15 +77,14 @@ function msgText(m){
 // padrões de interesse do CLIENTE (user)
 const INTEREST_PATTERNS = {
   perguntas: [
-    /\?/,
-    /\bcomo\b/, /\bquanto\b/, /\bquando\b/, /\bonde\b/, /\bprazo\b/,
-    /\bvalor\b/, /\bpreco\b/, /\bpreço\b/, /\bgarantia\b/, /\bentrega\b/, /\bfunciona\b/,
-    /\bdemonstracao\b/, /\bdemonstrac?ao\b/, /\bmostrar?\b/, /\bcatalogo\b/, /\bcardapio\b/
+    /\?/, /\bcomo\b/, /\bquanto\b/, /\bquando\b/, /\bonde\b/, /\bprazo\b/,
+    /\bvalor\b/, /\bpreco\b/, /\bpreço\b/, /\bgarantia\b/, /\bentrega\b/,
+    /\bfunciona\b/, /\bdemonstrac?ao\b/, /\bmostrar?\b/, /\bcatalogo\b/, /\bcardapio\b/
   ],
   intencao: [
-    /\bquero\b/, /\bgostaria\b/, /\btenho interesse\b/,
-    /\bme interessa\b/, /\bpode enviar\b/, /\bpode me mostrar\b/, /\baceito\b/,
-    /\btopo\b/, /\btenho duvida(s)?\b/
+    /\bquero\b/, /\bgostaria\b/, /\btenho interesse\b/, /\bme interessa\b/,
+    /\bpode enviar\b/, /\bpode me mostrar\b/, /\baceito\b/, /\btopo\b/,
+    /\btenho duvida(s)?\b/
   ],
   confirmacaoLeve: [
     /\bbeleza\b/, /\bshow\b/, /\bperfeito\b/, /\bok\b/, /\bmanda\b/, /\bmanda sim\b/
@@ -132,18 +129,16 @@ const state = {
   unread: new Map(), // chatid => count
   loadingChats: false,
 
-  // === Classificação (persistente) ===
-  // chatid -> {stage, confidence, reason, at, votes:{contatos,lead,lead_quente}, lastKey}
+  // === Classificação (persistente no navegador) ===
+  // chatid -> {stage, confidence, reason, at, lastKey}
   aiStage: new Map(),
   aiStageLoaded: false,
 }
 
-/* ========= STAGES (Contatos, Lead, Lead Quente) ========= */
+/* ========= STAGES ========= */
 const STAGES = ["contatos", "lead", "lead_quente"]
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" }
 const STAGE_RANK  = { contatos: 0, lead: 1, lead_quente: 2 }
-const MIN_CONF    = { lead: 0.60, lead_quente: 0.70 }   // histerese por confiança
-const MIN_VOTES   = { lead: 2,    lead_quente: 2 }      // histerese por votos
 
 function normalizeStage(s) {
   const k = String(s || "").toLowerCase().trim()
@@ -175,36 +170,64 @@ function getStage(chatid) {
   loadStageCache()
   return state.aiStage.get(chatid) || null
 }
-function computeStageFromVotes(prevStage, votes, confHint) {
-  const cur = normalizeStage(prevStage || "contatos")
-  let best = cur
-  if ((votes.lead_quente || 0) >= MIN_VOTES.lead_quente && (confHint || 0) >= MIN_CONF.lead_quente)
-    best = maxStage(best, "lead_quente")
-  if ((votes.lead || 0) >= MIN_VOTES.lead && (confHint || 0) >= MIN_CONF.lead)
-    best = maxStage(best, "lead")
-  return best
-}
-function voteStage(chatid, { stage, confidence, reason, key }) {
-  loadStageCache()
-  const record = getStage(chatid) || {
-    stage: "contatos",
-    confidence: 0,
-    reason: "",
-    at: 0,
-    votes: { contatos: 0, lead: 0, lead_quente: 0 },
-    lastKey: null,
+
+/* ======== CLASSIFICAÇÃO SÓ POR REGRAS ======== */
+function classifyByRules(items){
+  const all = Array.isArray(items) ? items : []
+  const userMsgs   = all.filter(m => !(m.fromMe || m.fromme || m.from_me))
+  const agentMsgs  = all.filter(m =>  (m.fromMe || m.fromme || m.from_me))
+
+  // Lead Quente se NÓS sinalizamos transferência/encaminhamento
+  if (isTransferredByAgent(agentMsgs)) {
+    return { stage: "lead_quente", confidence: 0.9, reason: "Transferência detectada" }
   }
-  const st = normalizeStage(stage)
-  record.votes[st] = (record.votes[st] || 0) + 1
-  const promoted = computeStageFromVotes(record.stage, record.votes, confidence)
-  record.stage = maxStage(record.stage, promoted) // nunca rebaixa
-  record.confidence = Math.max(record.confidence || 0, confidence || 0)
-  if (reason) record.reason = reason
-  record.at = Date.now()
-  if (key) record.lastKey = key
-  state.aiStage.set(chatid, record)
+
+  // Contatos = cliente ainda não engajou (0 msg) OU só 1 msg sem interesse
+  const interest = scoreInterest(userMsgs)
+  if (userMsgs.length === 0) {
+    return { stage: "contatos", confidence: 0.6, reason: "Sem resposta do cliente" }
+  }
+  if (userMsgs.length === 1 && interest < INTEREST_THRESHOLD) {
+    return { stage: "contatos", confidence: 0.58, reason: "Uma mensagem sem interesse claro" }
+  }
+
+  // Lead = demonstrou interesse (pontuação suficiente)
+  if (interest >= INTEREST_THRESHOLD) {
+    const conf = Math.min(0.85, 0.55 + 0.1 * interest)
+    return { stage: "lead", confidence: conf, reason: `Interesse detectado (score=${interest})` }
+  }
+
+  // fallback: se está conversando mas sem sinais fortes, trata como lead
+  if (userMsgs.length >= 2) {
+    return { stage: "lead", confidence: 0.62, reason: "Troca de mensagens sem transferência" }
+  }
+
+  return { stage: "contatos", confidence: 0.55, reason: "Sem sinais suficientes" }
+}
+
+/* ======== PERSISTÊNCIA LOCAL (nunca rebaixa) ======== */
+function makeTranscriptKey(items) {
+  if (!Array.isArray(items) || !items.length) return "empty"
+  const lastTs = items[0]?.messageTimestamp || items[0]?.timestamp || 0
+  const len = items.length
+  const tail = (items[0]?.text || items[0]?.body || "").slice(0, 64)
+  return `${len}:${lastTs}:${tail.length}`
+}
+
+function promoteAndPersist(chatid, {stage, confidence, reason, key}) {
+  loadStageCache()
+  const prev = getStage(chatid) || { stage: "contatos", confidence: 0, reason: "", at: 0, lastKey: null }
+  const nextStage = maxStage(prev.stage, stage) // nunca rebaixa
+  const rec = {
+    stage: nextStage,
+    confidence: Math.max(prev.confidence || 0, confidence || 0),
+    reason: reason || prev.reason || "",
+    at: Date.now(),
+    lastKey: key || prev.lastKey || null,
+  }
+  state.aiStage.set(chatid, rec)
   saveStageCache()
-  return record
+  return rec
 }
 
 /* ========= CRM (mantido, mas sem botões/sem render de barra) ========= */
@@ -218,7 +241,7 @@ async function apiCRMList(stage, limit=100, offset=0){
 async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
-function ensureCRMBar(){ /* no-op: escondido por padrão */ }
+function ensureCRMBar(){ /* no-op */ }
 async function refreshCRMCounters(){
   try{
     const data=await apiCRMViews()
@@ -411,12 +434,13 @@ async function loadChats() {
     await progressiveRenderChats(items)
     await prefetchCards(items)
 
-    // classifica todas em background (regras + IA, com histerese)
+    // classifica todas em background (SOMENTE REGRAS) e atualiza contadores
     try {
       await classifyAllChatsInBackground(items)
       refreshStageCounters()
     } catch {}
 
+    // opcional: sync CRM
     try {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 500 }) })
       refreshCRMCounters()
@@ -631,7 +655,7 @@ async function loadMessages(chatid) {
     state.lastMsg.set(chatid, pv)
 
     try {
-      await classifyAndPersist(chatid, items)
+      await classifyAndPersist(chatid, items) // só REGRAS
       refreshStageCounters()
     } catch {}
   } catch (e) {
@@ -680,7 +704,7 @@ function appendMessageBubble(pane, m) {
   pane.appendChild(el)
 }
 
-/* ========= IA — PILL + CLASSIFICAÇÃO ========= */
+/* ========= BADGE DE STATUS NO HEADER ========= */
 function upsertAIPill(stage, confidence, reason) {
   let pill = document.getElementById("ai-pill")
   if (!pill) {
@@ -701,83 +725,19 @@ function upsertAIPill(stage, confidence, reason) {
   pill.title = reason || ""
 }
 
-// hash simples do histórico
-function makeTranscriptKey(items) {
-  if (!Array.isArray(items) || !items.length) return "empty"
-  const lastTs = items[0]?.messageTimestamp || items[0]?.timestamp || 0
-  const len = items.length
-  const tail = (items[0]?.text || items[0]?.body || "").slice(0, 64)
-  return `${len}:${lastTs}:${tail.length}`
-}
-
-// ======== CLASSIFICAÇÃO POR REGRAS (substitui heuristicStage) ========
-function classifyByRules(items){
-  const all = Array.isArray(items) ? items : []
-  const userMsgs   = all.filter(m => !(m.fromMe || m.fromme || m.from_me))
-  const agentMsgs  = all.filter(m =>  (m.fromMe || m.fromme || m.from_me))
-
-  // 1) Lead Quente se NÓS falamos que vamos transferir/encaminhar
-  if (isTransferredByAgent(agentMsgs)) {
-    return { stage: "lead_quente", conf: 0.9, why: "Transferência detectada" }
-  }
-
-  // 2) Contatos = cliente ainda não engajou (0 msg) OU só 1 msg sem interesse
-  const interest = scoreInterest(userMsgs)
-  if (userMsgs.length === 0) {
-    return { stage: "contatos", conf: 0.6, why: "Sem resposta do cliente" }
-  }
-  if (userMsgs.length === 1 && interest < INTEREST_THRESHOLD) {
-    return { stage: "contatos", conf: 0.58, why: "Uma mensagem sem interesse claro" }
-  }
-
-  // 3) Lead = demonstrou interesse/curiosidade (pontos suficientes)
-  if (interest >= INTEREST_THRESHOLD) {
-    const conf = Math.min(0.85, 0.55 + 0.1 * interest)
-    return { stage: "lead", conf, why: `Interesse detectado (score=${interest})` }
-  }
-
-  // 4) fallback: se está conversando mas sem sinais fortes, trata como lead
-  if (userMsgs.length >= 2) {
-    return { stage: "lead", conf: 0.62, why: "Troca de mensagens sem transferência" }
-  }
-
-  return { stage: "contatos", conf: 0.55, why: "Sem sinais suficientes" }
-}
-
+/* ========= CLASSIFICAÇÃO E PERSISTÊNCIA (SÓ REGRAS) ========= */
 async function classifyAndPersist(chatid, items) {
   const key = makeTranscriptKey(items)
   const current = getStage(chatid)
   if (current?.lastKey === key) return current
 
-  // 1) REGRAS votam primeiro
   const h = classifyByRules(items)
-  voteStage(chatid, { stage: h.stage, confidence: h.conf, reason: h.why || "Regras", key })
+  const rec = promoteAndPersist(chatid, { stage: h.stage, confidence: h.confidence, reason: h.reason, key })
 
-  // 2) IA vota (mantido)
-  try {
-    const history = (items || []).slice(0, 200).map(m => ({
-      role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
-      content: (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toString()
-    })).filter(x => x.content)
+  const curId = state.current && (state.current.wa_chatid || state.current.chatid || state.current.wa_fastid || state.current.wa_id)
+  if (curId === chatid) upsertAIPill(rec.stage, rec.confidence, rec.reason)
 
-    const r = await fetch(BACKEND() + "/api/ai/classify", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify(history.length ? { history } : { text: state.lastMsg.get(chatid) || "" }),
-    })
-    if (!r.ok) throw new Error(await r.text())
-    const data = await r.json()
-
-    const rec = voteStage(chatid, { stage: data.stage, confidence: data.confidence, reason: data.reason, key })
-
-    const curId = state.current && (state.current.wa_chatid || state.current.chatid || state.current.wa_fastid || state.current.wa_id)
-    if (curId === chatid) upsertAIPill(rec.stage, rec.confidence, rec.reason)
-
-    return rec
-  } catch (e) {
-    console.warn("IA classify falhou:", e?.message || e)
-    return getStage(chatid)
-  }
+  return rec
 }
 
 async function classifyAllChatsInBackground(items) {
