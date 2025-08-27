@@ -85,9 +85,16 @@ body {
 }
 
 .login-icon {
-  font-size: 48px;
+  /* Melhorando o estilo do ícone da luna */
   margin-bottom: 16px;
-  filter: drop-shadow(0 0 20px rgba(132, 204, 22, 0.3));
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.login-icon svg {
+  filter: drop-shadow(0 0 20px rgba(132, 204, 22, 0.4));
+  animation: moonGlow 3s ease-in-out infinite alternate;
 }
 
 .login h1 {
@@ -250,8 +257,14 @@ body {
 }
 
 .brand-icon {
-  font-size: 24px;
-  filter: drop-shadow(0 0 10px rgba(132, 204, 22, 0.3));
+  /* Melhorando o estilo do ícone no header */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand-icon svg {
+  filter: drop-shadow(0 0 8px rgba(132, 204, 22, 0.3));
 }
 
 .brand-text {
@@ -589,8 +602,14 @@ body {
 }
 
 .loading-icon {
-  font-size: 64px;
+  /* Melhorando o estilo do ícone no loading */
   margin-bottom: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.loading-icon svg {
   filter: drop-shadow(0 0 30px rgba(132, 204, 22, 0.4));
   animation: pulse 2s ease-in-out infinite;
 }
@@ -648,7 +667,17 @@ body {
   font-weight: 500;
 }
 
-/* Loading animations */
+/* ========= ANIMATIONS ========= */
+/* Adicionando animação personalizada para o ícone da lua */
+@keyframes moonGlow {
+  0% {
+    filter: drop-shadow(0 0 20px rgba(132, 204, 22, 0.4));
+  }
+  100% {
+    filter: drop-shadow(0 0 30px rgba(132, 204, 22, 0.6));
+  }
+}
+
 @keyframes spin {
   0% {
     transform: rotate(0deg);
@@ -691,26 +720,27 @@ body {
   }
 }
 
-/* Mobile responsive para loading */
-@media (max-width: 1023px) {
-  .loading-container {
-    padding: 0 16px;
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
   }
-
-  .loading-icon {
-    font-size: 48px;
-  }
-
-  .loading h2 {
-    font-size: 20px;
-  }
-
-  .loading p {
-    font-size: 14px;
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
+.chat-item {
+  animation: fadeIn 0.3s ease;
+}
+
+.msg {
+  animation: fadeIn 0.2s ease;
+}
+
 /* ========= MOBILE RESPONSIVE ========= */
+/* Melhorando a responsividade mobile */
 @media (max-width: 1023px) {
   .shell {
     grid-template-columns: 1fr;
@@ -759,6 +789,69 @@ body {
 
   .login-card {
     padding: 24px;
+    width: min(380px, 95vw);
+  }
+
+  .login h1 {
+    font-size: 28px;
+  }
+
+  .login-sub {
+    font-size: 14px;
+  }
+
+  .login-icon svg {
+    width: 56px;
+    height: 56px;
+  }
+
+  .loading-container {
+    padding: 0 16px;
+  }
+
+  .loading-icon svg {
+    width: 64px;
+    height: 64px;
+  }
+
+  .loading h2 {
+    font-size: 20px;
+  }
+
+  .loading p {
+    font-size: 14px;
+  }
+}
+
+/* Adicionando responsividade para telas muito pequenas */
+@media (max-width: 480px) {
+  .login {
+    padding: 16px;
+  }
+
+  .login-card {
+    padding: 20px;
+    width: 100%;
+    max-width: 340px;
+  }
+
+  .login h1 {
+    font-size: 24px;
+  }
+
+  .login-icon svg {
+    width: 48px;
+    height: 48px;
+  }
+
+  .btn-primary {
+    padding: 14px 20px;
+    font-size: 15px;
+  }
+
+  .inp {
+    padding: 12px 14px;
+    font-size: 16px; /* Evita zoom no iOS */
   }
 }
 
@@ -789,24 +882,4 @@ body {
 .chat-list,
 .messages {
   scrollbar-gutter: stable both-edges;
-}
-
-/* ========= ANIMATIONS ========= */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.chat-item {
-  animation: fadeIn 0.3s ease;
-}
-
-.msg {
-  animation: fadeIn 0.2s ease;
 }
