@@ -61,49 +61,6 @@ function escapeHtml(s) {
   )
 }
 
-/* ======== DETECÇÃO POR REGRAS (SEM IA) ======== */
-function norm(s="") {
-  return String(s)
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
-}
-function msgText(m){
-  return norm(
-    m?.text || m?.caption || m?.message?.text || m?.message?.conversation || m?.body || ""
-  )
-}
-
-// Lead QUENTE: detecta transferência/encaminhamento (mensagem nossa)
-const TRANSFER_PATTERNS = [
-  /\bvou te passar para\b/, /\bvou passar seu contato\b/, /\bvou encaminhar\b/,
-  /\bencaminhando seu contato\b/, /\b(o|a) (time|setor|equipe) (vai|ira) (te )?chamar\b/,
-  /\b(alguem|consultor|vendedor) vai (falar|entrar em contato)\b/,
-  /\bvou pedir para (alguem|o time) te chamar\b/,
-  /\bvou (te )?transferir\b/, /\bte coloco em contato\b/, /\b(o|a) comercial vai (te )?chamar\b/
-]
-function isTransferredByAgent(agentMsgs){
-  for(const m of agentMsgs){
-    const t = msgText(m)
-    if (TRANSFER_PATTERNS.some(r => r.test(t))) return true
-  }
-  return false
-}
-
-// Lead: quando NÓS enviamos a confirmação “Sim, pode continuar” (variações)
-const LEAD_CONFIRM_PATTERNS = [
-  /\bsim[, ]*\s*pode\s+continuar\b/,
-  /\bpode\s+continuar\b/ // mantém simples; só conta se vier de mensagem nossa (agent)
-]
-function isLeadConfirmByAgent(agentMsgs){
-  for(const m of agentMsgs){
-    const t = msgText(m)
-    if (LEAD_CONFIRM_PATTERNS.some(r => r.test(t))) return true
-  }
-  return false
-}
-
 /* ========= STATE ========= */
 const state = {
   chats: [],
@@ -113,13 +70,16 @@ const state = {
   unread: new Map(), // chatid => count
   loadingChats: false,
 
-  // Classificação persistente (localStorage)
-  // chatid -> {stage, confidence, reason, at, lastKey}
+  // === Classificação (persistente) ===
+  // chatid -> {stage, at, lastKey}
   aiStage: new Map(),
   aiStageLoaded: false,
+
+  // Splash
+  splash: { shown: false, timer: null, forceTimer: null },
 }
 
-/* ========= STAGES ========= */
+/* ========= STAGES (Contatos, Lead, Lead Quente) ========= */
 const STAGES = ["contatos", "lead", "lead_quente"]
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" }
 const STAGE_RANK  = { contatos: 0, lead: 1, lead_quente: 2 }
@@ -154,53 +114,11 @@ function getStage(chatid) {
   loadStageCache()
   return state.aiStage.get(chatid) || null
 }
-
-/* ======== CLASSIFICAÇÃO SÓ POR REGRAS ======== */
-function classifyByRules(items){
-  const all = Array.isArray(items) ? items : []
-  const userMsgs   = all.filter(m => !(m.fromMe || m.fromme || m.from_me))
-  const agentMsgs  = all.filter(m =>  (m.fromMe || m.fromme || m.from_me))
-
-  // 1) Lead Quente se nós indicamos transferência/encaminhamento
-  if (isTransferredByAgent(agentMsgs)) {
-    return { stage: "lead_quente", confidence: 0.95, reason: "Transferência/encaminhamento detectado" }
-  }
-
-  // 2) Lead se nós enviamos “Sim, pode continuar” (ou variações)
-  if (isLeadConfirmByAgent(agentMsgs)) {
-    return { stage: "lead", confidence: 0.9, reason: "Confirmação 'pode continuar' enviada" }
-  }
-
-  // 3) Caso contrário, Contatos
-  //    (toda conversa em que apenas enviamos mensagens ou sem esses gatilhos)
-  //    Se o cliente respondeu mas não houve nossos gatilhos, fica Contatos mesmo.
-  if (userMsgs.length >= 0) {
-    return { stage: "contatos", confidence: 0.7, reason: "Sem gatilhos de lead/transferência" }
-  }
-
-  return { stage: "contatos", confidence: 0.7, reason: "Padrão" }
-}
-
-/* ======== PERSISTÊNCIA LOCAL (nunca rebaixa) ======== */
-function makeTranscriptKey(items) {
-  if (!Array.isArray(items) || !items.length) return "empty"
-  const lastTs = items[0]?.messageTimestamp || items[0]?.timestamp || 0
-  const len = items.length
-  const tail = (items[0]?.text || items[0]?.body || "").slice(0, 64)
-  return `${len}:${lastTs}:${tail.length}`
-}
-
-function promoteAndPersist(chatid, {stage, confidence, reason, key}) {
+function setStage(chatid, nextStage, key) {
   loadStageCache()
-  const prev = getStage(chatid) || { stage: "contatos", confidence: 0, reason: "", at: 0, lastKey: null }
-  const nextStage = maxStage(prev.stage, stage) // nunca rebaixa
-  const rec = {
-    stage: nextStage,
-    confidence: Math.max(prev.confidence || 0, confidence || 0),
-    reason: reason || prev.reason || "",
-    at: Date.now(),
-    lastKey: key || prev.lastKey || null,
-  }
+  const cur = getStage(chatid) || { stage: "contatos", at: 0, lastKey: null }
+  const stage = maxStage(cur.stage, normalizeStage(nextStage))
+  const rec = { stage, at: Date.now(), lastKey: key || cur.lastKey }
   state.aiStage.set(chatid, rec)
   saveStageCache()
   return rec
@@ -217,7 +135,7 @@ async function apiCRMList(stage, limit=100, offset=0){
 async function apiCRMSetStatus(chatid, stage, notes=""){
   return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
-function ensureCRMBar(){ /* no-op */ }
+function ensureCRMBar(){ /* no-op: escondido por padrão */ }
 async function refreshCRMCounters(){
   try{
     const data=await apiCRMViews()
@@ -249,6 +167,61 @@ async function loadCRMStage(stage){
   }
 }
 function attachCRMControlsToCard(cardEl, chatObj){ return }
+
+/* ========= SPLASH ========= */
+function createSplash() {
+  if (state.splash.shown) return
+  const el = document.createElement("div")
+  el.id = "luna-splash"
+  el.style.position = "fixed"
+  el.style.inset = "0"
+  el.style.background = "var(--bg, #0b0b0c)"
+  el.style.display = "flex"
+  el.style.flexDirection = "column"
+  el.style.alignItems = "center"
+  el.style.justifyContent = "center"
+  el.style.gap = "18px"
+  el.style.zIndex = "9999"
+
+  const logo = document.createElement("div")
+  logo.textContent = "Luna"
+  logo.style.fontSize = "28px"
+  logo.style.fontWeight = "700"
+  logo.style.letterSpacing = "1px"
+
+  const spin = document.createElement("div")
+  spin.style.width = "36px"
+  spin.style.height = "36px"
+  spin.style.border = "3px solid rgba(255,255,255,.2)"
+  spin.style.borderTopColor = "currentColor"
+  spin.style.borderRadius = "50%"
+  spin.style.animation = "luna-rot 1s linear infinite"
+
+  const note = document.createElement("div")
+  note.textContent = "Carregando..."
+  note.style.opacity = ".8"
+  note.style.fontSize = "13px"
+
+  const style = document.createElement("style")
+  style.textContent = `@keyframes luna-rot{to{transform:rotate(360deg)}}`
+
+  el.appendChild(style)
+  el.appendChild(logo)
+  el.appendChild(spin)
+  el.appendChild(note)
+  document.body.appendChild(el)
+  state.splash.shown = true
+
+  // Força ocultar em até 7s (máximo)
+  state.splash.forceTimer = setTimeout(hideSplash, 7000)
+}
+function hideSplash() {
+  const el = document.getElementById("luna-splash")
+  if (el) el.remove()
+  state.splash.shown = false
+  if (state.splash.timer) { clearTimeout(state.splash.timer); state.splash.timer = null }
+  if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
+}
 
 /* ========= LOGIN ========= */
 async function doLogin() {
@@ -291,7 +264,15 @@ function switchToApp() {
   setMobileMode("list")
   ensureCRMBar()
   ensureStageTabs()
-  loadChats()
+
+  // Splash (máx. 7s) enquanto iniciamos carregamentos + classificações
+  createSplash()
+
+  // Carregar conversas (progressivo); splash some assim que a 1ª leva for renderizada
+  loadChats().finally(() => {
+    // dá um respiro de 300ms para evitar "piscar"
+    state.splash.timer = setTimeout(hideSplash, 300)
+  })
 }
 
 function ensureRoute() {
@@ -410,13 +391,12 @@ async function loadChats() {
     await progressiveRenderChats(items)
     await prefetchCards(items)
 
-    // classifica todas em background (SOMENTE REGRAS) e atualiza contadores
+    // Classifica todas em background (regras locais)
     try {
       await classifyAllChatsInBackground(items)
       refreshStageCounters()
     } catch {}
 
-    // opcional: sync CRM
     try {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 500 }) })
       refreshCRMCounters()
@@ -607,7 +587,7 @@ async function openChat(ch) {
   await loadMessages(chatid)
 
   const st = getStage(chatid)
-  if (st) upsertAIPill(st.stage, st.confidence, st.reason)
+  if (st) upsertAIPill(st.stage)
 
   if (status) status.textContent = "Online"
 }
@@ -630,9 +610,12 @@ async function loadMessages(chatid) {
       .trim()
     state.lastMsg.set(chatid, pv)
 
+    // Classificação local pelas regras
     try {
-      await classifyAndPersist(chatid, items) // só REGRAS
+      await classifyAndPersist(chatid, items)
       refreshStageCounters()
+      const st = getStage(chatid)
+      if (st) upsertAIPill(st.stage)
     } catch {}
   } catch (e) {
     console.error(e)
@@ -680,8 +663,8 @@ function appendMessageBubble(pane, m) {
   pane.appendChild(el)
 }
 
-/* ========= BADGE DE STATUS NO HEADER ========= */
-function upsertAIPill(stage, confidence, reason) {
+/* ========= “PILL” de estágio (usa dados locais) ========= */
+function upsertAIPill(stage) {
   let pill = document.getElementById("ai-pill")
   if (!pill) {
     pill = document.createElement("span")
@@ -695,24 +678,102 @@ function upsertAIPill(stage, confidence, reason) {
     const header = document.querySelector(".chatbar") || document.querySelector(".chat-title") || document.body
     header.appendChild(pill)
   }
-  const map = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" }
-  const label = map[normalizeStage(stage)] || stage
-  pill.textContent = `${label} • conf ${(confidence * 100).toFixed(0)}%`
-  pill.title = reason || ""
+  const label = STAGE_LABEL[normalizeStage(stage)] || stage
+  pill.textContent = label
+  pill.title = ""
 }
 
-/* ========= CLASSIFICAÇÃO E PERSISTÊNCIA (SÓ REGRAS) ========= */
+// hash simples do histórico
+function makeTranscriptKey(items) {
+  if (!Array.isArray(items) || !items.length) return "empty"
+  const lastTs = items[0]?.messageTimestamp || items[0]?.timestamp || 0
+  const len = items.length
+  const tail = (items[0]?.text || items[0]?.body || "").slice(0, 64)
+  return `${len}:${lastTs}:${tail.length}`
+}
+
+/* ========= CLASSIFICAÇÃO POR REGRAS (SEM IA) ========= */
+// Normaliza strings para comparação tolerante
+function norm(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove acentos
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+// Regras:
+// - Lead Quente: mensagem nossa indicando encaminhamento/transferência.
+// - Lead: mensagem nossa "sim, pode continuar" (tolerante).
+// - Contatos: padrão/else.
+function classifyByRules(items) {
+  const msgs = Array.isArray(items) ? items : []
+  let stage = "contatos"
+
+  const hotHints = [
+    "vou te passar para",
+    "vou te passar pro",
+    "vou encaminhar",
+    "encaminhando seu contato",
+    "colocar voce em contato",
+    "colocar você em contato",
+    "o time comercial vai te chamar",
+    "nossa equipe vai entrar em contato",
+    "o setor vai entrar em contato",
+    "vou pedir para alguem te chamar",
+    "vou transferir",
+    "vou passar seu numero",
+    "vou passar o seu numero",
+    "vou passar seu número",
+    "vou passar o seu número",
+  ].map(norm)
+
+  const okPatterns = [
+    "sim, pode continuar",
+    "pode continuar",
+    "sim pode continuar",
+  ].map(norm)
+
+  for (const m of msgs) {
+    const me = m.fromMe || m.fromme || m.from_me || false
+    const text = norm(m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "")
+    if (!text) continue
+
+    if (me) {
+      // Lead Quente?
+      if (hotHints.some(h => text.includes(h))) {
+        stage = "lead_quente"
+        break // já é o topo da hierarquia
+      }
+      // Lead?
+      if (okPatterns.some(p => text === p || text.startsWith(p))) {
+        stage = maxStage(stage, "lead")
+      }
+    }
+  }
+
+  // Regra de "Contatos": se não subiu para lead/lead_quente e não há resposta do cliente
+  if (stage === "contatos") {
+    const userMsgs = msgs.filter(m => !(m.fromMe || m.fromme || m.from_me))
+    if (userMsgs.length > 0) {
+      // o cliente respondeu algo -> pelo menos Lead?
+      // (Se quiser travar só por "Sim, pode continuar", remova esta linha)
+      // stage = maxStage(stage, "lead")
+      // Mantemos "contatos" caso não haja sinal de interesse explícito
+    }
+  }
+
+  return stage
+}
+
 async function classifyAndPersist(chatid, items) {
   const key = makeTranscriptKey(items)
   const current = getStage(chatid)
   if (current?.lastKey === key) return current
 
-  const h = classifyByRules(items)
-  const rec = promoteAndPersist(chatid, { stage: h.stage, confidence: h.confidence, reason: h.reason, key })
-
-  const curId = state.current && (state.current.wa_chatid || state.current.chatid || state.current.wa_fastid || state.current.wa_id)
-  if (curId === chatid) upsertAIPill(rec.stage, rec.confidence, rec.reason)
-
+  const stage = classifyByRules(items)
+  const rec = setStage(chatid, stage, key)
   return rec
 }
 
