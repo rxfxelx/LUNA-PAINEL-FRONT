@@ -604,80 +604,94 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
   background: linear-gradient(135deg, var(--bg) 0%, #1e293b 100%);
 }
 
 .loading-container {
   text-align: center;
-  max-width: 400px;
-  width: 100%;
-}
-
-.loading-icon {
-  /* Melhorando o estilo do ícone no loading */
-  margin-bottom: 28px;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
+  gap: 24px;
 }
 
 .loading-icon svg {
-  filter: drop-shadow(0 0 35px rgba(132, 204, 22, 0.5));
-  animation: moonPulse 2s ease-in-out infinite, rotate 8s linear infinite;
+  animation: moonPulse 3s ease-in-out infinite;
 }
 
 .loading-spinner {
-  width: 48px;
-  height: 48px;
-  border: 4px solid var(--border);
-  border-top: 4px solid var(--primary);
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--primary);
   border-radius: 50%;
-  margin: 0 auto 24px;
   animation: spin 1s linear infinite;
 }
 
 .loading h2 {
-  margin: 0 0 12px 0;
+  margin: 0;
   font-family: var(--font-primary);
   font-size: 24px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text);
 }
 
 .loading p {
-  margin: 0 0 32px 0;
+  margin: 0;
   color: var(--text-muted);
   font-size: 16px;
 }
 
 .loading-progress {
-  width: 100%;
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .progress-bar {
   width: 100%;
   height: 6px;
-  background: var(--card);
+  background: var(--card-light);
   border-radius: 3px;
   overflow: hidden;
-  margin-bottom: 12px;
-  border: 1px solid var(--border);
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--primary) 0%, var(--accent) 100%);
+  background: linear-gradient(90deg, var(--primary), var(--accent));
   border-radius: 3px;
-  width: 0%;
-  animation: progressFill 5s ease-in-out forwards;
-  box-shadow: 0 0 10px rgba(21, 128, 61, 0.3);
+  animation: progressFill 3s ease-in-out infinite;
 }
 
 .progress-text {
+  font-size: 13px;
   color: var(--text-subtle);
-  font-size: 14px;
-  font-weight: 500;
+  text-align: center;
+}
+
+/* ========= STAGE TABS STYLING ========= */
+.stage-tabs {
+  display: flex;
+  gap: 8px;
+  margin-left: 16px;
+}
+
+.stage-counters {
+  margin-left: 8px;
+  color: var(--text-subtle);
+  font-size: 12px;
+}
+
+/* ========= AI PILL STYLING ========= */
+.ai-pill {
+  margin-left: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: var(--card-light);
+  color: var(--text);
+  border: 1px solid var(--border);
 }
 
 /* ========= ANIMATIONS ========= */
