@@ -167,7 +167,7 @@
             <polyline points="16,17 21,12 16,7"/>
             <line x1="21" y1="12" x2="9" y2="12"/>
           </svg>
-          Sair
+          <span class="btn-text">Sair</span>
         </button>
       </div>
     </header>
@@ -176,8 +176,32 @@
       <aside class="sidebar">
         <div class="sidebar-head">
           <h2>Conversas</h2>
+          <!-- Adicionando seletor mobile para as abas -->
+          <div class="mobile-stage-selector">
+            <select id="mobile-stage-select" class="stage-select">
+              <option value="geral">Geral</option>
+              <option value="contatos">Contatos</option>
+              <option value="lead">Lead</option>
+              <option value="lead_quente">Lead Quente</option>
+            </select>
+          </div>
           <div class="sidebar-stats">
             <span class="stats-badge">Ativo</span>
+          </div>
+        </div>
+        <!-- Adicionando contadores mobile compactos -->
+        <div class="mobile-counters">
+          <div class="counter-item">
+            <span class="counter-label">C:</span>
+            <span class="counter-value" id="mobile-counter-contatos">0</span>
+          </div>
+          <div class="counter-item">
+            <span class="counter-label">L:</span>
+            <span class="counter-value" id="mobile-counter-lead">0</span>
+          </div>
+          <div class="counter-item">
+            <span class="counter-label">LQ:</span>
+            <span class="counter-value" id="mobile-counter-lead_quente">0</span>
           </div>
         </div>
         <div id="chat-list" class="chat-list"></div>
