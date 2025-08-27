@@ -61,6 +61,33 @@ function escapeHtml(s) {
   )
 }
 
+/* ========= helpers de mídia (NOVO) ========= */
+function isProbablyImage(m) {
+  const mt = (m.mimetype || m.mimeType || "").toLowerCase()
+  const u  = (m.mediaUrl || m.url || m.image || (m.message && (m.message.imageUrl || m.message.image || (m.message.imageMessage && m.message.imageMessage.url))) || "").toLowerCase()
+  return mt.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/.test(u)
+}
+function isProbablyVideo(m) {
+  const mt = (m.mimetype || m.mimeType || "").toLowerCase()
+  const u  = (m.mediaUrl || m.url || m.video || (m.message && (m.message.videoUrl || m.message.video || (m.message.videoMessage && m.message.videoMessage.url))) || "").toLowerCase()
+  return mt.startsWith("video/") || /\.(mp4|webm|ogg|mov|m4v)(\?|$)/.test(u)
+}
+function extractMediaUrl(m) {
+  const raw =
+    m.mediaUrl || m.url || m.image || m.video ||
+    (m.message && (m.message.imageUrl || m.message.videoUrl)) ||
+    (m.message && m.message.imageMessage && m.message.imageMessage.url) ||
+    (m.message && m.message.videoMessage && m.message.videoMessage.url) ||
+    ""
+  if (!raw) return ""
+  if (/^https?:\/\//i.test(raw)) {
+    // usa proxy do backend para evitar CORS
+    return BACKEND() + "/api/proxy?u=" + encodeURIComponent(raw)
+  }
+  if (/^data:/.test(raw)) return raw
+  return BACKEND() + "/api/proxy?u=" + encodeURIComponent(raw)
+}
+
 /* ========= STATE ========= */
 const state = {
   chats: [],
@@ -615,6 +642,45 @@ function appendMessageBubble(pane, m) {
     ${escapeHtml(text)}
     <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
   `
+
+  // === MÍDIA (IMAGEM/VÍDEO) — ACRÉSCIMO ===
+  try {
+    if (isProbablyImage(m)) {
+      const src = extractMediaUrl(m)
+      if (src) {
+        const fig = document.createElement("div")
+        fig.style.marginTop = "6px"
+        const img = document.createElement("img")
+        img.src = src
+        img.alt = "imagem"
+        img.loading = "lazy"
+        img.style.maxWidth = "320px"
+        img.style.maxHeight = "360px"
+        img.style.borderRadius = "10px"
+        img.style.display = "block"
+        img.style.objectFit = "cover"
+        fig.appendChild(img)
+        el.insertBefore(fig, el.lastElementChild) // antes do <small>
+      }
+    } else if (isProbablyVideo(m)) {
+      const src = extractMediaUrl(m)
+      if (src) {
+        const fig = document.createElement("div")
+        fig.style.marginTop = "6px"
+        const vid = document.createElement("video")
+        vid.src = src
+        vid.controls = true
+        vid.preload = "metadata"
+        vid.style.maxWidth = "320px"
+        vid.style.maxHeight = "360px"
+        vid.style.borderRadius = "10px"
+        vid.style.display = "block"
+        fig.appendChild(vid)
+        el.insertBefore(fig, el.lastElementChild)
+      }
+    }
+  } catch (_) {}
+
   pane.appendChild(el)
 }
 
