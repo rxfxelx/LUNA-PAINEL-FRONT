@@ -5,10 +5,7 @@ const show = (sel) => $(sel).classList.remove("hidden")
 const hide = (sel) => $(sel).classList.add("hidden")
 
 // Idle callback (não bloqueia UI)
-const rIC = (cb) =>
-  (window.requestIdleCallback
-    ? window.requestIdleCallback(cb, { timeout: 200 })
-    : setTimeout(cb, 0))
+const rIC = (cb) => (window.requestIdleCallback ? window.requestIdleCallback(cb, { timeout: 200 }) : setTimeout(cb, 0))
 
 // Limitador de concorrência simples
 async function runLimited(tasks, limit = 8) {
@@ -17,7 +14,11 @@ async function runLimited(tasks, limit = 8) {
   const workers = new Array(Math.min(limit, tasks.length)).fill(0).map(async () => {
     while (i < tasks.length) {
       const cur = i++
-      try { results[cur] = await tasks[cur]() } catch (e) { results[cur] = undefined }
+      try {
+        results[cur] = await tasks[cur]()
+      } catch (e) {
+        results[cur] = undefined
+      }
     }
   })
   await Promise.all(workers)
@@ -82,17 +83,20 @@ const state = {
 /* ========= STAGES (Contatos, Lead, Lead Quente) ========= */
 const STAGES = ["contatos", "lead", "lead_quente"]
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" }
-const STAGE_RANK  = { contatos: 0, lead: 1, lead_quente: 2 }
+const STAGE_RANK = { contatos: 0, lead: 1, lead_quente: 2 }
 
 function normalizeStage(s) {
-  const k = String(s || "").toLowerCase().trim()
+  const k = String(s || "")
+    .toLowerCase()
+    .trim()
   if (k.startsWith("contato")) return "contatos"
   if (k.includes("lead_quente") || k.includes("quente")) return "lead_quente"
   if (k === "lead") return "lead"
   return "contatos"
 }
 function maxStage(a, b) {
-  a = normalizeStage(a); b = normalizeStage(b)
+  a = normalizeStage(a)
+  b = normalizeStage(b)
   return STAGE_RANK[b] > STAGE_RANK[a] ? b : a
 }
 
@@ -107,7 +111,9 @@ function loadStageCache() {
 }
 function saveStageCache() {
   const obj = {}
-  state.aiStage.forEach((v, k) => { obj[k] = v })
+  state.aiStage.forEach((v, k) => {
+    obj[k] = v
+  })
   localStorage.setItem("luna_ai_stage", JSON.stringify(obj))
 }
 function getStage(chatid) {
@@ -125,102 +131,75 @@ function setStage(chatid, nextStage, key) {
 }
 
 /* ========= CRM (mantido, mas sem botões/sem render de barra) ========= */
-const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
+const CRM_STAGES = ["novo", "sem_resposta", "interessado", "em_negociacao", "fechou", "descartado"]
 
-async function apiCRMViews(){ return api("/api/crm/views") }
-async function apiCRMList(stage, limit=100, offset=0){
-  const qs = new URLSearchParams({stage,limit,offset}).toString()
-  return api("/api/crm/list?"+qs)
+async function apiCRMViews() {
+  return api("/api/crm/views")
 }
-async function apiCRMSetStatus(chatid, stage, notes=""){
-  return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
+async function apiCRMList(stage, limit = 100, offset = 0) {
+  const qs = new URLSearchParams({ stage, limit, offset }).toString()
+  return api("/api/crm/list?" + qs)
 }
-function ensureCRMBar(){ /* no-op: escondido por padrão */ }
-async function refreshCRMCounters(){
-  try{
-    const data=await apiCRMViews()
-    const counts=data?.counts||{}
-    const el=document.querySelector(".crm-counters")
-    if(el){
-      const parts=CRM_STAGES.map(s=>`${s.replace("_"," ")}: ${counts[s]||0}`)
-      el.textContent=parts.join(" • ")
+async function apiCRMSetStatus(chatid, stage, notes = "") {
+  return api("/api/crm/status", { method: "POST", body: JSON.stringify({ chatid, stage, notes }) })
+}
+function ensureCRMBar() {
+  /* no-op: escondido por padrão */
+}
+async function refreshCRMCounters() {
+  try {
+    const data = await apiCRMViews()
+    const counts = data?.counts || {}
+    const el = document.querySelector(".crm-counters")
+    if (el) {
+      const parts = CRM_STAGES.map((s) => `${s.replace("_", " ")}: ${counts[s] || 0}`)
+      el.textContent = parts.join(" • ")
     }
-  }catch{}
+  } catch {}
 }
-async function loadCRMStage(stage){
-  const list=$("#chat-list")
-  list.innerHTML="<div class='hint'>Carregando visão CRM...</div>"
-  try{
-    const data=await apiCRMList(stage,100,0)
-    const items=[]
-    for(const it of (data?.items||[])){
-      const ch=it.chat||{}
-      if(!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid=it.crm.chatid
+async function loadCRMStage(stage) {
+  const list = $("#chat-list")
+  list.innerHTML = "<div class='hint'>Carregando visão CRM...</div>"
+  try {
+    const data = await apiCRMList(stage, 100, 0)
+    const items = []
+    for (const it of data?.items || []) {
+      const ch = it.chat || {}
+      if (!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid = it.crm.chatid
       items.push(ch)
     }
     await progressiveRenderChats(items)
     await prefetchCards(items)
-  }catch(e){
-    list.innerHTML=`<div class='error'>Falha ao carregar CRM: ${escapeHtml(e.message||"")}</div>`
-  }finally{
+  } catch (e) {
+    list.innerHTML = `<div class='error'>Falha ao carregar CRM: ${escapeHtml(e.message || "")}</div>`
+  } finally {
     refreshCRMCounters()
   }
 }
-function attachCRMControlsToCard(cardEl, chatObj){ return }
+function attachCRMControlsToCard(cardEl, chatObj) {
+  return
+}
 
 /* ========= SPLASH ========= */
 function createSplash() {
   if (state.splash.shown) return
-  const el = document.createElement("div")
-  el.id = "luna-splash"
-  el.style.position = "fixed"
-  el.style.inset = "0"
-  el.style.background = "var(--bg, #0b0b0c)"
-  el.style.display = "flex"
-  el.style.flexDirection = "column"
-  el.style.alignItems = "center"
-  el.style.justifyContent = "center"
-  el.style.gap = "18px"
-  el.style.zIndex = "9999"
-
-  const logo = document.createElement("div")
-  logo.textContent = "Luna"
-  logo.style.fontSize = "28px"
-  logo.style.fontWeight = "700"
-  logo.style.letterSpacing = "1px"
-
-  const spin = document.createElement("div")
-  spin.style.width = "36px"
-  spin.style.height = "36px"
-  spin.style.border = "3px solid rgba(255,255,255,.2)"
-  spin.style.borderTopColor = "currentColor"
-  spin.style.borderRadius = "50%"
-  spin.style.animation = "luna-rot 1s linear infinite"
-
-  const note = document.createElement("div")
-  note.textContent = "Carregando..."
-  note.style.opacity = ".8"
-  note.style.fontSize = "13px"
-
-  const style = document.createElement("style")
-  style.textContent = `@keyframes luna-rot{to{transform:rotate(360deg)}}`
-
-  el.appendChild(style)
-  el.appendChild(logo)
-  el.appendChild(spin)
-  el.appendChild(note)
-  document.body.appendChild(el)
+  show("#loading-view")
   state.splash.shown = true
 
   // Força ocultar em até 7s (máximo)
   state.splash.forceTimer = setTimeout(hideSplash, 7000)
 }
 function hideSplash() {
-  const el = document.getElementById("luna-splash")
-  if (el) el.remove()
+  hide("#loading-view")
   state.splash.shown = false
-  if (state.splash.timer) { clearTimeout(state.splash.timer); state.splash.timer = null }
-  if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
+  if (state.splash.timer) {
+    clearTimeout(state.splash.timer)
+    state.splash.timer = null
+  }
+  if (state.splash.forceTimer) {
+    clearTimeout(state.splash.forceTimer)
+    state.splash.forceTimer = null
+  }
 }
 
 /* ========= LOGIN ========= */
@@ -310,8 +289,6 @@ function ensureStageTabs() {
 
   const bar = document.createElement("div")
   bar.className = "stage-tabs"
-  bar.style.display = "flex"
-  bar.style.gap = "8px"
 
   const addBtn = (key, label, onclick) => {
     const b = document.createElement("button")
@@ -323,9 +300,9 @@ function ensureStageTabs() {
   }
 
   const btnGeral = addBtn("geral", "Geral", () => loadChats())
-  const btnCont   = addBtn("contatos", "Contatos", () => loadStageTab("contatos"))
-  const btnLead   = addBtn("lead", "Lead", () => loadStageTab("lead"))
-  const btnLQ     = addBtn("lead_quente", "Lead Quente", () => loadStageTab("lead_quente"))
+  const btnCont = addBtn("contatos", "Contatos", () => loadStageTab("contatos"))
+  const btnLead = addBtn("lead", "Lead", () => loadStageTab("lead"))
+  const btnLQ = addBtn("lead_quente", "Lead Quente", () => loadStageTab("lead_quente"))
 
   bar.appendChild(btnGeral)
   bar.appendChild(btnCont)
@@ -334,9 +311,6 @@ function ensureStageTabs() {
 
   const counters = document.createElement("div")
   counters.className = "stage-counters"
-  counters.style.marginLeft = "8px"
-  counters.style.color = "var(--sub2)"
-  counters.style.fontSize = "12px"
 
   host.appendChild(bar)
   host.appendChild(counters)
@@ -347,14 +321,13 @@ function ensureStageTabs() {
 function refreshStageCounters() {
   loadStageCache()
   const counts = { contatos: 0, lead: 0, lead_quente: 0 }
-  state.chats.forEach(ch => {
+  state.chats.forEach((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     const st = getStage(chatid)?.stage || "contatos"
     if (counts[st] !== undefined) counts[st]++
   })
   const el = document.querySelector(".stage-counters")
-  if (el) el.textContent =
-    `contatos: ${counts.contatos} • lead: ${counts.lead} • lead quente: ${counts.lead_quente}`
+  if (el) el.textContent = `contatos: ${counts.contatos} • lead: ${counts.lead} • lead quente: ${counts.lead_quente}`
 }
 
 async function loadStageTab(stageKey) {
@@ -362,7 +335,7 @@ async function loadStageTab(stageKey) {
   list.innerHTML = "<div class='hint'>Carregando…</div>"
 
   loadStageCache()
-  const filtered = state.chats.filter(ch => {
+  const filtered = state.chats.filter((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     const st = getStage(chatid)?.stage || "contatos"
     return st === stageKey
@@ -530,7 +503,9 @@ async function prefetchCards(items) {
               last?.message?.conversation ||
               last?.body ||
               ""
-            ).replace(/\s+/g, " ").trim()
+            )
+              .replace(/\s+/g, " ")
+              .trim()
             state.lastMsg.set(chatid, pv)
 
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`)
@@ -663,18 +638,13 @@ function appendMessageBubble(pane, m) {
   pane.appendChild(el)
 }
 
-/* ========= “PILL” de estágio (usa dados locais) ========= */
+/* ========= "PILL" de estágio (usa dados locais) ========= */
 function upsertAIPill(stage) {
   let pill = document.getElementById("ai-pill")
   if (!pill) {
     pill = document.createElement("span")
     pill.id = "ai-pill"
-    pill.style.marginLeft = "8px"
-    pill.style.padding = "4px 8px"
-    pill.style.borderRadius = "999px"
-    pill.style.fontSize = "12px"
-    pill.style.background = "var(--muted)"
-    pill.style.color = "var(--text)"
+    pill.className = "ai-pill"
     const header = document.querySelector(".chatbar") || document.querySelector(".chat-title") || document.body
     header.appendChild(pill)
   }
@@ -729,11 +699,7 @@ function classifyByRules(items) {
     "vou passar o seu número",
   ].map(norm)
 
-  const okPatterns = [
-    "sim, pode continuar",
-    "pode continuar",
-    "sim pode continuar",
-  ].map(norm)
+  const okPatterns = ["sim, pode continuar", "pode continuar", "sim pode continuar"].map(norm)
 
   for (const m of msgs) {
     const me = m.fromMe || m.fromme || m.from_me || false
@@ -742,12 +708,12 @@ function classifyByRules(items) {
 
     if (me) {
       // Lead Quente?
-      if (hotHints.some(h => text.includes(h))) {
+      if (hotHints.some((h) => text.includes(h))) {
         stage = "lead_quente"
         break // já é o topo da hierarquia
       }
       // Lead?
-      if (okPatterns.some(p => text === p || text.startsWith(p))) {
+      if (okPatterns.some((p) => text === p || text.startsWith(p))) {
         stage = maxStage(stage, "lead")
       }
     }
@@ -755,7 +721,7 @@ function classifyByRules(items) {
 
   // Regra de "Contatos": se não subiu para lead/lead_quente e não há resposta do cliente
   if (stage === "contatos") {
-    const userMsgs = msgs.filter(m => !(m.fromMe || m.fromme || m.from_me))
+    const userMsgs = msgs.filter((m) => !(m.fromMe || m.fromme || m.from_me))
     if (userMsgs.length > 0) {
       // o cliente respondeu algo -> pelo menos Lead?
       // (Se quiser travar só por "Sim, pode continuar", remova esta linha)
@@ -778,7 +744,7 @@ async function classifyAndPersist(chatid, items) {
 }
 
 async function classifyAllChatsInBackground(items) {
-  const tasks = (items || []).map(ch => async () => {
+  const tasks = (items || []).map((ch) => async () => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     if (!chatid) return
     try {
@@ -788,7 +754,9 @@ async function classifyAllChatsInBackground(items) {
       })
       const msgs = Array.isArray(data?.items) ? data.items : []
       await classifyAndPersist(chatid, msgs)
-    } catch (e) { /* ignora */ }
+    } catch (e) {
+      /* ignora */
+    }
   })
 
   const CHUNK = 10
@@ -799,7 +767,7 @@ async function classifyAllChatsInBackground(items) {
   }
 }
 
-/* ========= SUA renderização “clássica” (mantida) ========= */
+/* ========= SUA renderização "clássica" (mantida) ========= */
 function renderMessages(msgs) {
   const pane = $("#messages")
   pane.innerHTML = ""
