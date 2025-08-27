@@ -739,14 +739,10 @@ function norm(s) {
 
 /*
 Regras pedidas (sem IA):
-- Lead Quente (transferência/encaminhamento) quando NÓS (fromMe=true) mandamos algo indicando:
-  transferir, encaminhar, passar contato/número, equipe/time/consultor/especialista vai chamar, abrir chamado etc.
-- Lead quando NÓS mandamos "sim, pode continuar" (e variações).
+- Lead Quente quando NÓS (fromMe=true) indicamos transferência/encaminhamento/contato de equipe.
+- Lead quando NÓS mandamos "sim, pode continuar" (e variações) OU quando pedimos/perguntamos nome.
 - Contatos é o padrão.
-
-Abaixo ampliamos MUITO o vocabulário para reduzir falso negativo/positivo.
-Incluímos grafias alternativas, sem acento, abreviações, erros comuns, e expressões equivalentes.
-Também evitamos falsos positivos de menu/cardápio/catálogos (mensagem automática de link).
+Também há um guard contra mensagens automáticas de menu/cardápio.
 */
 const HOT_HINTS = [
   // verbos de encaminhar
@@ -791,7 +787,6 @@ const HOT_HINTS = [
 ].map(norm)
 
 const HOT_NEGATIVE_GUARDS = [
-  // Evitar confundir com mensagens automáticas de cardápio/catálogo/menus
   "cardapio", "cardápio", "menu", "catalogo", "catálogo", "ver menu", "ver cardapio",
   "acesse o menu", "acesse o cardapio", "acesse o cardápio", "acesse nosso catalogo",
   "acesse nosso catálogo", "cardapio online", "link do menu", "nosso menu",
@@ -799,18 +794,30 @@ const HOT_NEGATIVE_GUARDS = [
 ].map(norm)
 
 const LEAD_OK_PATTERNS = [
-  // confirmação direta
   "sim, pode continuar", "sim pode continuar", "pode continuar",
   "ok, pode continuar", "ok pode continuar", "pode seguir",
   "sim, pode seguir", "sim pode seguir", "vamos continuar",
   "podemos continuar", "pode prosseguir", "ok vamos prosseguir",
   "segue", "segue por favor", "pode mostrar", "pode me mostrar",
   "pode enviar", "pode mandar",
-  // variações com emojis/complementos
   "pode continuar 👍", "pode continuar sim", "sim, pode continuar sim",
   "pode continuar por favor", "pode continuar pf", "pode continuar pff",
-  // abreviações/erros comuns
   "pode cont", "pode cnt", "pode seg", "pode prosseg", "pode proseguir",
+].map(norm)
+
+/* NOVO — padrões de pedir/perguntar NOME (muitas variações, com/sem acento) */
+const LEAD_NAME_PATTERNS = [
+  "qual seu nome", "qual o seu nome", "me diga seu nome", "me fala seu nome",
+  "como voce se chama", "como você se chama", "quem fala", "quem esta falando",
+  "quem está falando", "quem e voce", "quem é você", "pode me dizer seu nome",
+  "me passa seu nome", "me informe seu nome", "seu nome por favor", "nome pfv",
+  "nome por favor", "nome?", "qual seu primeiro nome", "qual seu nome completo",
+  "nome do cliente", "nome do titular", "nome para cadastro",
+  "poderia me informar seu nome", "me diga o seu nome", "informe seu nome",
+  "sobrenome", "seu nome e sobrenome", "como devo te chamar", "como posso te chamar",
+  "qual e seu nome", "qual é seu nome", "qual seria seu nome",
+  // abreviações e erros comuns
+  "ql seu nome", "q seu nome", "seu nm", "seu nome sff", "seu nome pf",
 ].map(norm)
 
 function classifyByRules(items) {
@@ -831,10 +838,14 @@ function classifyByRules(items) {
       break
     }
 
-    // LEAD: confirmação de “pode continuar” e equivalentes (sem exigir exata igualdade)
-    if (LEAD_OK_PATTERNS.some(p => text === p || text.startsWith(p) || text.includes(" " + p + " "))) {
+    // LEAD: confirmação de “pode continuar” e equivalentes
+    if (LEAD_OK_PATTERNS.some(p => text.includes(p))) {
       stage = maxStage(stage, "lead")
-      // não damos break aqui, pois uma mensagem depois pode indicar lead_quente
+    }
+
+    // LEAD: quando pedimos/perguntamos o NOME
+    if (LEAD_NAME_PATTERNS.some(p => text.includes(p))) {
+      stage = maxStage(stage, "lead")
     }
   }
 
