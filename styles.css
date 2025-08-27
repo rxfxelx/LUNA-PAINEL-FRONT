@@ -675,12 +675,46 @@ body {
   display: flex;
   gap: 8px;
   margin-left: 16px;
+  /* Prevenindo overflow e quebra de layout */
+  flex-wrap: wrap;
+  overflow: hidden;
 }
 
 .stage-counters {
   margin-left: 8px;
   color: var(--text-subtle);
   font-size: 12px;
+  /* Prevenindo quebra de linha em zoom */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stage-tabs-mobile {
+  display: none;
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  gap: 4px;
+}
+
+.stage-tabs-mobile .btn {
+  padding: 8px 12px;
+  font-size: 12px;
+  min-height: 36px;
+  border-radius: 8px;
+}
+
+.stage-tabs-mobile .btn.active {
+  background: var(--primary);
+  color: white;
 }
 
 /* ========= AI PILL STYLING ========= */
@@ -692,6 +726,9 @@ body {
   background: var(--card-light);
   color: var(--text);
   border: 1px solid var(--border);
+  /* Prevenindo quebra em zoom */
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ========= ANIMATIONS ========= */
@@ -786,6 +823,81 @@ body {
 @media (max-width: 1023px) {
   .shell {
     grid-template-columns: 1fr;
+    /* Prevenindo overflow horizontal */
+    overflow-x: hidden;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-list .sidebar {
+    display: flex;
+  }
+
+  body.is-mobile-list .main {
+    display: none;
+  }
+
+  body.is-mobile-chat .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-chat .main {
+    display: flex;
+  }
+
+  /* Escondendo stage tabs desktop e mostrando mobile */
+  .stage-tabs {
+    display: none;
+  }
+
+  .stage-tabs-mobile {
+    display: flex;
+  }
+
+  .btn.back {
+    display: inline-flex;
+    /* Melhorando touch target do botão voltar */
+    min-height: 44px;
+    min-width: 44px;
+    padding: 12px 16px;
+  }
+
+  .topbar {
+    padding: 12px 16px;
+    /* Prevenindo overflow e quebra de layout */
+    overflow: hidden;
+    min-height: 60px;
+    flex-wrap: nowrap;
+  }
+
+  /* Garantindo que elementos não quebrem o layout */
+  .brand {
+    flex-shrink: 0;
+    min-width: 0;
+  }
+
+  .brand-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .brand small {
+    color: var(--text-subtle);
+    font-size: 12px;
+    margin: 0;
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .shell {
+    grid-template-columns: 1fr;
   }
 
   .sidebar {
@@ -822,383 +934,343 @@ body {
     min-height: 60px;
   }
 
-  .brand-name {
-    font-size: 16px;
-  }
-
-  .send-group {
-    flex-direction: row;
-    gap: 12px;
-    /* Melhorando layout do grupo de envio */
-    align-items: stretch;
-  }
-
-  .inp-compact {
-    flex: 0 0 140px;
-    /* Melhorando altura para touch */
-    min-height: 48px;
-  }
-
-  .inp-main {
-    flex: 1;
-    min-height: 48px;
-  }
-
-  .btn-send {
-    /* Garantindo touch target adequado */
-    min-height: 48px;
-    min-width: 48px;
-    padding: 12px;
-  }
-
-  /* Melhorando login mobile para tablets */
-  .login {
-    padding: 20px;
-  }
-
-  .login-card {
-    padding: 28px;
-    width: min(400px, 95vw);
-  }
-
-  .login h1 {
-    font-size: 28px;
-  }
-
-  .login-sub {
-    font-size: 15px;
-  }
-
-  .login-icon svg {
-    width: 72px;
-    height: 72px;
-  }
-
-  /* Melhorando chat list mobile */
-  .chat-list {
-    padding: 8px;
-  }
-
-  .chat-item {
-    padding: 16px 12px;
-    margin-bottom: 4px;
-    /* Melhorando touch target dos itens de chat */
-    min-height: 60px;
-    cursor: pointer;
-    -webkit-tap-highlight-color: rgba(21, 128, 61, 0.1);
-  }
-
-  .chat-item:active {
-    background: var(--surface);
-    transform: scale(0.98);
-  }
-
-  .messages {
-    padding: 12px;
-    /* Melhorando scroll em mobile */
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .send {
-    padding: 16px 12px;
-    /* Garantindo área de toque adequada */
-    min-height: 80px;
-  }
-}
-
-/* Responsividade para smartphones */
-@media (max-width: 480px) {
-  .login {
-    padding: 12px;
-  }
-
-  .login-card {
-    padding: 24px;
-    width: 100%;
-    max-width: 360px;
-    margin: 0 8px;
-  }
-
-  .login h1 {
-    font-size: 26px;
-  }
-
-  .login-icon svg {
-    width: 64px;
-    height: 64px;
-  }
-
-  .btn-primary {
-    padding: 16px 24px;
-    font-size: 15px;
-    /* Garantindo touch target mínimo */
-    min-height: 48px;
-  }
-
-  /* Melhorando topbar mobile */
-  .topbar {
-    padding: 12px;
-    min-height: 56px;
-    /* Melhorando layout da topbar */
+  .brand {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .brand-icon {
+    /* Melhorando o estilo do ícone no header */
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .brand-icon svg {
-    width: 28px;
-    height: 28px;
+    filter: drop-shadow(0 0 10px rgba(132, 204, 22, 0.4));
+    transition: filter 0.3s ease, transform 0.3s ease;
   }
 
-  .brand-name {
-    font-size: 14px;
-  }
-
-  .btn-logout {
-    padding: 10px 14px;
-    font-size: 13px;
-    min-height: 40px;
-  }
-
-  /* Otimizando chat mobile */
-  .chatbar {
-    padding: 12px;
-    min-height: 56px;
-    display: flex;
-    align-items: center;
-  }
-
-  .chat-title {
-    font-size: 16px;
-  }
-
-  .send-group {
-    flex-direction: row;
-    gap: 10px;
-    align-items: stretch;
-  }
-
-  .inp-compact {
-    min-width: 100px;
-    flex: 0 0 100px;
-    min-height: 44px;
-  }
-
-  .inp-main {
-    flex: 1;
-    min-height: 44px;
-    /* Melhorando experiência de digitação */
-    font-size: 16px; /* Previne zoom no iOS */
-  }
-
-  .btn-send {
-    min-height: 44px;
-    min-width: 44px;
-    padding: 10px;
-  }
-
-  /* Melhorando mensagens em mobile */
-  .message {
-    margin-bottom: 16px;
-    padding: 12px;
-  }
-
-  .message-content {
-    font-size: 15px;
-    line-height: 1.5;
-  }
-}
-
-/* Responsividade para telas muito pequenas */
-@media (max-width: 360px) {
-  .login {
-    padding: 8px;
-  }
-
-  .login-card {
-    padding: 20px;
-    margin: 4px;
-    width: calc(100% - 8px);
-  }
-
-  .login h1 {
-    font-size: 24px;
-  }
-
-  .login-icon svg {
-    width: 56px;
-    height: 56px;
-  }
-
-  .btn-primary {
-    padding: 14px 20px;
-    font-size: 14px;
-    min-height: 44px;
-  }
-
-  /* Ajustes extremos para telas pequenas */
-  .topbar {
-    padding: 8px 12px;
-    min-height: 52px;
+  .brand-icon:hover svg {
+    filter: drop-shadow(0 0 15px rgba(132, 204, 22, 0.6));
+    transform: scale(1.1) rotate(5deg);
   }
 
   .brand-text {
-    display: none;
-  }
-
-  .btn-logout span {
-    display: none;
-  }
-
-  .btn-logout {
-    min-width: 40px;
-    padding: 8px;
-  }
-
-  .send-group {
+    display: flex;
     flex-direction: column;
-    gap: 8px;
   }
 
-  .inp-compact {
-    min-width: auto;
-    flex: 1;
+  .brand-name {
+    font-family: var(--font-primary);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--text);
+  }
+
+  .brand small {
+    color: var(--text-subtle);
+    font-size: 12px;
+    margin: 0;
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-list .sidebar {
+    display: flex;
+  }
+
+  body.is-mobile-list .main {
+    display: none;
+  }
+
+  body.is-mobile-chat .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-chat .main {
+    display: flex;
+  }
+
+  .btn.back {
+    display: inline-flex;
+    /* Melhorando touch target do botão voltar */
     min-height: 44px;
+    min-width: 44px;
+    padding: 12px 16px;
   }
 
-  .inp-main {
-    min-height: 44px;
-    font-size: 16px;
-  }
-
-  .chat-item {
-    padding: 12px 10px;
-    min-height: 56px;
-  }
-
-  .avatar {
-    width: 36px;
-    height: 36px;
-  }
-
-  /* Melhorando área de envio em telas pequenas */
-  .send {
-    padding: 12px;
-    min-height: 100px;
-  }
-}
-
-/* Melhorias adicionais para landscape mobile */
-@media (max-height: 500px) and (orientation: landscape) {
-  .login {
-    padding: 16px;
-  }
-
-  .login-card {
-    padding: 20px;
-    max-height: 90vh;
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-  }
-
-  .login-header {
-    margin-bottom: 20px;
-  }
-
-  .login-icon svg {
-    width: 48px;
-    height: 48px;
-  }
-
-  .login h1 {
-    font-size: 22px;
-    margin-bottom: 4px;
-  }
-
-  .login-sub {
-    font-size: 14px;
-    margin-bottom: 20px;
-  }
-
-  /* Otimizando chat em landscape */
   .topbar {
-    min-height: 48px;
-    padding: 8px 12px;
-  }
-
-  .chatbar {
-    min-height: 48px;
-    padding: 8px 12px;
-  }
-
-  .send {
+    padding: 12px 16px;
+    /* Garantindo altura mínima para touch */
     min-height: 60px;
-    padding: 8px 12px;
-  }
-}
-
-/* Melhorias gerais para touch e acessibilidade mobile */
-@media (max-width: 1023px) {
-  /* Melhorando feedback visual para touch */
-  .btn:active {
-    transform: scale(0.95);
   }
 
-  .chat-item:hover {
-    background: var(--surface);
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
   }
 
-  /* Removendo hover effects em touch devices */
-  @media (hover: none) {
-    .btn:hover {
-      transform: none;
-      background: var(--card-light);
-    }
-
-    .btn-primary:hover {
-      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
-      transform: none;
-    }
+  .brand-icon {
+    /* Melhorando o estilo do ícone no header */
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  /* Melhorando scroll suave */
-  .messages,
-  .chat-list {
-    scroll-behavior: smooth;
-    -webkit-overflow-scrolling: touch;
+  .brand-icon svg {
+    filter: drop-shadow(0 0 10px rgba(132, 204, 22, 0.4));
+    transition: filter 0.3s ease, transform 0.3s ease;
   }
 
-  /* Prevenindo zoom indesejado em inputs */
-  .inp {
-    font-size: 16px;
+  .brand-icon:hover svg {
+    filter: drop-shadow(0 0 15px rgba(132, 204, 22, 0.6));
+    transform: scale(1.1) rotate(5deg);
   }
-}
 
-/* ========= SCROLLBARS ========= */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-light) var(--card);
-}
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+  }
 
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
+  .brand-name {
+    font-family: var(--font-primary);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--text);
+  }
 
-*::-webkit-scrollbar-track {
-  background: var(--card);
-}
+  .brand small {
+    color: var(--text-subtle);
+    font-size: 12px;
+    margin: 0;
+  }
 
-*::-webkit-scrollbar-thumb {
-  background: var(--border-light);
-  border-radius: 4px;
-}
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
 
-*::-webkit-scrollbar-thumb:hover {
-  background: var(--surface);
-}
+  .shell {
+    grid-template-columns: 1fr;
+  }
 
-.chat-list,
-.messages {
-  scrollbar-gutter: stable both-edges;
+  .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-list .sidebar {
+    display: flex;
+  }
+
+  body.is-mobile-list .main {
+    display: none;
+  }
+
+  body.is-mobile-chat .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-chat .main {
+    display: flex;
+  }
+
+  .btn.back {
+    display: inline-flex;
+    /* Melhorando touch target do botão voltar */
+    min-height: 44px;
+    min-width: 44px;
+    padding: 12px 16px;
+  }
+
+  .topbar {
+    padding: 12px 16px;
+    /* Garantindo altura mínima para touch */
+    min-height: 60px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .brand-icon {
+    /* Melhorando o estilo do ícone no header */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .brand-icon svg {
+    filter: drop-shadow(0 0 10px rgba(132, 204, 22, 0.4));
+    transition: filter 0.3s ease, transform 0.3s ease;
+  }
+
+  .brand-icon:hover svg {
+    filter: drop-shadow(0 0 15px rgba(132, 204, 22, 0.6));
+    transform: scale(1.1) rotate(5deg);
+  }
+
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .brand-name {
+    font-family: var(--font-primary);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--text);
+  }
+
+  .brand small {
+    color: var(--text-subtle);
+    font-size: 12px;
+    margin: 0;
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-list .sidebar {
+    display: flex;
+  }
+
+  body.is-mobile-list .main {
+    display: none;
+  }
+
+  body.is-mobile-chat .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-chat .main {
+    display: flex;
+  }
+
+  .btn.back {
+    display: inline-flex;
+    /* Melhorando touch target do botão voltar */
+    min-height: 44px;
+    min-width: 44px;
+    padding: 12px 16px;
+  }
+
+  .topbar {
+    padding: 12px 16px;
+    /* Garantindo altura mínima para touch */
+    min-height: 60px;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .brand-icon {
+    /* Melhorando o estilo do ícone no header */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .brand-icon svg {
+    filter: drop-shadow(0 0 10px rgba(132, 204, 22, 0.4));
+    transition: filter 0.3s ease, transform 0.3s ease;
+  }
+
+  .brand-icon:hover svg {
+    filter: drop-shadow(0 0 15px rgba(132, 204, 22, 0.6));
+    transform: scale(1.1) rotate(5deg);
+  }
+
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .brand-name {
+    font-family: var(--font-primary);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--text);
+  }
+
+  .brand small {
+    color: var(--text-subtle);
+    font-size: 12px;
+    margin: 0;
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-list .sidebar {
+    display: flex;
+  }
+
+  body.is-mobile-list .main {
+    display: none;
+  }
+
+  body.is-mobile-chat .sidebar {
+    display: none;
+  }
+
+  body.is-mobile-chat .main {
+    display: flex;
+  }
+
+  .btn.back {
+    display: inline-flex;
+    /* Melhorando touch target do botão voltar */
+    min-height: 44px;
+    min-width: 44px;
+    padding: 12px 16px;
+  }
+
+  .topbar {
+    padding: 12px 16px;
+    /* Garantindo altura mínima para touch */
+    min-height: 60px;
+  }
 }
