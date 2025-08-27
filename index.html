@@ -18,7 +18,29 @@
   <main id="login-view" class="login">
     <div class="login-card">
       <div class="login-header">
-        <div class="login-icon">🌙</div>
+        <!-- Substituindo emoji por SVG customizado da lua -->
+        <div class="login-icon">
+          <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="moonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#84cc16;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#15803d;stop-opacity:1" />
+              </linearGradient>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                <feMerge> 
+                  <feMergeNode in="coloredBlur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+            <circle cx="32" cy="32" r="28" fill="url(#moonGradient)" filter="url(#glow)" opacity="0.9"/>
+            <path d="M20 32C20 20.954 28.954 12 40 12C36.686 12 33.686 13.343 31.515 15.515C27.172 19.858 25 25.858 25 32C25 38.142 27.172 44.142 31.515 48.485C33.686 50.657 36.686 52 40 52C28.954 52 20 43.046 20 32Z" fill="#0f172a" opacity="0.3"/>
+            <circle cx="26" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
+            <circle cx="38" cy="20" r="1.5" fill="#a3e635" opacity="0.6"/>
+            <circle cx="42" cy="28" r="1" fill="#84cc16" opacity="0.7"/>
+          </svg>
+        </div>
         <h1>Luna</h1>
         <p class="login-sub">Supervisor WhatsApp Profissional</p>
       </div>
@@ -41,7 +63,29 @@
   <!-- LOADING -->
   <section id="loading-view" class="loading hidden">
     <div class="loading-container">
-      <div class="loading-icon">🌙</div>
+      <!-- Substituindo emoji por SVG customizado da lua no loading -->
+      <div class="loading-icon">
+        <svg width="80" height="80" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="moonGradientLoading" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" style="stop-color:#84cc16;stop-opacity:1" />
+              <stop offset="100%" style="stop-color:#15803d;stop-opacity:1" />
+            </linearGradient>
+            <filter id="glowLoading">
+              <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+              <feMerge> 
+                <feMergeNode in="coloredBlur"/>
+                <feMergeNode in="SourceGraphic"/>
+              </feMerge>
+            </filter>
+          </defs>
+          <circle cx="32" cy="32" r="28" fill="url(#moonGradientLoading)" filter="url(#glowLoading)" opacity="0.9"/>
+          <path d="M20 32C20 20.954 28.954 12 40 12C36.686 12 33.686 13.343 31.515 15.515C27.172 19.858 25 25.858 25 32C25 38.142 27.172 44.142 31.515 48.485C33.686 50.657 36.686 52 40 52C28.954 52 20 43.046 20 32Z" fill="#0f172a" opacity="0.3"/>
+          <circle cx="26" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
+          <circle cx="38" cy="20" r="1.5" fill="#a3e635" opacity="0.6"/>
+          <circle cx="42" cy="28" r="1" fill="#84cc16" opacity="0.7"/>
+        </svg>
+      </div>
       <div class="loading-spinner"></div>
       <h2>Carregando Sistema</h2>
       <p>Preparando suas conversas...</p>
@@ -58,7 +102,29 @@
   <section id="app-view" class="app hidden">
     <header class="topbar">
       <div class="brand">
-        <div class="brand-icon">🌙</div>
+        <!-- Substituindo emoji por SVG customizado da lua no header -->
+        <div class="brand-icon">
+          <svg width="32" height="32" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="moonGradientHeader" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" style="stop-color:#84cc16;stop-opacity:1" />
+                <stop offset="100%" style="stop-color:#15803d;stop-opacity:1" />
+              </linearGradient>
+              <filter id="glowHeader">
+                <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+                <feMerge> 
+                  <feMergeNode in="coloredBlur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+            <circle cx="32" cy="32" r="28" fill="url(#moonGradientHeader)" filter="url(#glowHeader)" opacity="0.9"/>
+            <path d="M20 32C20 20.954 28.954 12 40 12C36.686 12 33.686 13.343 31.515 15.515C27.172 19.858 25 25.858 25 32C25 38.142 27.172 44.142 31.515 48.485C33.686 50.657 36.686 52 40 52C28.954 52 20 43.046 20 32Z" fill="#0f172a" opacity="0.3"/>
+            <circle cx="26" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
+            <circle cx="38" cy="20" r="1.5" fill="#a3e635" opacity="0.6"/>
+            <circle cx="42" cy="28" r="1" fill="#84cc16" opacity="0.7"/>
+          </svg>
+        </div>
         <div class="brand-text">
           <span class="brand-name">Luna</span>
           <small id="profile">Supervisor WhatsApp</small>
