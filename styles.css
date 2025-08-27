@@ -95,6 +95,11 @@ body {
 .login-icon svg {
   filter: drop-shadow(0 0 25px rgba(132, 204, 22, 0.5));
   animation: moonGlow 4s ease-in-out infinite alternate;
+  transition: transform 0.3s ease;
+}
+
+.login-icon svg:hover {
+  transform: scale(1.1);
 }
 
 .login h1 {
@@ -265,11 +270,12 @@ body {
 
 .brand-icon svg {
   filter: drop-shadow(0 0 10px rgba(132, 204, 22, 0.4));
-  transition: filter 0.3s ease;
+  transition: filter 0.3s ease, transform 0.3s ease;
 }
 
 .brand-icon:hover svg {
   filter: drop-shadow(0 0 15px rgba(132, 204, 22, 0.6));
+  transform: scale(1.1) rotate(5deg);
 }
 
 .brand-text {
@@ -618,7 +624,7 @@ body {
 
 .loading-icon svg {
   filter: drop-shadow(0 0 35px rgba(132, 204, 22, 0.5));
-  animation: moonPulse 3s ease-in-out infinite;
+  animation: moonPulse 2s ease-in-out infinite, rotate 8s linear infinite;
 }
 
 .loading-spinner {
@@ -690,12 +696,12 @@ body {
 @keyframes moonPulse {
   0%,
   100% {
-    filter: drop-shadow(0 0 35px rgba(132, 204, 22, 0.5));
-    transform: scale(1) rotate(0deg);
+    opacity: 1;
+    transform: scale(1);
   }
   50% {
-    filter: drop-shadow(0 0 45px rgba(132, 204, 22, 0.8));
-    transform: scale(1.1) rotate(5deg);
+    opacity: 0.8;
+    transform: scale(1.02);
   }
 }
 
@@ -752,6 +758,15 @@ body {
   }
 }
 
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* ========= MOBILE RESPONSIVE ========= */
 /* Melhorando a responsividade mobile */
 @media (max-width: 1023px) {
@@ -800,6 +815,11 @@ body {
     flex: 1;
   }
 
+  /* Melhorando login mobile para tablets */
+  .login {
+    padding: 20px;
+  }
+
   .login-card {
     padding: 28px;
     width: min(400px, 95vw);
@@ -818,54 +838,26 @@ body {
     height: 72px;
   }
 
-  .loading-container {
-    padding: 0 16px;
+  /* Melhorando chat list mobile */
+  .chat-list {
+    padding: 8px;
   }
 
-  .loading-icon svg {
-    width: 80px;
-    height: 80px;
-  }
-
-  .loading h2 {
-    font-size: 22px;
-  }
-
-  .loading p {
-    font-size: 15px;
-  }
-
-  /* Melhorando chat items no mobile */
   .chat-item {
-    padding: 14px;
-    margin-bottom: 2px;
-  }
-
-  .avatar {
-    width: 48px;
-    height: 48px;
-    font-size: 16px;
-  }
-
-  .name {
-    font-size: 14px;
-  }
-
-  .preview {
-    font-size: 12px;
+    padding: 12px;
+    margin-bottom: 4px;
   }
 
   .messages {
-    padding: 16px;
+    padding: 12px;
   }
 
-  .msg {
-    max-width: 85%;
-    padding: 10px 14px;
+  .send {
+    padding: 12px;
   }
 }
 
-/* Adicionando responsividade para telas muito pequenas */
+/* Responsividade para smartphones */
 @media (max-width: 480px) {
   .login {
     padding: 12px;
@@ -875,6 +867,7 @@ body {
     padding: 24px;
     width: 100%;
     max-width: 360px;
+    margin: 0 8px;
   }
 
   .login h1 {
@@ -891,11 +884,7 @@ body {
     font-size: 15px;
   }
 
-  .inp {
-    padding: 14px 16px;
-    font-size: 16px; /* Evita zoom no iOS */
-  }
-
+  /* Melhorando topbar mobile */
   .topbar {
     padding: 10px 12px;
   }
@@ -906,44 +895,48 @@ body {
   }
 
   .brand-name {
-    font-size: 15px;
+    font-size: 14px;
   }
 
-  .sidebar-head {
-    padding: 16px;
+  .btn-logout {
+    padding: 8px 12px;
+    font-size: 13px;
   }
 
-  .sidebar-head h2 {
-    font-size: 16px;
-  }
-
-  .send {
-    padding: 12px 16px;
-  }
-
+  /* Otimizando chat mobile */
   .chatbar {
-    padding: 10px 16px;
+    padding: 12px;
   }
 
   .chat-title {
-    font-size: 15px;
+    font-size: 16px;
   }
 
-  .loading-icon svg {
-    width: 72px;
-    height: 72px;
+  .send-group {
+    flex-direction: row;
+    gap: 8px;
   }
 
-  .loading h2 {
-    font-size: 20px;
+  .inp-compact {
+    min-width: 120px;
+    flex: 0 0 auto;
+  }
+
+  .inp-main {
+    flex: 1;
   }
 }
 
-/* Adicionando responsividade para telas extra pequenas */
+/* Responsividade para telas muito pequenas */
 @media (max-width: 360px) {
+  .login {
+    padding: 8px;
+  }
+
   .login-card {
     padding: 20px;
-    margin: 8px;
+    margin: 4px;
+    width: calc(100% - 8px);
   }
 
   .login h1 {
@@ -960,23 +953,67 @@ body {
     font-size: 14px;
   }
 
-  .inp {
-    padding: 12px 14px;
+  /* Ajustes extremos para telas pequenas */
+  .topbar {
+    padding: 8px 10px;
+  }
+
+  .brand-text {
+    display: none;
+  }
+
+  .btn-logout span {
+    display: none;
+  }
+
+  .send-group {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .inp-compact {
+    min-width: auto;
+    flex: 1;
   }
 
   .chat-item {
-    padding: 12px;
+    padding: 10px;
   }
 
   .avatar {
-    width: 44px;
-    height: 44px;
-    font-size: 15px;
+    width: 36px;
+    height: 36px;
+  }
+}
+
+/* Melhorias adicionais para landscape mobile */
+@media (max-height: 500px) and (orientation: landscape) {
+  .login {
+    padding: 16px;
   }
 
-  .msg {
-    max-width: 90%;
-    padding: 8px 12px;
+  .login-card {
+    padding: 20px;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .login-header {
+    margin-bottom: 20px;
+  }
+
+  .login-icon svg {
+    width: 48px;
+    height: 48px;
+  }
+
+  .login h1 {
+    font-size: 22px;
+    margin-bottom: 4px;
+  }
+
+  .login-sub {
+    font-size: 14px;
   }
 }
 
