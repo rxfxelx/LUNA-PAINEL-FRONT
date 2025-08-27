@@ -61,7 +61,7 @@ function escapeHtml(s) {
   )
 }
 
-/* ======== DETECÇÃO REGRAS — INTERESSE & TRANSFERÊNCIA (SEM IA) ======== */
+/* ======== DETECÇÃO POR REGRAS (SEM IA) ======== */
 function norm(s="") {
   return String(s)
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -74,37 +74,8 @@ function msgText(m){
     m?.text || m?.caption || m?.message?.text || m?.message?.conversation || m?.body || ""
   )
 }
-// padrões de interesse do CLIENTE (user)
-const INTEREST_PATTERNS = {
-  perguntas: [
-    /\?/, /\bcomo\b/, /\bquanto\b/, /\bquando\b/, /\bonde\b/, /\bprazo\b/,
-    /\bvalor\b/, /\bpreco\b/, /\bpreço\b/, /\bgarantia\b/, /\bentrega\b/,
-    /\bfunciona\b/, /\bdemonstrac?ao\b/, /\bmostrar?\b/, /\bcatalogo\b/, /\bcardapio\b/
-  ],
-  intencao: [
-    /\bquero\b/, /\bgostaria\b/, /\btenho interesse\b/, /\bme interessa\b/,
-    /\bpode enviar\b/, /\bpode me mostrar\b/, /\baceito\b/, /\btopo\b/,
-    /\btenho duvida(s)?\b/
-  ],
-  confirmacaoLeve: [
-    /\bbeleza\b/, /\bshow\b/, /\bperfeito\b/, /\bok\b/, /\bmanda\b/, /\bmanda sim\b/
-  ]
-}
-const INTEREST_POINTS = { perguntas: 2, intencao: 3, confirmacaoLeve: 1 }
-const INTEREST_THRESHOLD = 3 // >= 3 pontos => LEAD
 
-function scoreInterest(userMsgs){
-  let score = 0
-  for(const m of userMsgs){
-    const t = msgText(m)
-    for(const [group, regs] of Object.entries(INTEREST_PATTERNS)){
-      if (regs.some(r => r.test(t))) score += INTEREST_POINTS[group]
-    }
-  }
-  return score
-}
-
-// padrões de TRANSFERÊNCIA/ENCAMINHAMENTO feitos por NÓS (assistant)
+// Lead QUENTE: detecta transferência/encaminhamento (mensagem nossa)
 const TRANSFER_PATTERNS = [
   /\bvou te passar para\b/, /\bvou passar seu contato\b/, /\bvou encaminhar\b/,
   /\bencaminhando seu contato\b/, /\b(o|a) (time|setor|equipe) (vai|ira) (te )?chamar\b/,
@@ -120,6 +91,19 @@ function isTransferredByAgent(agentMsgs){
   return false
 }
 
+// Lead: quando NÓS enviamos a confirmação “Sim, pode continuar” (variações)
+const LEAD_CONFIRM_PATTERNS = [
+  /\bsim[, ]*\s*pode\s+continuar\b/,
+  /\bpode\s+continuar\b/ // mantém simples; só conta se vier de mensagem nossa (agent)
+]
+function isLeadConfirmByAgent(agentMsgs){
+  for(const m of agentMsgs){
+    const t = msgText(m)
+    if (LEAD_CONFIRM_PATTERNS.some(r => r.test(t))) return true
+  }
+  return false
+}
+
 /* ========= STATE ========= */
 const state = {
   chats: [],
@@ -129,7 +113,7 @@ const state = {
   unread: new Map(), // chatid => count
   loadingChats: false,
 
-  // === Classificação (persistente no navegador) ===
+  // Classificação persistente (localStorage)
   // chatid -> {stage, confidence, reason, at, lastKey}
   aiStage: new Map(),
   aiStageLoaded: false,
@@ -177,32 +161,24 @@ function classifyByRules(items){
   const userMsgs   = all.filter(m => !(m.fromMe || m.fromme || m.from_me))
   const agentMsgs  = all.filter(m =>  (m.fromMe || m.fromme || m.from_me))
 
-  // Lead Quente se NÓS sinalizamos transferência/encaminhamento
+  // 1) Lead Quente se nós indicamos transferência/encaminhamento
   if (isTransferredByAgent(agentMsgs)) {
-    return { stage: "lead_quente", confidence: 0.9, reason: "Transferência detectada" }
+    return { stage: "lead_quente", confidence: 0.95, reason: "Transferência/encaminhamento detectado" }
   }
 
-  // Contatos = cliente ainda não engajou (0 msg) OU só 1 msg sem interesse
-  const interest = scoreInterest(userMsgs)
-  if (userMsgs.length === 0) {
-    return { stage: "contatos", confidence: 0.6, reason: "Sem resposta do cliente" }
-  }
-  if (userMsgs.length === 1 && interest < INTEREST_THRESHOLD) {
-    return { stage: "contatos", confidence: 0.58, reason: "Uma mensagem sem interesse claro" }
+  // 2) Lead se nós enviamos “Sim, pode continuar” (ou variações)
+  if (isLeadConfirmByAgent(agentMsgs)) {
+    return { stage: "lead", confidence: 0.9, reason: "Confirmação 'pode continuar' enviada" }
   }
 
-  // Lead = demonstrou interesse (pontuação suficiente)
-  if (interest >= INTEREST_THRESHOLD) {
-    const conf = Math.min(0.85, 0.55 + 0.1 * interest)
-    return { stage: "lead", confidence: conf, reason: `Interesse detectado (score=${interest})` }
+  // 3) Caso contrário, Contatos
+  //    (toda conversa em que apenas enviamos mensagens ou sem esses gatilhos)
+  //    Se o cliente respondeu mas não houve nossos gatilhos, fica Contatos mesmo.
+  if (userMsgs.length >= 0) {
+    return { stage: "contatos", confidence: 0.7, reason: "Sem gatilhos de lead/transferência" }
   }
 
-  // fallback: se está conversando mas sem sinais fortes, trata como lead
-  if (userMsgs.length >= 2) {
-    return { stage: "lead", confidence: 0.62, reason: "Troca de mensagens sem transferência" }
-  }
-
-  return { stage: "contatos", confidence: 0.55, reason: "Sem sinais suficientes" }
+  return { stage: "contatos", confidence: 0.7, reason: "Padrão" }
 }
 
 /* ======== PERSISTÊNCIA LOCAL (nunca rebaixa) ======== */
