@@ -5,10 +5,7 @@ const show = (sel) => $(sel).classList.remove("hidden")
 const hide = (sel) => $(sel).classList.add("hidden")
 
 // Idle callback (não bloqueia UI)
-const rIC = (cb) =>
-  (window.requestIdleCallback
-    ? window.requestIdleCallback(cb, { timeout: 200 })
-    : setTimeout(cb, 0))
+const rIC = (cb) => (window.requestIdleCallback ? window.requestIdleCallback(cb, { timeout: 200 }) : setTimeout(cb, 0))
 
 // Limitador de concorrência simples
 async function runLimited(tasks, limit = 8) {
@@ -17,7 +14,11 @@ async function runLimited(tasks, limit = 8) {
   const workers = new Array(Math.min(limit, tasks.length)).fill(0).map(async () => {
     while (i < tasks.length) {
       const cur = i++
-      try { results[cur] = await tasks[cur]() } catch (e) { results[cur] = undefined }
+      try {
+        results[cur] = await tasks[cur]()
+      } catch (e) {
+        results[cur] = undefined
+      }
     }
   })
   await Promise.all(workers)
@@ -85,17 +86,20 @@ const state = {
 /* ========= STAGES ========= */
 const STAGES = ["contatos", "lead", "lead_quente"]
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" }
-const STAGE_RANK  = { contatos: 0, lead: 1, lead_quente: 2 }
+const STAGE_RANK = { contatos: 0, lead: 1, lead_quente: 2 }
 
 function normalizeStage(s) {
-  const k = String(s || "").toLowerCase().trim()
+  const k = String(s || "")
+    .toLowerCase()
+    .trim()
   if (k.startsWith("contato")) return "contatos"
   if (k.includes("lead_quente") || k.includes("quente")) return "lead_quente"
   if (k === "lead") return "lead"
   return "contatos"
 }
 function maxStage(a, b) {
-  a = normalizeStage(a); b = normalizeStage(b)
+  a = normalizeStage(a)
+  b = normalizeStage(b)
   return STAGE_RANK[b] > STAGE_RANK[a] ? b : a
 }
 
@@ -111,7 +115,9 @@ function loadStageCache() {
 }
 function saveStageCache() {
   const obj = {}
-  state.stages.forEach((v, k) => { obj[k] = v })
+  state.stages.forEach((v, k) => {
+    obj[k] = v
+  })
   localStorage.setItem("luna_ai_stage", JSON.stringify(obj))
 }
 function getStage(chatid) {
@@ -129,47 +135,51 @@ function setStage(chatid, nextStage, key) {
 }
 
 /* ========= CRM (mantido) ========= */
-const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
-async function apiCRMViews(){ return api("/api/crm/views") }
-async function apiCRMList(stage, limit=100, offset=0){
-  const qs = new URLSearchParams({stage,limit,offset}).toString()
-  return api("/api/crm/list?"+qs)
+const CRM_STAGES = ["novo", "sem_resposta", "interessado", "em_negociacao", "fechou", "descartado"]
+async function apiCRMViews() {
+  return api("/api/crm/views")
 }
-async function apiCRMSetStatus(chatid, stage, notes=""){
-  return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
+async function apiCRMList(stage, limit = 100, offset = 0) {
+  const qs = new URLSearchParams({ stage, limit, offset }).toString()
+  return api("/api/crm/list?" + qs)
 }
-function ensureCRMBar(){ /* no-op */ }
-async function refreshCRMCounters(){
-  try{
-    const data=await apiCRMViews()
-    const counts=data?.counts||{}
-    const el=document.querySelector(".crm-counters")
-    if(el){
-      const parts=CRM_STAGES.map(s=>`${s.replace("_"," ")}: ${counts[s]||0}`)
-      el.textContent=parts.join(" • ")
+async function apiCRMSetStatus(chatid, stage, notes = "") {
+  return api("/api/crm/status", { method: "POST", body: JSON.stringify({ chatid, stage, notes }) })
+}
+function ensureCRMBar() {
+  /* no-op */
+}
+async function refreshCRMCounters() {
+  try {
+    const data = await apiCRMViews()
+    const counts = data?.counts || {}
+    const el = document.querySelector(".crm-counters")
+    if (el) {
+      const parts = CRM_STAGES.map((s) => `${s.replace("_", " ")}: ${counts[s] || 0}`)
+      el.textContent = parts.join(" • ")
     }
-  }catch{}
+  } catch {}
 }
-async function loadCRMStage(stage){
-  const list=$("#chat-list")
-  list.innerHTML="<div class='hint'>Carregando visão CRM...</div>"
-  try{
-    const data=await apiCRMList(stage,100,0)
-    const items=[]
-    for(const it of (data?.items||[])){
-      const ch=it.chat||{}
-      if(!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid=it.crm.chatid
+async function loadCRMStage(stage) {
+  const list = $("#chat-list")
+  list.innerHTML = "<div class='hint'>Carregando visão CRM...</div>"
+  try {
+    const data = await apiCRMList(stage, 100, 0)
+    const items = []
+    for (const it of data?.items || []) {
+      const ch = it.chat || {}
+      if (!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid = it.crm.chatid
       items.push(ch)
     }
     await progressiveRenderChats(items)
     await prefetchCards(items)
-  }catch(e){
-    list.innerHTML=`<div class='error'>Falha ao carregar CRM: ${escapeHtml(e.message||"")}</div>`
-  }finally{
+  } catch (e) {
+    list.innerHTML = `<div class='error'>Falha ao carregar CRM: ${escapeHtml(e.message || "")}</div>`
+  } finally {
     refreshCRMCounters()
   }
 }
-function attachCRMControlsToCard(){}
+function attachCRMControlsToCard() {}
 
 /* ========= SPLASH ========= */
 function createSplash() {
@@ -220,8 +230,14 @@ function hideSplash() {
   const el = document.getElementById("luna-splash")
   if (el) el.remove()
   state.splash.shown = false
-  if (state.splash.timer) { clearTimeout(state.splash.timer); state.splash.timer = null }
-  if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
+  if (state.splash.timer) {
+    clearTimeout(state.splash.timer)
+    state.splash.timer = null
+  }
+  if (state.splash.forceTimer) {
+    clearTimeout(state.splash.forceTimer)
+    state.splash.forceTimer = null
+  }
 }
 
 /* ========= LOGIN ========= */
@@ -338,16 +354,18 @@ function ensureStageTabs() {
       state.activeTab = key
       onclick()
       // marca ativa
-      host.querySelectorAll(".stage-tabs .btn").forEach(x => x.classList.remove("active"))
+      host.querySelectorAll(".stage-tabs .btn").forEach((x) => x.classList.remove("active"))
       b.classList.add("active")
+      const mobileSelect = document.getElementById("mobile-stage-select")
+      if (mobileSelect) mobileSelect.value = key
     }
     return b
   }
 
   const btnGeral = addBtn("geral", "Geral", () => loadChats())
-  const btnCont   = addBtn("contatos", "Contatos", () => loadStageTab("contatos"))
-  const btnLead   = addBtn("lead", "Lead", () => loadStageTab("lead"))
-  const btnLQ     = addBtn("lead_quente", "Lead Quente", () => loadStageTab("lead_quente"))
+  const btnCont = addBtn("contatos", "Contatos", () => loadStageTab("contatos"))
+  const btnLead = addBtn("lead", "Lead", () => loadStageTab("lead"))
+  const btnLQ = addBtn("lead_quente", "Lead Quente", () => loadStageTab("lead_quente"))
 
   bar.appendChild(btnGeral)
   bar.appendChild(btnCont)
@@ -363,6 +381,37 @@ function ensureStageTabs() {
   host.appendChild(bar)
   host.appendChild(counters)
 
+  const mobileSelect = document.getElementById("mobile-stage-select")
+  if (mobileSelect) {
+    mobileSelect.onchange = (e) => {
+      const key = e.target.value
+      state.activeTab = key
+
+      // Executa a ação correspondente
+      switch (key) {
+        case "geral":
+          loadChats()
+          break
+        case "contatos":
+          loadStageTab("contatos")
+          break
+        case "lead":
+          loadStageTab("lead")
+          break
+        case "lead_quente":
+          loadStageTab("lead_quente")
+          break
+      }
+
+      // Sincroniza com botões desktop
+      const btn = host.querySelector(`.stage-tabs .btn[data-stage="${key}"]`)
+      if (btn) {
+        host.querySelectorAll(".stage-tabs .btn").forEach((x) => x.classList.remove("active"))
+        btn.classList.add("active")
+      }
+    }
+  }
+
   // ativa a guia atual
   setTimeout(() => {
     const btn = host.querySelector(`.stage-tabs .btn[data-stage="${state.activeTab}"]`) || btnGeral
@@ -373,14 +422,22 @@ function ensureStageTabs() {
 function refreshStageCounters() {
   loadStageCache()
   const counts = { contatos: 0, lead: 0, lead_quente: 0 }
-  state.chats.forEach(ch => {
+  state.chats.forEach((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     const st = getStage(chatid)?.stage || "contatos"
     if (counts[st] !== undefined) counts[st]++
   })
+
   const el = document.querySelector(".stage-counters")
-  if (el) el.textContent =
-    `contatos: ${counts.contatos} • lead: ${counts.lead} • lead quente: ${counts.lead_quente}`
+  if (el) el.textContent = `contatos: ${counts.contatos} • lead: ${counts.lead} • lead quente: ${counts.lead_quente}`
+
+  const mobileContatos = document.getElementById("mobile-counter-contatos")
+  const mobileLead = document.getElementById("mobile-counter-lead")
+  const mobileLeadQuente = document.getElementById("mobile-counter-lead_quente")
+
+  if (mobileContatos) mobileContatos.textContent = counts.contatos
+  if (mobileLead) mobileLead.textContent = counts.lead
+  if (mobileLeadQuente) mobileLeadQuente.textContent = counts.lead_quente
 }
 
 async function loadStageTab(stageKey) {
@@ -388,7 +445,7 @@ async function loadStageTab(stageKey) {
   list.innerHTML = "<div class='hint'>Carregando…</div>"
 
   loadStageCache()
-  const filtered = state.chats.filter(ch => {
+  const filtered = state.chats.filter((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     const st = getStage(chatid)?.stage || "contatos"
     return st === stageKey
@@ -560,7 +617,9 @@ async function prefetchCards(items) {
               last?.message?.conversation ||
               last?.body ||
               ""
-            ).replace(/\s+/g, " ").trim()
+            )
+              .replace(/\s+/g, " ")
+              .trim()
             state.lastMsg.set(chatid, pv)
 
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`)
@@ -746,78 +805,186 @@ Também há um guard contra mensagens automáticas de menu/cardápio.
 */
 const HOT_HINTS = [
   // verbos de encaminhar
-  "vou te passar para", "vou te passar pro", "vou passar voce para", "vou passar você para",
-  "vou passar para o setor", "vou passar para o departamento", "vou passar para o time",
-  "vou passar seu contato", "vou passar o seu contato", "vou passar seu numero",
-  "vou passar o seu numero", "vou repassar seu contato", "repassei seu contato",
-  "enviei seu contato", "vou enviar seu contato", "enviarei seu contato",
-  "vou encaminhar", "encaminhando seu contato", "encaminhei seu contato",
-  "encaminhei seu numero", "encaminhei seu número", "encaminhar seu contato",
-  "estou encaminhando", "encaminharei",
+  "vou te passar para",
+  "vou te passar pro",
+  "vou passar voce para",
+  "vou passar você para",
+  "vou passar para o setor",
+  "vou passar para o departamento",
+  "vou passar para o time",
+  "vou passar seu contato",
+  "vou passar o seu contato",
+  "vou passar seu numero",
+  "vou passar o seu numero",
+  "vou repassar seu contato",
+  "repassei seu contato",
+  "enviei seu contato",
+  "vou enviar seu contato",
+  "enviarei seu contato",
+  "vou encaminhar",
+  "encaminhando seu contato",
+  "encaminhei seu contato",
+  "encaminhei seu numero",
+  "encaminhei seu número",
+  "encaminhar seu contato",
+  "estou encaminhando",
+  "encaminharei",
 
   // colocar em contato / conectar
-  "vou te colocar em contato", "vou colocar voce em contato", "vou colocar você em contato",
-  "colocar voce em contato", "colocar você em contato", "vou te conectar", "vou te por em contato",
+  "vou te colocar em contato",
+  "vou colocar voce em contato",
+  "vou colocar você em contato",
+  "colocar voce em contato",
+  "colocar você em contato",
+  "vou te conectar",
+  "vou te por em contato",
   "te coloco em contato",
 
   // outra pessoa/area/consultor
-  "o time comercial vai te chamar", "o time vai te chamar", "nossa equipe vai entrar em contato",
-  "a equipe vai entrar em contato", "o setor vai entrar em contato",
-  "o atendente vai falar com voce", "o atendente vai falar com você",
-  "um atendente vai te chamar", "um consultor vai te chamar",
-  "o consultor vai te chamar", "o especialista vai te chamar",
-  "o responsavel vai te chamar", "o responsável vai te chamar",
-  "o pessoal do comercial te chama", "suporte vai te chamar",
-  "vendas vai te chamar", "pre-vendas vai te chamar", "pré-vendas vai te chamar",
+  "o time comercial vai te chamar",
+  "o time vai te chamar",
+  "nossa equipe vai entrar em contato",
+  "a equipe vai entrar em contato",
+  "o setor vai entrar em contato",
+  "o atendente vai falar com voce",
+  "o atendente vai falar com você",
+  "um atendente vai te chamar",
+  "um consultor vai te chamar",
+  "o consultor vai te chamar",
+  "o especialista vai te chamar",
+  "o responsavel vai te chamar",
+  "o responsável vai te chamar",
+  "o pessoal do comercial te chama",
+  "suporte vai te chamar",
+  "vendas vai te chamar",
+  "pre-vendas vai te chamar",
+  "pré-vendas vai te chamar",
 
   // pedir para alguém chamar
-  "vou pedir para alguem te chamar", "vou pedir para alguém te chamar",
-  "vou pedir pra alguem te chamar", "vou pedir pra alguém te chamar",
-  "vou pedir pro pessoal te chamar", "vou pedir para o time te chamar",
-  "ja pedi para te chamarem", "já pedi para te chamarem",
+  "vou pedir para alguem te chamar",
+  "vou pedir para alguém te chamar",
+  "vou pedir pra alguem te chamar",
+  "vou pedir pra alguém te chamar",
+  "vou pedir pro pessoal te chamar",
+  "vou pedir para o time te chamar",
+  "ja pedi para te chamarem",
+  "já pedi para te chamarem",
 
   // transferir (formas)
-  "vou transferir", "estou transferindo", "transferencia para o setor",
-  "transferência para o setor", "transferi sua solicitacao", "transferi sua solicitação",
-  "direcionei seu contato", "direcionando seu contato", "direcionar seu contato",
+  "vou transferir",
+  "estou transferindo",
+  "transferencia para o setor",
+  "transferência para o setor",
+  "transferi sua solicitacao",
+  "transferi sua solicitação",
+  "direcionei seu contato",
+  "direcionando seu contato",
+  "direcionar seu contato",
 
   // confirmações
-  "daqui a pouco te chamam", "em breve vao entrar em contato", "em breve vão entrar em contato",
-  "abrirei um chamado", "vou abrir um chamado", "abrir um ticket", "abrirei um ticket",
+  "daqui a pouco te chamam",
+  "em breve vao entrar em contato",
+  "em breve vão entrar em contato",
+  "abrirei um chamado",
+  "vou abrir um chamado",
+  "abrir um ticket",
+  "abrirei um ticket",
 ].map(norm)
 
 const HOT_NEGATIVE_GUARDS = [
-  "cardapio", "cardápio", "menu", "catalogo", "catálogo", "ver menu", "ver cardapio",
-  "acesse o menu", "acesse o cardapio", "acesse o cardápio", "acesse nosso catalogo",
-  "acesse nosso catálogo", "cardapio online", "link do menu", "nosso menu",
-  "veja o menu", "veja o cardapio", "veja o catálogo",
+  "cardapio",
+  "cardápio",
+  "menu",
+  "catalogo",
+  "catálogo",
+  "ver menu",
+  "ver cardapio",
+  "acesse o menu",
+  "acesse o cardapio",
+  "acesse o cardápio",
+  "acesse nosso catalogo",
+  "acesse nosso catálogo",
+  "cardapio online",
+  "link do menu",
+  "nosso menu",
+  "veja o menu",
+  "veja o cardapio",
+  "veja o catálogo",
 ].map(norm)
 
 const LEAD_OK_PATTERNS = [
-  "sim, pode continuar", "sim pode continuar", "pode continuar",
-  "ok, pode continuar", "ok pode continuar", "pode seguir",
-  "sim, pode seguir", "sim pode seguir", "vamos continuar",
-  "podemos continuar", "pode prosseguir", "ok vamos prosseguir",
-  "segue", "segue por favor", "pode mostrar", "pode me mostrar",
-  "pode enviar", "pode mandar",
-  "pode continuar 👍", "pode continuar sim", "sim, pode continuar sim",
-  "pode continuar por favor", "pode continuar pf", "pode continuar pff",
-  "pode cont", "pode cnt", "pode seg", "pode prosseg", "pode proseguir",
+  "sim, pode continuar",
+  "sim pode continuar",
+  "pode continuar",
+  "ok, pode continuar",
+  "ok pode continuar",
+  "pode seguir",
+  "sim, pode seguir",
+  "sim pode seguir",
+  "vamos continuar",
+  "podemos continuar",
+  "pode prosseguir",
+  "ok vamos prosseguir",
+  "segue",
+  "segue por favor",
+  "pode mostrar",
+  "pode me mostrar",
+  "pode enviar",
+  "pode mandar",
+  "pode continuar 👍",
+  "pode continuar sim",
+  "sim, pode continuar sim",
+  "pode continuar por favor",
+  "pode continuar pf",
+  "pode continuar pff",
+  "pode cont",
+  "pode cnt",
+  "pode seg",
+  "pode prosseg",
+  "pode proseguir",
 ].map(norm)
 
 /* NOVO — padrões de pedir/perguntar NOME (muitas variações, com/sem acento) */
 const LEAD_NAME_PATTERNS = [
-  "qual seu nome", "qual o seu nome", "me diga seu nome", "me fala seu nome",
-  "como voce se chama", "como você se chama", "quem fala", "quem esta falando",
-  "quem está falando", "quem e voce", "quem é você", "pode me dizer seu nome",
-  "me passa seu nome", "me informe seu nome", "seu nome por favor", "nome pfv",
-  "nome por favor", "nome?", "qual seu primeiro nome", "qual seu nome completo",
-  "nome do cliente", "nome do titular", "nome para cadastro",
-  "poderia me informar seu nome", "me diga o seu nome", "informe seu nome",
-  "sobrenome", "seu nome e sobrenome", "como devo te chamar", "como posso te chamar",
-  "qual e seu nome", "qual é seu nome", "qual seria seu nome",
+  "qual seu nome",
+  "qual o seu nome",
+  "me diga seu nome",
+  "me fala seu nome",
+  "como voce se chama",
+  "como você se chama",
+  "quem fala",
+  "quem esta falando",
+  "quem está falando",
+  "quem e voce",
+  "quem é você",
+  "pode me dizer seu nome",
+  "me passa seu nome",
+  "me informe seu nome",
+  "seu nome por favor",
+  "nome pfv",
+  "nome por favor",
+  "nome?",
+  "qual seu primeiro nome",
+  "qual seu nome completo",
+  "nome do cliente",
+  "nome do titular",
+  "nome para cadastro",
+  "poderia me informar seu nome",
+  "me diga o seu nome",
+  "informe seu nome",
+  "sobrenome",
+  "seu nome e sobrenome",
+  "como devo te chamar",
+  "como posso te chamar",
+  "qual e seu nome",
+  "qual é seu nome",
+  "qual seria seu nome",
   // abreviações e erros comuns
-  "ql seu nome", "q seu nome", "seu nm", "seu nome sff", "seu nome pf",
+  "ql seu nome",
+  "q seu nome",
+  "seu nm",
+  "seu nome sff",
+  "seu nome pf",
 ].map(norm)
 
 function classifyByRules(items) {
@@ -830,21 +997,21 @@ function classifyByRules(items) {
     if (!text || !me) continue
 
     // Guard contra "menu/cardápio" para evitar marcar como lead_quente por links automáticos
-    const hasMenuish = HOT_NEGATIVE_GUARDS.some(g => text.includes(g))
+    const hasMenuish = HOT_NEGATIVE_GUARDS.some((g) => text.includes(g))
 
     // LEAD QUENTE: qualquer hint de transferência/encaminhamento etc.
-    if (!hasMenuish && HOT_HINTS.some(h => text.includes(h))) {
+    if (!hasMenuish && HOT_HINTS.some((h) => text.includes(h))) {
       stage = "lead_quente"
       break
     }
 
     // LEAD: confirmação de “pode continuar” e equivalentes
-    if (LEAD_OK_PATTERNS.some(p => text.includes(p))) {
+    if (LEAD_OK_PATTERNS.some((p) => text.includes(p))) {
       stage = maxStage(stage, "lead")
     }
 
     // LEAD: quando pedimos/perguntamos o NOME
-    if (LEAD_NAME_PATTERNS.some(p => text.includes(p))) {
+    if (LEAD_NAME_PATTERNS.some((p) => text.includes(p))) {
       stage = maxStage(stage, "lead")
     }
   }
@@ -863,7 +1030,7 @@ async function classifyAndPersist(chatid, items) {
 }
 
 async function classifyAllChatsInBackground(items) {
-  const tasks = (items || []).map(ch => async () => {
+  const tasks = (items || []).map((ch) => async () => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     if (!chatid) return
     try {
@@ -956,36 +1123,40 @@ async function sendNow() {
 /* ========= BOOT ========= */
 document.addEventListener("DOMContentLoaded", () => {
   $("#btn-login") && ($("#btn-login").onclick = doLogin)
-  $("#btn-logout") && ($("#btn-logout").onclick = () => {
-    localStorage.clear()
-    location.reload()
-  })
+  $("#btn-logout") &&
+    ($("#btn-logout").onclick = () => {
+      localStorage.clear()
+      location.reload()
+    })
   $("#btn-send") && ($("#btn-send").onclick = sendNow)
-  $("#btn-refresh") && ($("#btn-refresh").onclick = () => {
-    if (state.current) {
-      const chatid = state.current.wa_chatid || state.current.chatid
-      loadMessages(chatid)
-    } else {
-      loadChats()
-    }
-  })
+  $("#btn-refresh") &&
+    ($("#btn-refresh").onclick = () => {
+      if (state.current) {
+        const chatid = state.current.wa_chatid || state.current.chatid
+        loadMessages(chatid)
+      } else {
+        loadChats()
+      }
+    })
 
   const backBtn = document.getElementById("btn-back-mobile")
   if (backBtn) backBtn.onclick = () => setMobileMode("list")
 
-  $("#send-text") && $("#send-text").addEventListener("keypress", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      sendNow()
-    }
-  })
+  $("#send-text") &&
+    $("#send-text").addEventListener("keypress", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault()
+        sendNow()
+      }
+    })
 
-  $("#token") && $("#token").addEventListener("keypress", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault()
-      doLogin()
-    }
-  })
+  $("#token") &&
+    $("#token").addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault()
+        doLogin()
+      }
+    })
 
   ensureRoute()
 })
