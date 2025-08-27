@@ -5,7 +5,10 @@ const show = (sel) => $(sel).classList.remove("hidden")
 const hide = (sel) => $(sel).classList.add("hidden")
 
 // Idle callback (não bloqueia UI)
-const rIC = (cb) => (window.requestIdleCallback ? window.requestIdleCallback(cb, { timeout: 200 }) : setTimeout(cb, 0))
+const rIC = (cb) =>
+  (window.requestIdleCallback
+    ? window.requestIdleCallback(cb, { timeout: 200 })
+    : setTimeout(cb, 0))
 
 // Limitador de concorrência simples
 async function runLimited(tasks, limit = 8) {
@@ -14,11 +17,7 @@ async function runLimited(tasks, limit = 8) {
   const workers = new Array(Math.min(limit, tasks.length)).fill(0).map(async () => {
     while (i < tasks.length) {
       const cur = i++
-      try {
-        results[cur] = await tasks[cur]()
-      } catch (e) {
-        results[cur] = undefined
-      }
+      try { results[cur] = await tasks[cur]() } catch (e) { results[cur] = undefined }
     }
   })
   await Promise.all(workers)
@@ -71,135 +70,158 @@ const state = {
   unread: new Map(), // chatid => count
   loadingChats: false,
 
-  // === Classificação (persistente) ===
+  // Classificação local persistida
   // chatid -> {stage, at, lastKey}
-  aiStage: new Map(),
-  aiStageLoaded: false,
+  stages: new Map(),
+  stagesLoaded: false,
 
   // Splash
   splash: { shown: false, timer: null, forceTimer: null },
+
+  // Aba ativa (geral/contatos/lead/lead_quente)
+  activeTab: "geral",
 }
 
-/* ========= STAGES (Contatos, Lead, Lead Quente) ========= */
+/* ========= STAGES ========= */
 const STAGES = ["contatos", "lead", "lead_quente"]
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" }
-const STAGE_RANK = { contatos: 0, lead: 1, lead_quente: 2 }
+const STAGE_RANK  = { contatos: 0, lead: 1, lead_quente: 2 }
 
 function normalizeStage(s) {
-  const k = String(s || "")
-    .toLowerCase()
-    .trim()
+  const k = String(s || "").toLowerCase().trim()
   if (k.startsWith("contato")) return "contatos"
   if (k.includes("lead_quente") || k.includes("quente")) return "lead_quente"
   if (k === "lead") return "lead"
   return "contatos"
 }
 function maxStage(a, b) {
-  a = normalizeStage(a)
-  b = normalizeStage(b)
+  a = normalizeStage(a); b = normalizeStage(b)
   return STAGE_RANK[b] > STAGE_RANK[a] ? b : a
 }
 
+/* ========= STAGE CACHE ========= */
 function loadStageCache() {
-  if (state.aiStageLoaded) return
+  if (state.stagesLoaded) return
   try {
     const raw = localStorage.getItem("luna_ai_stage") || "{}"
     const obj = JSON.parse(raw)
-    Object.entries(obj).forEach(([chatid, v]) => state.aiStage.set(chatid, v))
+    Object.entries(obj).forEach(([chatid, v]) => state.stages.set(chatid, v))
   } catch {}
-  state.aiStageLoaded = true
+  state.stagesLoaded = true
 }
 function saveStageCache() {
   const obj = {}
-  state.aiStage.forEach((v, k) => {
-    obj[k] = v
-  })
+  state.stages.forEach((v, k) => { obj[k] = v })
   localStorage.setItem("luna_ai_stage", JSON.stringify(obj))
 }
 function getStage(chatid) {
   loadStageCache()
-  return state.aiStage.get(chatid) || null
+  return state.stages.get(chatid) || null
 }
 function setStage(chatid, nextStage, key) {
   loadStageCache()
   const cur = getStage(chatid) || { stage: "contatos", at: 0, lastKey: null }
-  const stage = maxStage(cur.stage, normalizeStage(nextStage))
+  const stage = maxStage(cur.stage, normalizeStage(nextStage)) // nunca rebaixa
   const rec = { stage, at: Date.now(), lastKey: key || cur.lastKey }
-  state.aiStage.set(chatid, rec)
+  state.stages.set(chatid, rec)
   saveStageCache()
   return rec
 }
 
-/* ========= CRM (mantido, mas sem botões/sem render de barra) ========= */
-const CRM_STAGES = ["novo", "sem_resposta", "interessado", "em_negociacao", "fechou", "descartado"]
-
-async function apiCRMViews() {
-  return api("/api/crm/views")
+/* ========= CRM (mantido) ========= */
+const CRM_STAGES = ["novo","sem_resposta","interessado","em_negociacao","fechou","descartado"]
+async function apiCRMViews(){ return api("/api/crm/views") }
+async function apiCRMList(stage, limit=100, offset=0){
+  const qs = new URLSearchParams({stage,limit,offset}).toString()
+  return api("/api/crm/list?"+qs)
 }
-async function apiCRMList(stage, limit = 100, offset = 0) {
-  const qs = new URLSearchParams({ stage, limit, offset }).toString()
-  return api("/api/crm/list?" + qs)
+async function apiCRMSetStatus(chatid, stage, notes=""){
+  return api("/api/crm/status",{method:"POST",body:JSON.stringify({chatid,stage,notes})})
 }
-async function apiCRMSetStatus(chatid, stage, notes = "") {
-  return api("/api/crm/status", { method: "POST", body: JSON.stringify({ chatid, stage, notes }) })
-}
-function ensureCRMBar() {
-  /* no-op: escondido por padrão */
-}
-async function refreshCRMCounters() {
-  try {
-    const data = await apiCRMViews()
-    const counts = data?.counts || {}
-    const el = document.querySelector(".crm-counters")
-    if (el) {
-      const parts = CRM_STAGES.map((s) => `${s.replace("_", " ")}: ${counts[s] || 0}`)
-      el.textContent = parts.join(" • ")
+function ensureCRMBar(){ /* no-op */ }
+async function refreshCRMCounters(){
+  try{
+    const data=await apiCRMViews()
+    const counts=data?.counts||{}
+    const el=document.querySelector(".crm-counters")
+    if(el){
+      const parts=CRM_STAGES.map(s=>`${s.replace("_"," ")}: ${counts[s]||0}`)
+      el.textContent=parts.join(" • ")
     }
-  } catch {}
+  }catch{}
 }
-async function loadCRMStage(stage) {
-  const list = $("#chat-list")
-  list.innerHTML = "<div class='hint'>Carregando visão CRM...</div>"
-  try {
-    const data = await apiCRMList(stage, 100, 0)
-    const items = []
-    for (const it of data?.items || []) {
-      const ch = it.chat || {}
-      if (!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid = it.crm.chatid
+async function loadCRMStage(stage){
+  const list=$("#chat-list")
+  list.innerHTML="<div class='hint'>Carregando visão CRM...</div>"
+  try{
+    const data=await apiCRMList(stage,100,0)
+    const items=[]
+    for(const it of (data?.items||[])){
+      const ch=it.chat||{}
+      if(!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid=it.crm.chatid
       items.push(ch)
     }
     await progressiveRenderChats(items)
     await prefetchCards(items)
-  } catch (e) {
-    list.innerHTML = `<div class='error'>Falha ao carregar CRM: ${escapeHtml(e.message || "")}</div>`
-  } finally {
+  }catch(e){
+    list.innerHTML=`<div class='error'>Falha ao carregar CRM: ${escapeHtml(e.message||"")}</div>`
+  }finally{
     refreshCRMCounters()
   }
 }
-function attachCRMControlsToCard(cardEl, chatObj) {
-  return
-}
+function attachCRMControlsToCard(){}
 
 /* ========= SPLASH ========= */
 function createSplash() {
   if (state.splash.shown) return
-  show("#loading-view")
+  const el = document.createElement("div")
+  el.id = "luna-splash"
+  el.style.position = "fixed"
+  el.style.inset = "0"
+  el.style.background = "var(--bg, #0b0b0c)"
+  el.style.display = "flex"
+  el.style.flexDirection = "column"
+  el.style.alignItems = "center"
+  el.style.justifyContent = "center"
+  el.style.gap = "18px"
+  el.style.zIndex = "9999"
+
+  const logo = document.createElement("div")
+  logo.textContent = "Luna"
+  logo.style.fontSize = "28px"
+  logo.style.fontWeight = "700"
+
+  const spin = document.createElement("div")
+  spin.style.width = "36px"
+  spin.style.height = "36px"
+  spin.style.border = "3px solid rgba(255,255,255,.2)"
+  spin.style.borderTopColor = "currentColor"
+  spin.style.borderRadius = "50%"
+  spin.style.animation = "luna-rot 1s linear infinite"
+
+  const note = document.createElement("div")
+  note.textContent = "Carregando..."
+  note.style.opacity = ".8"
+  note.style.fontSize = "13px"
+
+  const style = document.createElement("style")
+  style.textContent = `@keyframes luna-rot{to{transform:rotate(360deg)}}`
+
+  el.appendChild(style)
+  el.appendChild(logo)
+  el.appendChild(spin)
+  el.appendChild(note)
+  document.body.appendChild(el)
   state.splash.shown = true
 
-  // Força ocultar em até 7s (máximo)
   state.splash.forceTimer = setTimeout(hideSplash, 7000)
 }
 function hideSplash() {
-  hide("#loading-view")
+  const el = document.getElementById("luna-splash")
+  if (el) el.remove()
   state.splash.shown = false
-  if (state.splash.timer) {
-    clearTimeout(state.splash.timer)
-    state.splash.timer = null
-  }
-  if (state.splash.forceTimer) {
-    clearTimeout(state.splash.forceTimer)
-    state.splash.forceTimer = null
-  }
+  if (state.splash.timer) { clearTimeout(state.splash.timer); state.splash.timer = null }
+  if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
 }
 
 /* ========= LOGIN ========= */
@@ -237,19 +259,30 @@ async function doLogin() {
   }
 }
 
+function ensureTopbar() {
+  // Garante que exista .topbar para as abas
+  if (!$(".topbar")) {
+    const tb = document.createElement("div")
+    tb.className = "topbar"
+    tb.style.display = "flex"
+    tb.style.alignItems = "center"
+    tb.style.gap = "8px"
+    tb.style.padding = "8px 12px"
+    const host = $("#app-view") || document.body
+    host.prepend(tb)
+  }
+}
+
 function switchToApp() {
   hide("#login-view")
   show("#app-view")
   setMobileMode("list")
+  ensureTopbar()
   ensureCRMBar()
   ensureStageTabs()
 
-  // Splash (máx. 7s) enquanto iniciamos carregamentos + classificações
   createSplash()
-
-  // Carregar conversas (progressivo); splash some assim que a 1ª leva for renderizada
   loadChats().finally(() => {
-    // dá um respiro de 300ms para evitar "piscar"
     state.splash.timer = setTimeout(hideSplash, 300)
   })
 }
@@ -282,27 +315,35 @@ function initialsOf(str) {
   return parts.map((p) => p[0]?.toUpperCase() || "").join("") || "??"
 }
 
-/* ========= STAGE TABS (Geral / Contatos / Lead / Lead Quente) ========= */
+/* ========= STAGE TABS ========= */
 function ensureStageTabs() {
   const host = document.querySelector(".topbar")
   if (!host || host.querySelector(".stage-tabs")) return
 
   const bar = document.createElement("div")
   bar.className = "stage-tabs"
+  bar.style.display = "flex"
+  bar.style.gap = "8px"
 
   const addBtn = (key, label, onclick) => {
     const b = document.createElement("button")
     b.className = "btn"
     b.dataset.stage = key
     b.textContent = label
-    b.onclick = onclick
+    b.onclick = () => {
+      state.activeTab = key
+      onclick()
+      // marca ativa
+      host.querySelectorAll(".stage-tabs .btn").forEach(x => x.classList.remove("active"))
+      b.classList.add("active")
+    }
     return b
   }
 
   const btnGeral = addBtn("geral", "Geral", () => loadChats())
-  const btnCont = addBtn("contatos", "Contatos", () => loadStageTab("contatos"))
-  const btnLead = addBtn("lead", "Lead", () => loadStageTab("lead"))
-  const btnLQ = addBtn("lead_quente", "Lead Quente", () => loadStageTab("lead_quente"))
+  const btnCont   = addBtn("contatos", "Contatos", () => loadStageTab("contatos"))
+  const btnLead   = addBtn("lead", "Lead", () => loadStageTab("lead"))
+  const btnLQ     = addBtn("lead_quente", "Lead Quente", () => loadStageTab("lead_quente"))
 
   bar.appendChild(btnGeral)
   bar.appendChild(btnCont)
@@ -311,60 +352,46 @@ function ensureStageTabs() {
 
   const counters = document.createElement("div")
   counters.className = "stage-counters"
+  counters.style.marginLeft = "8px"
+  counters.style.color = "var(--sub2)"
+  counters.style.fontSize = "12px"
 
   host.appendChild(bar)
   host.appendChild(counters)
 
-  ensureMobileStageTabs()
-
-  refreshStageCounters()
-}
-
-function ensureMobileStageTabs() {
-  if (document.querySelector(".stage-tabs-mobile")) return
-
-  const mobileBar = document.createElement("div")
-  mobileBar.className = "stage-tabs-mobile"
-
-  const addMobileBtn = (key, label, onclick) => {
-    const b = document.createElement("button")
-    b.className = "btn"
-    b.dataset.stage = key
-    b.textContent = label
-    b.onclick = () => {
-      // Remove active de todos
-      mobileBar.querySelectorAll(".btn").forEach((btn) => btn.classList.remove("active"))
-      // Adiciona active no clicado
-      b.classList.add("active")
-      onclick()
-    }
-    return b
-  }
-
-  const btnGeral = addMobileBtn("geral", "Geral", () => loadChats())
-  const btnCont = addMobileBtn("contatos", "Contatos", () => loadStageTab("contatos"))
-  const btnLead = addMobileBtn("lead", "Lead", () => loadStageTab("lead"))
-  const btnLQ = addMobileBtn("lead_quente", "Quente", () => loadStageTab("lead_quente"))
-
-  // Marca Geral como ativo por padrão
-  btnGeral.classList.add("active")
-
-  mobileBar.appendChild(btnGeral)
-  mobileBar.appendChild(btnCont)
-  mobileBar.appendChild(btnLead)
-  mobileBar.appendChild(btnLQ)
-
-  document.body.appendChild(mobileBar)
-}
-
-function loadStageTab(stage) {
-  // Placeholder function for loadStageTab
-  console.log(`Loading stage tab: ${stage}`)
+  // ativa a guia atual
+  setTimeout(() => {
+    const btn = host.querySelector(`.stage-tabs .btn[data-stage="${state.activeTab}"]`) || btnGeral
+    btn.click()
+  }, 0)
 }
 
 function refreshStageCounters() {
-  // Placeholder function for refreshStageCounters
-  console.log("Refreshing stage counters")
+  loadStageCache()
+  const counts = { contatos: 0, lead: 0, lead_quente: 0 }
+  state.chats.forEach(ch => {
+    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+    const st = getStage(chatid)?.stage || "contatos"
+    if (counts[st] !== undefined) counts[st]++
+  })
+  const el = document.querySelector(".stage-counters")
+  if (el) el.textContent =
+    `contatos: ${counts.contatos} • lead: ${counts.lead} • lead quente: ${counts.lead_quente}`
+}
+
+async function loadStageTab(stageKey) {
+  const list = $("#chat-list")
+  list.innerHTML = "<div class='hint'>Carregando…</div>"
+
+  loadStageCache()
+  const filtered = state.chats.filter(ch => {
+    const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
+    const st = getStage(chatid)?.stage || "contatos"
+    return st === stageKey
+  })
+
+  await progressiveRenderChats(filtered)
+  await prefetchCards(filtered)
 }
 
 /* ========= CHATS ========= */
@@ -373,7 +400,7 @@ async function loadChats() {
   state.loadingChats = true
 
   const list = $("#chat-list")
-  list.innerHTML = "<div class='hint'>Carregando conversas...</div>"
+  if (list) list.innerHTML = "<div class='hint'>Carregando conversas...</div>"
 
   try {
     const data = await api("/api/chats", {
@@ -386,10 +413,13 @@ async function loadChats() {
     await progressiveRenderChats(items)
     await prefetchCards(items)
 
-    // Classifica todas em background (regras locais)
+    // Classifica tudo em background (apenas regras locais)
     try {
       await classifyAllChatsInBackground(items)
       refreshStageCounters()
+      if (state.activeTab !== "geral") {
+        await loadStageTab(state.activeTab)
+      }
     } catch {}
 
     try {
@@ -398,15 +428,16 @@ async function loadChats() {
     } catch {}
   } catch (e) {
     console.error(e)
-    list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`
+    if (list) list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`
   } finally {
     state.loadingChats = false
   }
 }
 
-// Renderiza chats em lotes pequenos para aparecer rápido
+// Renderiza chats progressivamente
 async function progressiveRenderChats(chats) {
   const list = $("#chat-list")
+  if (!list) return
   list.innerHTML = ""
 
   if (chats.length === 0) {
@@ -525,9 +556,7 @@ async function prefetchCards(items) {
               last?.message?.conversation ||
               last?.body ||
               ""
-            )
-              .replace(/\s+/g, " ")
-              .trim()
+            ).replace(/\s+/g, " ").trim()
             state.lastMsg.set(chatid, pv)
 
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`)
@@ -584,14 +613,14 @@ async function openChat(ch) {
   await loadMessages(chatid)
 
   const st = getStage(chatid)
-  if (st) upsertAIPill(st.stage)
+  if (st) upsertStagePill(st.stage)
 
   if (status) status.textContent = "Online"
 }
 
 async function loadMessages(chatid) {
   const pane = $("#messages")
-  pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>"
+  if (pane) pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>"
 
   try {
     const data = await api("/api/messages", {
@@ -607,22 +636,24 @@ async function loadMessages(chatid) {
       .trim()
     state.lastMsg.set(chatid, pv)
 
-    // Classificação local pelas regras
+    // Classificação local por regras
     try {
       await classifyAndPersist(chatid, items)
       refreshStageCounters()
       const st = getStage(chatid)
-      if (st) upsertAIPill(st.stage)
+      if (st) upsertStagePill(st.stage)
+      if (state.activeTab !== "geral") loadStageTab(state.activeTab)
     } catch {}
   } catch (e) {
     console.error(e)
-    pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`
+    if (pane) pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`
   }
 }
 
 /* ========= renderização PROGRESSIVA ========= */
 async function progressiveRenderMessages(msgs) {
   const pane = $("#messages")
+  if (!pane) return
   pane.innerHTML = ""
 
   if (!msgs.length) {
@@ -660,13 +691,18 @@ function appendMessageBubble(pane, m) {
   pane.appendChild(el)
 }
 
-/* ========= "PILL" de estágio (usa dados locais) ========= */
-function upsertAIPill(stage) {
+/* ========= PILL ========= */
+function upsertStagePill(stage) {
   let pill = document.getElementById("ai-pill")
   if (!pill) {
     pill = document.createElement("span")
     pill.id = "ai-pill"
-    pill.className = "ai-pill"
+    pill.style.marginLeft = "8px"
+    pill.style.padding = "4px 8px"
+    pill.style.borderRadius = "999px"
+    pill.style.fontSize = "12px"
+    pill.style.background = "var(--muted)"
+    pill.style.color = "var(--text)"
     const header = document.querySelector(".chatbar") || document.querySelector(".chat-title") || document.body
     header.appendChild(pill)
   }
@@ -674,6 +710,9 @@ function upsertAIPill(stage) {
   pill.textContent = label
   pill.title = ""
 }
+
+// compat com nome antigo
+const upsertAIPill = upsertStagePill
 
 // hash simples do histórico
 function makeTranscriptKey(items) {
@@ -684,26 +723,24 @@ function makeTranscriptKey(items) {
   return `${len}:${lastTs}:${tail.length}`
 }
 
-/* ========= CLASSIFICAÇÃO POR REGRAS (SEM IA) ========= */
-// Normaliza strings para comparação tolerante
+/* ========= CLASSIFICAÇÃO POR REGRAS ========= */
 function norm(s) {
   return String(s || "")
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove acentos
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim()
 }
 
-// Regras:
-// - Lead Quente: mensagem nossa indicando encaminhamento/transferência.
-// - Lead: mensagem nossa "sim, pode continuar" (tolerante).
-// - Contatos: padrão/else.
+// Regras pedidas:
+// - Lead Quente: quando nós enviamos algo indicando encaminhar/transferir/colocar em contato.
+// - Lead: quando nós enviamos "Sim, pode continuar" (variações).
+// - Contatos: padrão (qualquer outro caso).
 function classifyByRules(items) {
   const msgs = Array.isArray(items) ? items : []
   let stage = "contatos"
 
-  // Regras para Lead Quente: mensagens sobre encaminhamento/transferência
   const hotHints = [
     "vou te passar para",
     "vou te passar pro",
@@ -720,20 +757,14 @@ function classifyByRules(items) {
     "vou passar o seu numero",
     "vou passar seu número",
     "vou passar o seu número",
-    "vamos transferir",
-    "ela vai ser encaminhada",
-    "você vai ser encaminhada",
-    "vou colocar em contato",
-    "vou te colocar em contato",
+    "vou repassar seu contato",
+    "repassei seu contato",
   ].map(norm)
 
-  // Regras para Lead: "Sim, pode continuar"
-  const leadPatterns = [
+  const okPatterns = [
     "sim, pode continuar",
-    "pode continuar",
     "sim pode continuar",
-    "pode prosseguir",
-    "sim, pode prosseguir",
+    "pode continuar",
   ].map(norm)
 
   for (const m of msgs) {
@@ -741,15 +772,12 @@ function classifyByRules(items) {
     const text = norm(m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "")
     if (!text) continue
 
-    // Só analisamos mensagens nossas (do atendente)
     if (me) {
-      // Lead Quente: mensagens sobre encaminhamento/transferência
-      if (hotHints.some((h) => text.includes(h))) {
+      if (hotHints.some(h => text.includes(h))) {
         stage = "lead_quente"
-        break // já é o topo da hierarquia
+        break
       }
-      // Lead: "Sim, pode continuar"
-      if (leadPatterns.some((p) => text.includes(p))) {
+      if (okPatterns.some(p => text === p || text.startsWith(p))) {
         stage = maxStage(stage, "lead")
       }
     }
@@ -769,7 +797,7 @@ async function classifyAndPersist(chatid, items) {
 }
 
 async function classifyAllChatsInBackground(items) {
-  const tasks = (items || []).map((ch) => async () => {
+  const tasks = (items || []).map(ch => async () => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     if (!chatid) return
     try {
@@ -779,9 +807,7 @@ async function classifyAllChatsInBackground(items) {
       })
       const msgs = Array.isArray(data?.items) ? data.items : []
       await classifyAndPersist(chatid, msgs)
-    } catch (e) {
-      /* ignora */
-    }
+    } catch {}
   })
 
   const CHUNK = 10
@@ -792,9 +818,10 @@ async function classifyAllChatsInBackground(items) {
   }
 }
 
-/* ========= SUA renderização "clássica" (mantida) ========= */
+/* ========= RENDER “CLÁSSICO” ========= */
 function renderMessages(msgs) {
   const pane = $("#messages")
+  if (!pane) return
   pane.innerHTML = ""
 
   if (msgs.length === 0) {
@@ -826,24 +853,25 @@ function renderMessages(msgs) {
   pane.scrollTop = pane.scrollHeight
 }
 
-/* ========= SEND (mantido) ========= */
+/* ========= SEND ========= */
 async function sendNow() {
-  const number = $("#send-number").value.trim()
-  const text = $("#send-text").value.trim()
+  const number = $("#send-number")?.value?.trim()
+  const text = $("#send-text")?.value?.trim()
   const btnEl = $("#btn-send")
-
   if (!number || !text) return
 
-  btnEl.disabled = true
-  btnEl.innerHTML =
-    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'
+  if (btnEl) {
+    btnEl.disabled = true
+    btnEl.innerHTML =
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>'
+  }
 
   try {
     await api("/api/send-text", {
       method: "POST",
       body: JSON.stringify({ number, text }),
     })
-    $("#send-text").value = ""
+    if ($("#send-text")) $("#send-text").value = ""
 
     if (state.current && (state.current.wa_chatid || state.current.chatid) === number) {
       setTimeout(() => loadMessages(number), 500)
@@ -851,40 +879,42 @@ async function sendNow() {
   } catch (e) {
     alert(e.message || "Falha ao enviar mensagem")
   } finally {
-    btnEl.disabled = false
-    btnEl.innerHTML =
-      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>'
+    if (btnEl) {
+      btnEl.disabled = false
+      btnEl.innerHTML =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>'
+    }
   }
 }
 
 /* ========= BOOT ========= */
 document.addEventListener("DOMContentLoaded", () => {
-  $("#btn-login").onclick = doLogin
-  $("#btn-logout").onclick = () => {
+  $("#btn-login") && ($("#btn-login").onclick = doLogin)
+  $("#btn-logout") && ($("#btn-logout").onclick = () => {
     localStorage.clear()
     location.reload()
-  }
-  $("#btn-send").onclick = sendNow
-  $("#btn-refresh").onclick = () => {
+  })
+  $("#btn-send") && ($("#btn-send").onclick = sendNow)
+  $("#btn-refresh") && ($("#btn-refresh").onclick = () => {
     if (state.current) {
       const chatid = state.current.wa_chatid || state.current.chatid
       loadMessages(chatid)
     } else {
       loadChats()
     }
-  }
+  })
 
   const backBtn = document.getElementById("btn-back-mobile")
   if (backBtn) backBtn.onclick = () => setMobileMode("list")
 
-  $("#send-text").addEventListener("keypress", (e) => {
+  $("#send-text") && $("#send-text").addEventListener("keypress", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       sendNow()
     }
   })
 
-  $("#token").addEventListener("keypress", (e) => {
+  $("#token") && $("#token").addEventListener("keypress", (e) => {
     if (e.key === "Enter") {
       e.preventDefault()
       doLogin()
