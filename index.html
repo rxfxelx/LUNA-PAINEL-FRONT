@@ -18,27 +18,42 @@
   <main id="login-view" class="login">
     <div class="login-card">
       <div class="login-header">
-        <!-- Substituindo emoji por SVG customizado da lua -->
+        <!-- Substituindo emoji por SVG customizado da lua mais bonito -->
         <div class="login-icon">
-          <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="moonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" style="stop-color:#84cc16;stop-opacity:1" />
+                <stop offset="50%" style="stop-color:#16a34a;stop-opacity:1" />
                 <stop offset="100%" style="stop-color:#15803d;stop-opacity:1" />
               </linearGradient>
-              <filter id="glow">
-                <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+              <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
                 <feMerge> 
                   <feMergeNode in="coloredBlur"/>
                   <feMergeNode in="SourceGraphic"/>
                 </feMerge>
               </filter>
+              <filter id="innerShadow">
+                <feOffset dx="0" dy="2"/>
+                <feGaussianBlur stdDeviation="2" result="offset-blur"/>
+                <feFlood flood-color="#0f172a" flood-opacity="0.4"/>
+                <feComposite in2="offset-blur" operator="in"/>
+              </filter>
             </defs>
-            <circle cx="32" cy="32" r="28" fill="url(#moonGradient)" filter="url(#glow)" opacity="0.9"/>
-            <path d="M20 32C20 20.954 28.954 12 40 12C36.686 12 33.686 13.343 31.515 15.515C27.172 19.858 25 25.858 25 32C25 38.142 27.172 44.142 31.515 48.485C33.686 50.657 36.686 52 40 52C28.954 52 20 43.046 20 32Z" fill="#0f172a" opacity="0.3"/>
-            <circle cx="26" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
-            <circle cx="38" cy="20" r="1.5" fill="#a3e635" opacity="0.6"/>
-            <circle cx="42" cy="28" r="1" fill="#84cc16" opacity="0.7"/>
+            <!-- Lua principal com gradiente -->
+            <circle cx="40" cy="40" r="32" fill="url(#moonGradient)" filter="url(#glow)"/>
+            <!-- Sombra da lua crescente -->
+            <path d="M20 40C20 24.536 32.536 12 48 12C43.582 12 39.582 13.791 36.686 16.686C30.895 22.477 28 30.477 28 40C28 49.523 30.895 57.523 36.686 63.314C39.582 66.209 43.582 68 48 68C32.536 68 20 55.464 20 40Z" fill="#0f172a" opacity="0.4"/>
+            <!-- Crateras da lua -->
+            <circle cx="30" cy="28" r="3" fill="#15803d" opacity="0.6"/>
+            <circle cx="48" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
+            <circle cx="52" cy="36" r="1.5" fill="#a3e635" opacity="0.7"/>
+            <circle cx="34" cy="48" r="2.5" fill="#16a34a" opacity="0.5"/>
+            <circle cx="46" cy="52" r="1" fill="#84cc16" opacity="0.9"/>
+            <!-- Brilho sutil -->
+            <circle cx="32" cy="32" r="1.5" fill="#ffffff" opacity="0.8"/>
+            <circle cx="44" cy="28" r="1" fill="#ffffff" opacity="0.6"/>
           </svg>
         </div>
         <h1>Luna</h1>
@@ -65,25 +80,30 @@
     <div class="loading-container">
       <!-- Substituindo emoji por SVG customizado da lua no loading -->
       <div class="loading-icon">
-        <svg width="80" height="80" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <svg width="96" height="96" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <linearGradient id="moonGradientLoading" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" style="stop-color:#84cc16;stop-opacity:1" />
+              <stop offset="50%" style="stop-color:#16a34a;stop-opacity:1" />
               <stop offset="100%" style="stop-color:#15803d;stop-opacity:1" />
             </linearGradient>
-            <filter id="glowLoading">
-              <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+            <filter id="glowLoading" x="-50%" y="-50%" width="200%" height="200%">
+              <feGaussianBlur stdDeviation="5" result="coloredBlur"/>
               <feMerge> 
                 <feMergeNode in="coloredBlur"/>
                 <feMergeNode in="SourceGraphic"/>
               </feMerge>
             </filter>
           </defs>
-          <circle cx="32" cy="32" r="28" fill="url(#moonGradientLoading)" filter="url(#glowLoading)" opacity="0.9"/>
-          <path d="M20 32C20 20.954 28.954 12 40 12C36.686 12 33.686 13.343 31.515 15.515C27.172 19.858 25 25.858 25 32C25 38.142 27.172 44.142 31.515 48.485C33.686 50.657 36.686 52 40 52C28.954 52 20 43.046 20 32Z" fill="#0f172a" opacity="0.3"/>
-          <circle cx="26" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
-          <circle cx="38" cy="20" r="1.5" fill="#a3e635" opacity="0.6"/>
-          <circle cx="42" cy="28" r="1" fill="#84cc16" opacity="0.7"/>
+          <circle cx="40" cy="40" r="32" fill="url(#moonGradientLoading)" filter="url(#glowLoading)"/>
+          <path d="M20 40C20 24.536 32.536 12 48 12C43.582 12 39.582 13.791 36.686 16.686C30.895 22.477 28 30.477 28 40C28 49.523 30.895 57.523 36.686 63.314C39.582 66.209 43.582 68 48 68C32.536 68 20 55.464 20 40Z" fill="#0f172a" opacity="0.4"/>
+          <circle cx="30" cy="28" r="3" fill="#15803d" opacity="0.6"/>
+          <circle cx="48" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
+          <circle cx="52" cy="36" r="1.5" fill="#a3e635" opacity="0.7"/>
+          <circle cx="34" cy="48" r="2.5" fill="#16a34a" opacity="0.5"/>
+          <circle cx="46" cy="52" r="1" fill="#84cc16" opacity="0.9"/>
+          <circle cx="32" cy="32" r="1.5" fill="#ffffff" opacity="0.8"/>
+          <circle cx="44" cy="28" r="1" fill="#ffffff" opacity="0.6"/>
         </svg>
       </div>
       <div class="loading-spinner"></div>
@@ -104,13 +124,14 @@
       <div class="brand">
         <!-- Substituindo emoji por SVG customizado da lua no header -->
         <div class="brand-icon">
-          <svg width="32" height="32" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <svg width="36" height="36" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="moonGradientHeader" x1="0%" y1="0%" x2="100%" y2="100%">
                 <stop offset="0%" style="stop-color:#84cc16;stop-opacity:1" />
+                <stop offset="50%" style="stop-color:#16a34a;stop-opacity:1" />
                 <stop offset="100%" style="stop-color:#15803d;stop-opacity:1" />
               </linearGradient>
-              <filter id="glowHeader">
+              <filter id="glowHeader" x="-50%" y="-50%" width="200%" height="200%">
                 <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
                 <feMerge> 
                   <feMergeNode in="coloredBlur"/>
@@ -118,11 +139,12 @@
                 </feMerge>
               </filter>
             </defs>
-            <circle cx="32" cy="32" r="28" fill="url(#moonGradientHeader)" filter="url(#glowHeader)" opacity="0.9"/>
-            <path d="M20 32C20 20.954 28.954 12 40 12C36.686 12 33.686 13.343 31.515 15.515C27.172 19.858 25 25.858 25 32C25 38.142 27.172 44.142 31.515 48.485C33.686 50.657 36.686 52 40 52C28.954 52 20 43.046 20 32Z" fill="#0f172a" opacity="0.3"/>
-            <circle cx="26" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
-            <circle cx="38" cy="20" r="1.5" fill="#a3e635" opacity="0.6"/>
-            <circle cx="42" cy="28" r="1" fill="#84cc16" opacity="0.7"/>
+            <circle cx="40" cy="40" r="32" fill="url(#moonGradientHeader)" filter="url(#glowHeader)"/>
+            <path d="M20 40C20 24.536 32.536 12 48 12C43.582 12 39.582 13.791 36.686 16.686C30.895 22.477 28 30.477 28 40C28 49.523 30.895 57.523 36.686 63.314C39.582 66.209 43.582 68 48 68C32.536 68 20 55.464 20 40Z" fill="#0f172a" opacity="0.4"/>
+            <circle cx="30" cy="28" r="3" fill="#15803d" opacity="0.6"/>
+            <circle cx="48" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
+            <circle cx="52" cy="36" r="1.5" fill="#a3e635" opacity="0.7"/>
+            <circle cx="32" cy="32" r="1.5" fill="#ffffff" opacity="0.8"/>
           </svg>
         </div>
         <div class="brand-text">
