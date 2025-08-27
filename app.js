@@ -61,31 +61,66 @@ function escapeHtml(s) {
   )
 }
 
-/* ========= helpers de mídia (NOVO) ========= */
-function isProbablyImage(m) {
-  const mt = (m.mimetype || m.mimeType || "").toLowerCase()
-  const u  = (m.mediaUrl || m.url || m.image || (m.message && (m.message.imageUrl || m.message.image || (m.message.imageMessage && m.message.imageMessage.url))) || "").toLowerCase()
-  return mt.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/.test(u)
+/* ======== DETECÇÃO REGRAS — INTERESSE & TRANSFERÊNCIA (NOVO) ======== */
+// util: normaliza texto (tira acentos, baixa caixa, normaliza espaços)
+function norm(s="") {
+  return String(s)
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
 }
-function isProbablyVideo(m) {
-  const mt = (m.mimetype || m.mimeType || "").toLowerCase()
-  const u  = (m.mediaUrl || m.url || m.video || (m.message && (m.message.videoUrl || m.message.video || (m.message.videoMessage && m.message.videoMessage.url))) || "").toLowerCase()
-  return mt.startsWith("video/") || /\.(mp4|webm|ogg|mov|m4v)(\?|$)/.test(u)
+// pega texto "plano" da mensagem
+function msgText(m){
+  return norm(
+    m?.text || m?.caption || m?.message?.text || m?.message?.conversation || m?.body || ""
+  )
 }
-function extractMediaUrl(m) {
-  const raw =
-    m.mediaUrl || m.url || m.image || m.video ||
-    (m.message && (m.message.imageUrl || m.message.videoUrl)) ||
-    (m.message && m.message.imageMessage && m.message.imageMessage.url) ||
-    (m.message && m.message.videoMessage && m.message.videoMessage.url) ||
-    ""
-  if (!raw) return ""
-  if (/^https?:\/\//i.test(raw)) {
-    // usa proxy do backend para evitar CORS
-    return BACKEND() + "/api/proxy?u=" + encodeURIComponent(raw)
+// padrões de interesse do CLIENTE (user)
+const INTEREST_PATTERNS = {
+  perguntas: [
+    /\?/,
+    /\bcomo\b/, /\bquanto\b/, /\bquando\b/, /\bonde\b/, /\bprazo\b/,
+    /\bvalor\b/, /\bpreco\b/, /\bpreço\b/, /\bgarantia\b/, /\bentrega\b/, /\bfunciona\b/,
+    /\bdemonstracao\b/, /\bdemonstrac?ao\b/, /\bmostrar?\b/, /\bcatalogo\b/, /\bcardapio\b/
+  ],
+  intencao: [
+    /\bquero\b/, /\bgostaria\b/, /\btenho interesse\b/,
+    /\bme interessa\b/, /\bpode enviar\b/, /\bpode me mostrar\b/, /\baceito\b/,
+    /\btopo\b/, /\btenho duvida(s)?\b/
+  ],
+  confirmacaoLeve: [
+    /\bbeleza\b/, /\bshow\b/, /\bperfeito\b/, /\bok\b/, /\bmanda\b/, /\bmanda sim\b/
+  ]
+}
+const INTEREST_POINTS = { perguntas: 2, intencao: 3, confirmacaoLeve: 1 }
+const INTEREST_THRESHOLD = 3 // >= 3 pontos => LEAD
+
+function scoreInterest(userMsgs){
+  let score = 0
+  for(const m of userMsgs){
+    const t = msgText(m)
+    for(const [group, regs] of Object.entries(INTEREST_PATTERNS)){
+      if (regs.some(r => r.test(t))) score += INTEREST_POINTS[group]
+    }
   }
-  if (/^data:/.test(raw)) return raw
-  return BACKEND() + "/api/proxy?u=" + encodeURIComponent(raw)
+  return score
+}
+
+// padrões de TRANSFERÊNCIA/ENCAMINHAMENTO feitos por NÓS (assistant)
+const TRANSFER_PATTERNS = [
+  /\bvou te passar para\b/, /\bvou passar seu contato\b/, /\bvou encaminhar\b/,
+  /\bencaminhando seu contato\b/, /\b(o|a) (time|setor|equipe) (vai|ira) (te )?chamar\b/,
+  /\b(alguem|consultor|vendedor) vai (falar|entrar em contato)\b/,
+  /\bvou pedir para (alguem|o time) te chamar\b/,
+  /\bvou (te )?transferir\b/, /\bte coloco em contato\b/, /\b(o|a) comercial vai (te )?chamar\b/
+]
+function isTransferredByAgent(agentMsgs){
+  for(const m of agentMsgs){
+    const t = msgText(m)
+    if (TRANSFER_PATTERNS.some(r => r.test(t))) return true
+  }
+  return false
 }
 
 /* ========= STATE ========= */
@@ -376,7 +411,7 @@ async function loadChats() {
     await progressiveRenderChats(items)
     await prefetchCards(items)
 
-    // classifica todas em background (hash + votação + histerese)
+    // classifica todas em background (regras + IA, com histerese)
     try {
       await classifyAllChatsInBackground(items)
       refreshStageCounters()
@@ -642,45 +677,6 @@ function appendMessageBubble(pane, m) {
     ${escapeHtml(text)}
     <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
   `
-
-  // === MÍDIA (IMAGEM/VÍDEO) — ACRÉSCIMO ===
-  try {
-    if (isProbablyImage(m)) {
-      const src = extractMediaUrl(m)
-      if (src) {
-        const fig = document.createElement("div")
-        fig.style.marginTop = "6px"
-        const img = document.createElement("img")
-        img.src = src
-        img.alt = "imagem"
-        img.loading = "lazy"
-        img.style.maxWidth = "320px"
-        img.style.maxHeight = "360px"
-        img.style.borderRadius = "10px"
-        img.style.display = "block"
-        img.style.objectFit = "cover"
-        fig.appendChild(img)
-        el.insertBefore(fig, el.lastElementChild) // antes do <small>
-      }
-    } else if (isProbablyVideo(m)) {
-      const src = extractMediaUrl(m)
-      if (src) {
-        const fig = document.createElement("div")
-        fig.style.marginTop = "6px"
-        const vid = document.createElement("video")
-        vid.src = src
-        vid.controls = true
-        vid.preload = "metadata"
-        vid.style.maxWidth = "320px"
-        vid.style.maxHeight = "360px"
-        vid.style.borderRadius = "10px"
-        vid.style.display = "block"
-        fig.appendChild(vid)
-        el.insertBefore(fig, el.lastElementChild)
-      }
-    }
-  } catch (_) {}
-
   pane.appendChild(el)
 }
 
@@ -714,58 +710,50 @@ function makeTranscriptKey(items) {
   return `${len}:${lastTs}:${tail.length}`
 }
 
-// === Heurística nova: Contatos só quando sem resposta, ou 1 resposta sem interesse ===
-function heuristicStage(items) {
-  const texts = (items || []).map(m =>
-    (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toLowerCase()
-  )
-  const userMsgs = (items || []).filter(m => !(m.fromMe || m.fromme || m.from_me))
-  const agentMsgs = (items || []).filter(m =>  (m.fromMe || m.fromme || m.from_me))
+// ======== CLASSIFICAÇÃO POR REGRAS (substitui heuristicStage) ========
+function classifyByRules(items){
+  const all = Array.isArray(items) ? items : []
+  const userMsgs   = all.filter(m => !(m.fromMe || m.fromme || m.from_me))
+  const agentMsgs  = all.filter(m =>  (m.fromMe || m.fromme || m.from_me))
 
-  const userCount = userMsgs.length
-  const agentCount = agentMsgs.length
-
-  const hotHints = [
-    "vou te passar para", "vou encaminhar", "encaminhando seu contato",
-    "alguém vai falar com você", "o time comercial vai te chamar",
-    "o setor vai entrar em contato", "vou pedir para alguém te chamar", "vou transferir",
-  ]
-  if (texts.some(t => hotHints.some(h => t.includes(h)))) {
-    return { stage: "lead_quente", conf: 0.80 }
+  // 1) Lead Quente se NÓS falamos que vamos transferir/encaminhar
+  if (isTransferredByAgent(agentMsgs)) {
+    return { stage: "lead_quente", conf: 0.9, why: "Transferência detectada" }
   }
 
-  const qRegex = /(\?|como|quanto|quando|onde|prazo|valor|preço|preco|garantia|demonstra(ç|c)ão|mostra|funciona)/
-  const interestHints = ["quero", "tenho interesse", "me interessa", "pode enviar", "pode me mostrar", "gostaria"]
-
-  const userHasQuestion = userMsgs.some(m => {
-    const t = (m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "").toLowerCase()
-    return qRegex.test(t) || interestHints.some(h => t.includes(h))
-  })
-
-  // CONTATOS: sem resposta do cliente, OU apenas 1 resposta e sem interesse
-  if (userCount === 0) return { stage: "contatos", conf: 0.55 }
-  if (userCount === 1 && !userHasQuestion) return { stage: "contatos", conf: 0.52 }
-
-  // LEAD: cliente interagindo (>=2 msgs) OU 1 msg já com pergunta/interesse
-  if (userCount >= 2 || (userCount === 1 && userHasQuestion)) {
-    return { stage: "lead", conf: userHasQuestion ? 0.70 : 0.62 }
+  // 2) Contatos = cliente ainda não engajou (0 msg) OU só 1 msg sem interesse
+  const interest = scoreInterest(userMsgs)
+  if (userMsgs.length === 0) {
+    return { stage: "contatos", conf: 0.6, why: "Sem resposta do cliente" }
+  }
+  if (userMsgs.length === 1 && interest < INTEREST_THRESHOLD) {
+    return { stage: "contatos", conf: 0.58, why: "Uma mensagem sem interesse claro" }
   }
 
-  // fallback
-  return { stage: "contatos", conf: 0.50 }
+  // 3) Lead = demonstrou interesse/curiosidade (pontos suficientes)
+  if (interest >= INTEREST_THRESHOLD) {
+    const conf = Math.min(0.85, 0.55 + 0.1 * interest)
+    return { stage: "lead", conf, why: `Interesse detectado (score=${interest})` }
+  }
+
+  // 4) fallback: se está conversando mas sem sinais fortes, trata como lead
+  if (userMsgs.length >= 2) {
+    return { stage: "lead", conf: 0.62, why: "Troca de mensagens sem transferência" }
+  }
+
+  return { stage: "contatos", conf: 0.55, why: "Sem sinais suficientes" }
 }
 
 async function classifyAndPersist(chatid, items) {
   const key = makeTranscriptKey(items)
-
   const current = getStage(chatid)
   if (current?.lastKey === key) return current
 
-  // 1) Heurística vota
-  const h = heuristicStage(items)
-  voteStage(chatid, { stage: h.stage, confidence: h.conf, reason: "Heurística local", key })
+  // 1) REGRAS votam primeiro
+  const h = classifyByRules(items)
+  voteStage(chatid, { stage: h.stage, confidence: h.conf, reason: h.why || "Regras", key })
 
-  // 2) IA vota
+  // 2) IA vota (mantido)
   try {
     const history = (items || []).slice(0, 200).map(m => ({
       role: (m.fromMe || m.fromme || m.from_me) ? "assistant" : "user",
