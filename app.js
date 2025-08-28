@@ -19,7 +19,7 @@ async function runLimited(tasks, limit = 8) {
       const cur = i++;
       try {
         results[cur] = await tasks[cur]();
-      } catch (e) {
+      } catch {
         results[cur] = undefined;
       }
     }
@@ -32,7 +32,6 @@ function isMobile() {
   return window.matchMedia("(max-width:1023px)").matches;
 }
 function setMobileMode(mode) {
-  // "list" | "chat" | ""
   document.body.classList.remove("is-mobile-list", "is-mobile-chat");
   if (!isMobile()) return;
   if (mode === "list") document.body.classList.add("is-mobile-list");
@@ -116,9 +115,7 @@ function loadStageCache() {
 }
 function saveStageCache() {
   const obj = {};
-  state.stages.forEach((v, k) => {
-    obj[k] = v;
-  });
+  state.stages.forEach((v, k) => (obj[k] = v));
   localStorage.setItem("luna_ai_stage", JSON.stringify(obj));
 }
 function getStage(chatid) {
@@ -147,9 +144,7 @@ async function apiCRMList(stage, limit = 100, offset = 0) {
 async function apiCRMSetStatus(chatid, stage, notes = "") {
   return api("/api/crm/status", { method: "POST", body: JSON.stringify({ chatid, stage, notes }) });
 }
-function ensureCRMBar() {
-  /* no-op */
-}
+function ensureCRMBar() { /* no-op */ }
 async function refreshCRMCounters() {
   try {
     const data = await apiCRMViews();
@@ -281,7 +276,6 @@ async function doLogin() {
 }
 
 function ensureTopbar() {
-  // Garante que exista .topbar para as abas
   if (!$(".topbar")) {
     const tb = document.createElement("div");
     tb.className = "topbar";
@@ -324,7 +318,7 @@ async function fetchNameImage(chatid, preview = true) {
       body: JSON.stringify({ number: chatid, preview }),
     });
     return resp; // {name,image,imagePreview}
-  } catch (e) {
+  } catch {
     return { name: null, image: null, imagePreview: null };
   }
 }
@@ -354,7 +348,6 @@ function ensureStageTabs() {
     b.onclick = () => {
       state.activeTab = key;
       onclick();
-      // marca ativa
       host.querySelectorAll(".stage-tabs .btn").forEach((x) => x.classList.remove("active"));
       b.classList.add("active");
       const mobileSelect = document.getElementById("mobile-stage-select");
@@ -388,7 +381,6 @@ function ensureStageTabs() {
       const key = e.target.value;
       state.activeTab = key;
 
-      // Executa a ação correspondente
       switch (key) {
         case "geral":
           loadChats();
@@ -404,7 +396,6 @@ function ensureStageTabs() {
           break;
       }
 
-      // Sincroniza com botões desktop
       const btn = host.querySelector(`.stage-tabs .btn[data-stage="${key}"]`);
       if (btn) {
         host.querySelectorAll(".stage-tabs .btn").forEach((x) => x.classList.remove("active"));
@@ -413,7 +404,6 @@ function ensureStageTabs() {
     };
   }
 
-  // ativa a guia atual
   setTimeout(() => {
     const btn = host.querySelector(`.stage-tabs .btn[data-stage="${state.activeTab}"]`) || btnGeral;
     btn.click();
@@ -475,7 +465,7 @@ async function loadChats() {
     await progressiveRenderChats(items);
     await prefetchCards(items);
 
-    // Classifica tudo em background (apenas regras locais)
+    // Classifica tudo em background (regras locais)
     try {
       await classifyAllChatsInBackground(items);
       refreshStageCounters();
@@ -668,7 +658,7 @@ async function openChat(ch) {
   const cache = state.nameCache.get(chatid) || {};
   const nm = (cache.name || ch.wa_contactName || ch.name || chatid || "Chat").toString();
 
-  if (title) title.textContent = nm;
+  title.textContent = nm;
   if (status) status.textContent = "Carregando mensagens...";
 
   setMobileMode("chat");
@@ -690,22 +680,28 @@ async function loadMessages(chatid) {
       body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
     });
     const items = Array.isArray(data?.items) ? data.items : [];
+
+    // >>> Classificação imediata ANTES de renderizar
+    try {
+      const rec = await classifyAndPersist(chatid, items);
+      upsertStagePill(rec.stage);
+      refreshStageCounters();
+    } catch {}
+
+    // Render em ordem cronológica
+    if (pane) pane.innerHTML = "";
     await progressiveRenderMessages(items.slice().reverse());
 
     const last = items[0];
-    const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "")
-      .replace(/\s+/g, " ")
-      .trim();
+    const pv = (
+      last?.text ||
+      last?.caption ||
+      last?.message?.text ||
+      last?.message?.conversation ||
+      last?.body ||
+      ""
+    ).replace(/\s+/g, " ").trim();
     state.lastMsg.set(chatid, pv);
-
-    // Classificação local por regras
-    try {
-      await classifyAndPersist(chatid, items);
-      refreshStageCounters();
-      const st = getStage(chatid);
-      if (st) upsertStagePill(st.stage);
-      if (state.activeTab !== "geral") loadStageTab(state.activeTab);
-    } catch {}
   } catch (e) {
     console.error(e);
     if (pane) pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`;
@@ -759,7 +755,7 @@ function pickMediaInfo(m) {
   return { mime: String(mime || ""), url: String(url || ""), dataUrl: String(dataUrl || ""), caption: String(caption || "") };
 }
 
-// proxy via GET ?u= (combina com media.py)
+// >>> proxy via GET ?u= (combina com media.py)
 async function fetchMediaBlobViaProxy(rawUrl) {
   const q = encodeURIComponent(String(rawUrl || ""));
   const r = await fetch(BACKEND() + "/api/media/proxy?u=" + q, {
@@ -793,10 +789,10 @@ function renderReplyPreview(container, m) {
 
 // Cartões de lista/botões (enviados e respostas)
 function renderInteractive(container, m) {
-  const listMsg = m?.message?.listMessage;
-  const btnsMsg = m?.message?.buttonsMessage || m?.message?.templateMessage?.hydratedTemplate;
+  const listMsg  = m?.message?.listMessage;
+  const btnsMsg  = m?.message?.buttonsMessage || m?.message?.templateMessage?.hydratedTemplate;
   const listResp = m?.message?.listResponseMessage;
-  const btnResp = m?.message?.buttonsResponseMessage;
+  const btnResp  = m?.message?.buttonsResponseMessage;
 
   if (listMsg) {
     const card = document.createElement("div");
@@ -805,6 +801,7 @@ function renderInteractive(container, m) {
     card.style.borderRadius = "8px";
     card.style.padding = "8px";
     card.style.maxWidth = "320px";
+
     if (listMsg.title) {
       const h = document.createElement("div");
       h.style.fontWeight = "600";
@@ -820,6 +817,7 @@ function renderInteractive(container, m) {
       d.textContent = listMsg.description;
       card.appendChild(d);
     }
+
     (listMsg.sections || []).forEach((sec) => {
       if (sec.title) {
         const st = document.createElement("div");
@@ -839,6 +837,7 @@ function renderInteractive(container, m) {
         card.appendChild(opt);
       });
     });
+
     container.appendChild(card);
     return true;
   }
@@ -850,8 +849,10 @@ function renderInteractive(container, m) {
     card.style.borderRadius = "8px";
     card.style.padding = "8px";
     card.style.maxWidth = "320px";
+
     const title = btnsMsg.title || btnsMsg.hydratedTitle;
-    const text = btnsMsg.text || btnsMsg.hydratedContentText;
+    const text  = btnsMsg.text || btnsMsg.hydratedContentText;
+
     if (title) {
       const h = document.createElement("div");
       h.style.fontWeight = "600";
@@ -867,6 +868,7 @@ function renderInteractive(container, m) {
       d.textContent = text;
       card.appendChild(d);
     }
+
     const buttons = btnsMsg.buttons || btnsMsg.hydratedButtons || [];
     buttons.forEach((b) => {
       const lbl =
@@ -886,6 +888,7 @@ function renderInteractive(container, m) {
       btn.style.opacity = ".9";
       card.appendChild(btn);
     });
+
     container.appendChild(card);
     return true;
   }
@@ -893,8 +896,7 @@ function renderInteractive(container, m) {
   if (listResp) {
     const picked =
       listResp?.singleSelectReply?.selectedRowId ||
-      listResp?.title ||
-      "(resposta de lista)";
+      listResp?.title || "(resposta de lista)";
     const tag = document.createElement("div");
     tag.style.display = "inline-block";
     tag.style.padding = "6px 10px";
@@ -909,8 +911,7 @@ function renderInteractive(container, m) {
   if (btnResp) {
     const picked =
       btnResp?.selectedDisplayText ||
-      btnResp?.selectedButtonId ||
-      "(resposta)";
+      btnResp?.selectedButtonId || "(resposta)";
     const tag = document.createElement("div");
     tag.style.display = "inline-block";
     tag.style.padding = "6px 10px";
@@ -921,10 +922,11 @@ function renderInteractive(container, m) {
     container.appendChild(tag);
     return true;
   }
+
   return false;
 }
 
-/* ========= renderização de uma bolha (com mídia/reply/interactive) ========= */
+/* ========= renderização de uma bolha ========= */
 function appendMessageBubble(pane, m) {
   const me = m.fromMe || m.fromme || m.from_me || false;
   const el = document.createElement("div");
@@ -979,14 +981,15 @@ function appendMessageBubble(pane, m) {
 
     pane.appendChild(el);
 
+    const after = () => { pane.scrollTop = pane.scrollHeight; };
     if (dataUrl) {
-      img.src = dataUrl;
+      img.onload = after; img.src = dataUrl;
     } else if (url) {
       fetchMediaBlobViaProxy(url)
-        .then((b) => { img.src = URL.createObjectURL(b); })
-        .catch(() => { img.alt = "(Falha ao carregar imagem)"; });
+        .then((b) => { img.onload = after; img.src = URL.createObjectURL(b); })
+        .catch(() => { img.alt = "(Falha ao carregar imagem)"; after(); });
     } else {
-      img.alt = "(Imagem não disponível)";
+      img.alt = "(Imagem não disponível)"; after();
     }
     return;
   }
@@ -1018,24 +1021,27 @@ function appendMessageBubble(pane, m) {
 
     pane.appendChild(el);
 
+    const after = () => { pane.scrollTop = pane.scrollHeight; };
     if (dataUrl) {
-      video.src = dataUrl;
+      video.onloadeddata = after; video.src = dataUrl;
     } else if (url) {
       fetchMediaBlobViaProxy(url)
-        .then((b) => { video.src = URL.createObjectURL(b); })
+        .then((b) => { video.onloadeddata = after; video.src = URL.createObjectURL(b); })
         .catch(() => {
           const err = document.createElement("div");
           err.style.fontSize = "12px";
           err.style.opacity = ".8";
           err.textContent = "(Falha ao carregar vídeo)";
-          el.appendChild(err);
+          el.insertBefore(err, meta);
+          after();
         });
     } else {
       const err = document.createElement("div");
       err.style.fontSize = "12px";
       err.style.opacity = ".8";
       err.textContent = "(Vídeo não disponível)";
-      el.appendChild(err);
+      el.insertBefore(err, meta);
+      after();
     }
     return;
   }
@@ -1058,7 +1064,6 @@ function appendMessageBubble(pane, m) {
         alert("Falha ao baixar documento");
       }
     };
-
     el.appendChild(link);
 
     const meta = document.createElement("small");
@@ -1069,6 +1074,7 @@ function appendMessageBubble(pane, m) {
     el.appendChild(meta);
 
     pane.appendChild(el);
+    pane.scrollTop = pane.scrollHeight;
     return;
   }
 
@@ -1082,13 +1088,18 @@ function appendMessageBubble(pane, m) {
     meta.style.opacity = ".75";
     el.appendChild(meta);
     pane.appendChild(el);
+    pane.scrollTop = pane.scrollHeight;
     return;
   }
 
   // ---------- TEXTO ----------
   if (top.childNodes.length) el.appendChild(top);
-  el.innerHTML += `${escapeHtml(plainText)} <small>${escapeHtml(who)} • ${formatTime(ts)}</small>`;
+  el.innerHTML += `
+    ${escapeHtml(plainText)}
+    <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
+  `;
   pane.appendChild(el);
+  pane.scrollTop = pane.scrollHeight;
 }
 
 /* ========= PILL ========= */
@@ -1134,11 +1145,10 @@ function norm(s) {
 }
 
 /*
-Regras pedidas (sem IA):
+Regras (sem IA):
 - Lead Quente quando NÓS (fromMe=true) indicamos transferência/encaminhamento/contato de equipe.
-- Lead quando NÓS mandamos "sim, pode continuar" (e variações) OU quando pedimos/perguntamos nome.
-- Contatos é o padrão.
-Também há um guard contra mensagens automáticas de menu/cardápio.
+- Lead quando NÓS mandamos "sim, pode continuar" OU quando pedimos/perguntamos nome.
+- Contatos é o padrão. Há guard contra mensagens automáticas de menu/cardápio.
 */
 const HOT_HINTS = [
   "vou te passar para","vou te passar pro","vou passar voce para","vou passar você para",
@@ -1175,7 +1185,7 @@ const LEAD_OK_PATTERNS = [
   "pode prosseg","pode proseguir",
 ].map(norm);
 
-/* padrões de pedir/perguntar NOME (muitas variações) */
+/* padrões de pedir/perguntar NOME */
 const LEAD_NAME_PATTERNS = [
   "qual seu nome","qual o seu nome","me diga seu nome","me fala seu nome","como voce se chama","como você se chama",
   "quem fala","quem esta falando","quem está falando","quem e voce","quem é você","pode me dizer seu nome",
