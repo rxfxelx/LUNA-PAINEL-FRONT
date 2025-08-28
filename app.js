@@ -162,7 +162,7 @@ async function loadCRMStage(stage) {
   try {
     const data = await apiCRMList(stage, 100, 0);
     const items = [];
-    for (const it of data?.items || []) {
+    for (const it of (data?.items || [])) {
       const ch = it.chat || {};
       if (!ch.wa_chatid && it.crm?.chatid) ch.wa_chatid = it.crm.chatid;
       items.push(ch);
@@ -315,7 +315,7 @@ async function fetchNameImage(chatid, preview = true) {
   try {
     const resp = await api("/api/name-image", {
       method: "POST",
-      body: JSON.stringify({ number: chatid, preview }),
+      body: JSON.stringify({ number: chatid, preview }), // mantém protocolo atual
     });
     return resp; // {name,image,imagePreview}
   } catch {
@@ -455,19 +455,31 @@ async function loadChats() {
   if (list) list.innerHTML = "<div class='hint'>Carregando conversas...</div>";
 
   try {
-    const data = await api("/api/chats", {
-      method: "POST",
-      body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: 100, offset: 0 }),
-    });
-    const items = Array.isArray(data?.items) ? data.items : [];
-    state.chats = items;
+    // paginação para evitar limite de 100
+    const BATCH = 100;
+    let offset = 0;
+    const all = [];
 
-    await progressiveRenderChats(items);
-    await prefetchCards(items);
+    while (true) {
+      const data = await api("/api/chats", {
+        method: "POST",
+        body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: BATCH, offset }),
+      });
+      const items = Array.isArray(data?.items) ? data.items : [];
+      if (!items.length) break;
+      all.push(...items);
+      if (items.length < BATCH) break;
+      offset += items.length;
+    }
+
+    state.chats = all;
+
+    await progressiveRenderChats(all);
+    await prefetchCards(all);
 
     // Classifica tudo em background (regras locais)
     try {
-      await classifyAllChatsInBackground(items);
+      await classifyAllChatsInBackground(all);
       refreshStageCounters();
       if (state.activeTab !== "geral") {
         await loadStageTab(state.activeTab);
@@ -478,6 +490,11 @@ async function loadChats() {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 500 }) });
       refreshCRMCounters();
     } catch {}
+
+    // abre automaticamente o primeiro chat para já carregar mensagens e estágio
+    if (!state.current && all.length > 0) {
+      openChat(all[0]);
+    }
   } catch (e) {
     console.error(e);
     if (list) list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`;
