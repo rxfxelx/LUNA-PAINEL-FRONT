@@ -739,16 +739,175 @@ async function progressiveRenderMessages(msgs) {
   }
 }
 
+/* ========= MÍDIA: helpers ========= */
+function pickMediaInfo(m) {
+  const mm = m.message || m
+  const mime =
+    m.mimetype || m.mime || mm?.imageMessage?.mimetype || mm?.videoMessage?.mimetype ||
+    mm?.documentMessage?.mimetype || mm?.audioMessage?.mimetype || ""
+
+  const url =
+    m.mediaUrl || m.url || m.fileUrl || m.downloadUrl || m.image || m.video ||
+    mm?.imageMessage?.url || mm?.videoMessage?.url || mm?.documentMessage?.url || ""
+
+  const dataUrl = m.dataUrl || mm?.imageMessage?.dataUrl || mm?.videoMessage?.dataUrl || ""
+
+  const caption =
+    m.caption || mm?.imageMessage?.caption || mm?.videoMessage?.caption ||
+    m.text || mm?.conversation || ""
+
+  return { mime: String(mime || ""), url: String(url || ""), dataUrl: String(dataUrl || ""), caption: String(caption || "") }
+}
+
+async function fetchMediaBlobViaProxy(url) {
+  const r = await fetch(BACKEND() + "/api/media/proxy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ url }),
+  })
+  if (!r.ok) throw new Error("Falha ao baixar mídia")
+  return await r.blob()
+}
+
+/* ========= renderização de uma bolha (com mídia) ========= */
 function appendMessageBubble(pane, m) {
   const me = m.fromMe || m.fromme || m.from_me || false
   const el = document.createElement("div")
   el.className = "msg " + (me ? "me" : "you")
-  const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || ""
+
+  const { mime, url, dataUrl, caption } = pickMediaInfo(m)
+  const plainText = m.text || m.message?.text || m?.message?.conversation || m.caption || m.body || ""
   const who = m.senderName || m.pushName || ""
   const ts = m.messageTimestamp || m.timestamp || ""
 
+  // IMAGEM
+  if ((mime && mime.startsWith("image/")) || (!mime && url && /\.(png|jpe?g|gif|webp)(\?|$)/i.test(url))) {
+    const wrap = document.createElement("div")
+    wrap.className = "bubble-media"
+    const figure = document.createElement("figure")
+    figure.style.maxWidth = "280px"
+    figure.style.margin = "0"
+
+    const img = document.createElement("img")
+    img.alt = "imagem"
+    img.style.maxWidth = "100%"
+    img.style.borderRadius = "8px"
+    img.style.display = "block"
+
+    const cap = document.createElement("figcaption")
+    cap.style.fontSize = "12px"
+    cap.style.opacity = ".8"
+    cap.style.marginTop = "6px"
+    cap.textContent = caption || plainText || ""
+
+    const meta = document.createElement("small")
+    meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`
+    meta.style.display = "block"
+    meta.style.marginTop = "6px"
+    meta.style.opacity = ".75"
+
+    figure.appendChild(img)
+    if (cap.textContent) figure.appendChild(cap)
+    wrap.appendChild(figure)
+    wrap.appendChild(meta)
+    el.appendChild(wrap)
+    pane.appendChild(el)
+
+    if (dataUrl) {
+      img.src = dataUrl
+    } else if (url) {
+      fetchMediaBlobViaProxy(url).then(b => {
+        img.src = URL.createObjectURL(b)
+      }).catch(() => { img.alt = "(Falha ao carregar imagem)" })
+    } else {
+      img.alt = "(Imagem não disponível)"
+    }
+    return
+  }
+
+  // VÍDEO
+  if ((mime && mime.startsWith("video/")) || (!mime && url && /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url))) {
+    const wrap = document.createElement("div")
+    wrap.className = "bubble-media"
+
+    const video = document.createElement("video")
+    video.controls = true
+    video.style.maxWidth = "320px"
+    video.style.borderRadius = "8px"
+    video.preload = "metadata"
+
+    const cap = document.createElement("div")
+    cap.style.fontSize = "12px"
+    cap.style.opacity = ".8"
+    cap.style.marginTop = "6px"
+    cap.textContent = caption || ""
+
+    const meta = document.createElement("small")
+    meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`
+    meta.style.display = "block"
+    meta.style.marginTop = "6px"
+    meta.style.opacity = ".75"
+
+    wrap.appendChild(video)
+    if (cap.textContent) wrap.appendChild(cap)
+    wrap.appendChild(meta)
+    el.appendChild(wrap)
+    pane.appendChild(el)
+
+    if (dataUrl) {
+      video.src = dataUrl
+    } else if (url) {
+      fetchMediaBlobViaProxy(url).then(b => {
+        video.src = URL.createObjectURL(b)
+      }).catch(() => {
+        const err = document.createElement("div")
+        err.style.fontSize = "12px"
+        err.style.opacity = ".8"
+        err.textContent = "(Falha ao carregar vídeo)"
+        wrap.insertBefore(err, meta)
+      })
+    } else {
+      const err = document.createElement("div")
+      err.style.fontSize = "12px"
+      err.style.opacity = ".8"
+      err.textContent = "(Vídeo não disponível)"
+      wrap.insertBefore(err, meta)
+    }
+    return
+  }
+
+  // DOCUMENTO
+  if ((mime && /^application\//.test(mime)) || (!mime && url && /\.(pdf|docx?|xlsx?|pptx?)$/i.test(url))) {
+    const link = document.createElement("a")
+    link.textContent = caption || plainText || "Documento"
+    link.target = "_blank"
+    link.rel = "noopener noreferrer"
+    link.href = "javascript:void(0)"
+    link.onclick = async () => {
+      try {
+        const b = await fetchMediaBlobViaProxy(url)
+        const blobUrl = URL.createObjectURL(b)
+        window.open(blobUrl, "_blank")
+      } catch {
+        alert("Falha ao baixar documento")
+      }
+    }
+
+    const meta = document.createElement("small")
+    meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`
+    meta.style.display = "block"
+    meta.style.marginTop = "6px"
+    meta.style.opacity = ".75"
+
+    el.appendChild(link)
+    el.appendChild(meta)
+    pane.appendChild(el)
+    return
+  }
+
+  // TEXTO (fallback)
   el.innerHTML = `
-    ${escapeHtml(text)}
+    ${escapeHtml(plainText)}
     <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
   `
   pane.appendChild(el)
@@ -804,187 +963,48 @@ Regras pedidas (sem IA):
 Também há um guard contra mensagens automáticas de menu/cardápio.
 */
 const HOT_HINTS = [
-  // verbos de encaminhar
-  "vou te passar para",
-  "vou te passar pro",
-  "vou passar voce para",
-  "vou passar você para",
-  "vou passar para o setor",
-  "vou passar para o departamento",
-  "vou passar para o time",
-  "vou passar seu contato",
-  "vou passar o seu contato",
-  "vou passar seu numero",
-  "vou passar o seu numero",
-  "vou repassar seu contato",
-  "repassei seu contato",
-  "enviei seu contato",
-  "vou enviar seu contato",
-  "enviarei seu contato",
-  "vou encaminhar",
-  "encaminhando seu contato",
-  "encaminhei seu contato",
-  "encaminhei seu numero",
-  "encaminhei seu número",
-  "encaminhar seu contato",
-  "estou encaminhando",
-  "encaminharei",
-
-  // colocar em contato / conectar
-  "vou te colocar em contato",
-  "vou colocar voce em contato",
-  "vou colocar você em contato",
-  "colocar voce em contato",
-  "colocar você em contato",
-  "vou te conectar",
-  "vou te por em contato",
-  "te coloco em contato",
-
-  // outra pessoa/area/consultor
-  "o time comercial vai te chamar",
-  "o time vai te chamar",
-  "nossa equipe vai entrar em contato",
-  "a equipe vai entrar em contato",
-  "o setor vai entrar em contato",
-  "o atendente vai falar com voce",
-  "o atendente vai falar com você",
-  "um atendente vai te chamar",
-  "um consultor vai te chamar",
-  "o consultor vai te chamar",
-  "o especialista vai te chamar",
-  "o responsavel vai te chamar",
-  "o responsável vai te chamar",
-  "o pessoal do comercial te chama",
-  "suporte vai te chamar",
-  "vendas vai te chamar",
-  "pre-vendas vai te chamar",
-  "pré-vendas vai te chamar",
-
-  // pedir para alguém chamar
-  "vou pedir para alguem te chamar",
-  "vou pedir para alguém te chamar",
-  "vou pedir pra alguem te chamar",
-  "vou pedir pra alguém te chamar",
-  "vou pedir pro pessoal te chamar",
-  "vou pedir para o time te chamar",
-  "ja pedi para te chamarem",
-  "já pedi para te chamarem",
-
-  // transferir (formas)
-  "vou transferir",
-  "estou transferindo",
-  "transferencia para o setor",
-  "transferência para o setor",
-  "transferi sua solicitacao",
-  "transferi sua solicitação",
-  "direcionei seu contato",
-  "direcionando seu contato",
-  "direcionar seu contato",
-
-  // confirmações
-  "daqui a pouco te chamam",
-  "em breve vao entrar em contato",
-  "em breve vão entrar em contato",
-  "abrirei um chamado",
-  "vou abrir um chamado",
-  "abrir um ticket",
-  "abrirei um ticket",
+  "vou te passar para","vou te passar pro","vou passar voce para","vou passar você para",
+  "vou passar para o setor","vou passar para o departamento","vou passar para o time",
+  "vou passar seu contato","vou passar o seu contato","vou passar seu numero","vou passar o seu numero",
+  "vou repassar seu contato","repassei seu contato","enviei seu contato","vou enviar seu contato","enviarei seu contato",
+  "vou encaminhar","encaminhando seu contato","encaminhei seu contato","encaminhei seu numero","encaminhei seu número",
+  "encaminhar seu contato","estou encaminhando","encaminharei",
+  "vou te colocar em contato","vou colocar voce em contato","vou colocar você em contato","colocar voce em contato","colocar você em contato",
+  "vou te conectar","vou te por em contato","te coloco em contato",
+  "o time comercial vai te chamar","o time vai te chamar","nossa equipe vai entrar em contato","a equipe vai entrar em contato","o setor vai entrar em contato",
+  "o atendente vai falar com voce","o atendente vai falar com você","um atendente vai te chamar","um consultor vai te chamar","o consultor vai te chamar",
+  "o especialista vai te chamar","o responsavel vai te chamar","o responsável vai te chamar","o pessoal do comercial te chama","suporte vai te chamar",
+  "vendas vai te chamar","pre-vendas vai te chamar","pré-vendas vai te chamar",
+  "vou pedir para alguem te chamar","vou pedir para alguém te chamar","vou pedir pra alguem te chamar","vou pedir pra alguém te chamar",
+  "vou pedir pro pessoal te chamar","vou pedir para o time te chamar","ja pedi para te chamarem","já pedi para te chamarem",
+  "vou transferir","estou transferindo","transferencia para o setor","transferência para o setor",
+  "transferi sua solicitacao","transferi sua solicitação","direcionei seu contato","direcionando seu contato","direcionar seu contato",
+  "daqui a pouco te chamam","em breve vao entrar em contato","em breve vão entrar em contato","abrirei um chamado","vou abrir um chamado","abrir um ticket","abrirei um ticket",
 ].map(norm)
 
 const HOT_NEGATIVE_GUARDS = [
-  "cardapio",
-  "cardápio",
-  "menu",
-  "catalogo",
-  "catálogo",
-  "ver menu",
-  "ver cardapio",
-  "acesse o menu",
-  "acesse o cardapio",
-  "acesse o cardápio",
-  "acesse nosso catalogo",
-  "acesse nosso catálogo",
-  "cardapio online",
-  "link do menu",
-  "nosso menu",
-  "veja o menu",
-  "veja o cardapio",
-  "veja o catálogo",
+  "cardapio","cardápio","menu","catalogo","catálogo","ver menu","ver cardapio",
+  "acesse o menu","acesse o cardapio","acesse o cardápio","acesse nosso catalogo","acesse nosso catálogo",
+  "cardapio online","link do menu","nosso menu","veja o menu","veja o cardapio","veja o catálogo",
 ].map(norm)
 
 const LEAD_OK_PATTERNS = [
-  "sim, pode continuar",
-  "sim pode continuar",
-  "pode continuar",
-  "ok, pode continuar",
-  "ok pode continuar",
-  "pode seguir",
-  "sim, pode seguir",
-  "sim pode seguir",
-  "vamos continuar",
-  "podemos continuar",
-  "pode prosseguir",
-  "ok vamos prosseguir",
-  "segue",
-  "segue por favor",
-  "pode mostrar",
-  "pode me mostrar",
-  "pode enviar",
-  "pode mandar",
-  "pode continuar 👍",
-  "pode continuar sim",
-  "sim, pode continuar sim",
-  "pode continuar por favor",
-  "pode continuar pf",
-  "pode continuar pff",
-  "pode cont",
-  "pode cnt",
-  "pode seg",
-  "pode prosseg",
-  "pode proseguir",
+  "sim, pode continuar","sim pode continuar","pode continuar","ok, pode continuar","ok pode continuar",
+  "pode seguir","sim, pode seguir","sim pode seguir","vamos continuar","podemos continuar",
+  "pode prosseguir","ok vamos prosseguir","segue","segue por favor","pode mostrar","pode me mostrar",
+  "pode enviar","pode mandar","pode continuar 👍","pode continuar sim","sim, pode continuar sim",
+  "pode continuar por favor","pode continuar pf","pode continuar pff","pode cont","pode cnt","pode seg",
+  "pode prosseg","pode proseguir",
 ].map(norm)
 
-/* NOVO — padrões de pedir/perguntar NOME (muitas variações, com/sem acento) */
+/* padrões de pedir/perguntar NOME (muitas variações) */
 const LEAD_NAME_PATTERNS = [
-  "qual seu nome",
-  "qual o seu nome",
-  "me diga seu nome",
-  "me fala seu nome",
-  "como voce se chama",
-  "como você se chama",
-  "quem fala",
-  "quem esta falando",
-  "quem está falando",
-  "quem e voce",
-  "quem é você",
-  "pode me dizer seu nome",
-  "me passa seu nome",
-  "me informe seu nome",
-  "seu nome por favor",
-  "nome pfv",
-  "nome por favor",
-  "nome?",
-  "qual seu primeiro nome",
-  "qual seu nome completo",
-  "nome do cliente",
-  "nome do titular",
-  "nome para cadastro",
-  "poderia me informar seu nome",
-  "me diga o seu nome",
-  "informe seu nome",
-  "sobrenome",
-  "seu nome e sobrenome",
-  "como devo te chamar",
-  "como posso te chamar",
-  "qual e seu nome",
-  "qual é seu nome",
-  "qual seria seu nome",
-  // abreviações e erros comuns
-  "ql seu nome",
-  "q seu nome",
-  "seu nm",
-  "seu nome sff",
-  "seu nome pf",
+  "qual seu nome","qual o seu nome","me diga seu nome","me fala seu nome","como voce se chama","como você se chama",
+  "quem fala","quem esta falando","quem está falando","quem e voce","quem é você","pode me dizer seu nome",
+  "me passa seu nome","me informe seu nome","seu nome por favor","nome pfv","nome por favor","nome?","qual seu primeiro nome",
+  "qual seu nome completo","nome do cliente","nome do titular","nome para cadastro","poderia me informar seu nome","me diga o seu nome",
+  "informe seu nome","sobrenome","seu nome e sobrenome","como devo te chamar","como posso te chamar","qual e seu nome","qual é seu nome","qual seria seu nome",
+  "ql seu nome","q seu nome","seu nm","seu nome sff","seu nome pf",
 ].map(norm)
 
 function classifyByRules(items) {
@@ -996,21 +1016,17 @@ function classifyByRules(items) {
     const text = norm(m.text || m.caption || m?.message?.text || m?.message?.conversation || m?.body || "")
     if (!text || !me) continue
 
-    // Guard contra "menu/cardápio" para evitar marcar como lead_quente por links automáticos
     const hasMenuish = HOT_NEGATIVE_GUARDS.some((g) => text.includes(g))
 
-    // LEAD QUENTE: qualquer hint de transferência/encaminhamento etc.
     if (!hasMenuish && HOT_HINTS.some((h) => text.includes(h))) {
       stage = "lead_quente"
       break
     }
 
-    // LEAD: confirmação de “pode continuar” e equivalentes
     if (LEAD_OK_PATTERNS.some((p) => text.includes(p))) {
       stage = maxStage(stage, "lead")
     }
 
-    // LEAD: quando pedimos/perguntamos o NOME
     if (LEAD_NAME_PATTERNS.some((p) => text.includes(p))) {
       stage = maxStage(stage, "lead")
     }
@@ -1051,7 +1067,7 @@ async function classifyAllChatsInBackground(items) {
   }
 }
 
-/* ========= RENDER “CLÁSSICO” ========= */
+/* ========= RENDER “CLÁSSICO” (texto puro) ========= */
 function renderMessages(msgs) {
   const pane = $("#messages")
   if (!pane) return
