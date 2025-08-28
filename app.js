@@ -739,7 +739,7 @@ async function progressiveRenderMessages(msgs) {
   }
 }
 
-/* ========= MÍDIA: helpers ========= */
+/* ========= MÍDIA & INTERATIVOS: helpers ========= */
 function pickMediaInfo(m) {
   const mm = m.message || m
   const mime =
@@ -759,31 +759,204 @@ function pickMediaInfo(m) {
   return { mime: String(mime || ""), url: String(url || ""), dataUrl: String(dataUrl || ""), caption: String(caption || "") }
 }
 
-async function fetchMediaBlobViaProxy(url) {
-  const r = await fetch(BACKEND() + "/api/media/proxy", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
-    body: JSON.stringify({ url }),
+// >>> proxy via GET ?u= (combina com media.py)
+async function fetchMediaBlobViaProxy(rawUrl) {
+  const q = encodeURIComponent(String(rawUrl || ""))
+  const r = await fetch(BACKEND() + "/api/media/proxy?u=" + q, {
+    method: "GET",
+    headers: { ...authHeaders() },
   })
   if (!r.ok) throw new Error("Falha ao baixar mídia")
   return await r.blob()
 }
 
-/* ========= renderização de uma bolha (com mídia) ========= */
+// Caixinha de reply (mensagem citada)
+function renderReplyPreview(container, m) {
+  const qm =
+    m?.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
+    m?.contextInfo?.quotedMessage
+  if (!qm) return
+
+  const qt =
+    qm?.extendedTextMessage?.text ||
+    qm?.conversation ||
+    qm?.imageMessage?.caption ||
+    qm?.videoMessage?.caption ||
+    ""
+
+  const box = document.createElement("div")
+  box.className = "bubble-quote"
+  box.style.borderLeft = "3px solid var(--muted, #ccc)"
+  box.style.padding = "6px 8px"
+  box.style.marginBottom = "6px"
+  box.style.opacity = ".8"
+  box.style.fontSize = "12px"
+  box.textContent = qt || "(mensagem citada)"
+  container.appendChild(box)
+}
+
+// Cartões de lista/botões (enviados e respostas)
+function renderInteractive(container, m) {
+  const listMsg = m?.message?.listMessage
+  const btnsMsg =
+    m?.message?.buttonsMessage ||
+    m?.message?.templateMessage?.hydratedTemplate
+  const listResp = m?.message?.listResponseMessage
+  const btnResp  = m?.message?.buttonsResponseMessage
+
+  if (listMsg) {
+    const card = document.createElement("div")
+    card.className = "bubble-actions"
+    card.style.border = "1px solid var(--muted,#ddd)"
+    card.style.borderRadius = "8px"
+    card.style.padding = "8px"
+    card.style.maxWidth = "320px"
+
+    if (listMsg.title) {
+      const h = document.createElement("div")
+      h.style.fontWeight = "600"
+      h.style.marginBottom = "6px"
+      h.textContent = listMsg.title
+      card.appendChild(h)
+    }
+    if (listMsg.description) {
+      const d = document.createElement("div")
+      d.style.fontSize = "12px"
+      d.style.opacity = ".85"
+      d.style.marginBottom = "6px"
+      d.textContent = listMsg.description
+      card.appendChild(d)
+    }
+    ;(listMsg.sections || []).forEach(sec => {
+      if (sec.title) {
+        const st = document.createElement("div")
+        st.style.margin = "6px 0 4px"
+        st.style.fontSize = "12px"
+        st.style.opacity = ".8"
+        st.textContent = sec.title
+        card.appendChild(st)
+      }
+      ;(sec.rows || []).forEach(row => {
+        const opt = document.createElement("div")
+        opt.style.padding = "6px 8px"
+        opt.style.border = "1px solid var(--muted,#eee)"
+        opt.style.borderRadius = "6px"
+        opt.style.marginBottom = "6px"
+        opt.textContent = row.title || row.id || "(opção)"
+        card.appendChild(opt)
+      })
+    })
+
+    container.appendChild(card)
+    return true
+  }
+
+  if (btnsMsg) {
+    const card = document.createElement("div")
+    card.className = "bubble-actions"
+    card.style.border = "1px solid var(--muted,#ddd)"
+    card.style.borderRadius = "8px"
+    card.style.padding = "8px"
+    card.style.maxWidth = "320px"
+
+    const title = btnsMsg.title || btnsMsg.hydratedTitle
+    const text  = btnsMsg.text  || btnsMsg.hydratedContentText
+
+    if (title) {
+      const h = document.createElement("div")
+      h.style.fontWeight = "600"
+      h.style.marginBottom = "6px"
+      h.textContent = title
+      card.appendChild(h)
+    }
+    if (text) {
+      const d = document.createElement("div")
+      d.style.fontSize = "12px"
+      d.style.opacity = ".85"
+      d.style.marginBottom = "6px"
+      d.textContent = text
+      card.appendChild(d)
+    }
+
+    const buttons = btnsMsg.buttons || btnsMsg.hydratedButtons || []
+    buttons.forEach(b => {
+      const lbl =
+        b?.quickReplyButton?.displayText ||
+        b?.urlButton?.displayText ||
+        b?.callButton?.displayText ||
+        b?.displayText ||
+        "Opção"
+      const btn = document.createElement("div")
+      btn.textContent = lbl
+      btn.style.display = "inline-block"
+      btn.style.padding = "6px 10px"
+      btn.style.border = "1px solid var(--muted,#eee)"
+      btn.style.borderRadius = "999px"
+      btn.style.margin = "4px 6px 0 0"
+      btn.style.fontSize = "12px"
+      btn.style.opacity = ".9"
+      card.appendChild(btn)
+    })
+
+    container.appendChild(card)
+    return true
+  }
+
+  if (listResp) {
+    const picked =
+      listResp?.singleSelectReply?.selectedRowId ||
+      listResp?.title || "(resposta de lista)"
+    const tag = document.createElement("div")
+    tag.style.display = "inline-block"
+    tag.style.padding = "6px 10px"
+    tag.style.border = "1px solid var(--muted,#ddd)"
+    tag.style.borderRadius = "6px"
+    tag.style.fontSize = "12px"
+    tag.textContent = picked
+    container.appendChild(tag)
+    return true
+  }
+
+  if (btnResp) {
+    const picked = btnResp?.selectedDisplayText || btnResp?.selectedButtonId || "(resposta)"
+    const tag = document.createElement("div")
+    tag.style.display = "inline-block"
+    tag.style.padding = "6px 10px"
+    tag.style.border = "1px solid var(--muted,#ddd)"
+    tag.style.borderRadius = "6px"
+    tag.style.fontSize = "12px"
+    tag.textContent = picked
+    container.appendChild(tag)
+    return true
+  }
+  return false
+}
+
+/* ========= renderização de uma bolha (com mídia/reply/interactive) ========= */
 function appendMessageBubble(pane, m) {
   const me = m.fromMe || m.fromme || m.from_me || false
   const el = document.createElement("div")
   el.className = "msg " + (me ? "me" : "you")
 
-  const { mime, url, dataUrl, caption } = pickMediaInfo(m)
-  const plainText = m.text || m.message?.text || m?.message?.conversation || m.caption || m.body || ""
-  const who = m.senderName || m.pushName || ""
-  const ts = m.messageTimestamp || m.timestamp || ""
+  // topo: reply + interativo
+  const top = document.createElement("div")
+  renderReplyPreview(top, m)
+  const hadInteractive = renderInteractive(top, m)
 
-  // IMAGEM
+  const { mime, url, dataUrl, caption } = pickMediaInfo(m)
+  const plainText =
+    m.text ||
+    m.message?.text ||
+    m?.message?.extendedTextMessage?.text ||
+    m?.message?.conversation ||
+    m.caption ||
+    m.body ||
+    ""
+  const who = m.senderName || m.pushName || ""
+  const ts  = m.messageTimestamp || m.timestamp || ""
+
+  // ---------- IMAGEM ----------
   if ((mime && mime.startsWith("image/")) || (!mime && url && /\.(png|jpe?g|gif|webp)(\?|$)/i.test(url))) {
-    const wrap = document.createElement("div")
-    wrap.className = "bubble-media"
     const figure = document.createElement("figure")
     figure.style.maxWidth = "280px"
     figure.style.margin = "0"
@@ -800,84 +973,85 @@ function appendMessageBubble(pane, m) {
     cap.style.marginTop = "6px"
     cap.textContent = caption || plainText || ""
 
+    if (top.childNodes.length) el.appendChild(top)
+    figure.appendChild(img)
+    if (cap.textContent) figure.appendChild(cap)
+    el.appendChild(figure)
+
     const meta = document.createElement("small")
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`
     meta.style.display = "block"
     meta.style.marginTop = "6px"
     meta.style.opacity = ".75"
+    el.appendChild(meta)
 
-    figure.appendChild(img)
-    if (cap.textContent) figure.appendChild(cap)
-    wrap.appendChild(figure)
-    wrap.appendChild(meta)
-    el.appendChild(wrap)
     pane.appendChild(el)
 
-    if (dataUrl) {
-      img.src = dataUrl
-    } else if (url) {
-      fetchMediaBlobViaProxy(url).then(b => {
-        img.src = URL.createObjectURL(b)
-      }).catch(() => { img.alt = "(Falha ao carregar imagem)" })
-    } else {
-      img.alt = "(Imagem não disponível)"
-    }
+    const after = () => { pane.scrollTop = pane.scrollHeight }
+    if (dataUrl) { img.onload = after; img.src = dataUrl }
+    else if (url) {
+      fetchMediaBlobViaProxy(url)
+        .then(b => { img.onload = after; img.src = URL.createObjectURL(b) })
+        .catch(() => { img.alt = "(Falha ao carregar imagem)"; after() })
+    } else { img.alt = "(Imagem não disponível)"; after() }
     return
   }
 
-  // VÍDEO
+  // ---------- VÍDEO ----------
   if ((mime && mime.startsWith("video/")) || (!mime && url && /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url))) {
-    const wrap = document.createElement("div")
-    wrap.className = "bubble-media"
-
     const video = document.createElement("video")
     video.controls = true
     video.style.maxWidth = "320px"
     video.style.borderRadius = "8px"
     video.preload = "metadata"
 
+    if (top.childNodes.length) el.appendChild(top)
+    el.appendChild(video)
+
     const cap = document.createElement("div")
     cap.style.fontSize = "12px"
     cap.style.opacity = ".8"
     cap.style.marginTop = "6px"
     cap.textContent = caption || ""
+    if (cap.textContent) el.appendChild(cap)
 
     const meta = document.createElement("small")
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`
     meta.style.display = "block"
     meta.style.marginTop = "6px"
     meta.style.opacity = ".75"
+    el.appendChild(meta)
 
-    wrap.appendChild(video)
-    if (cap.textContent) wrap.appendChild(cap)
-    wrap.appendChild(meta)
-    el.appendChild(wrap)
     pane.appendChild(el)
 
-    if (dataUrl) {
-      video.src = dataUrl
-    } else if (url) {
-      fetchMediaBlobViaProxy(url).then(b => {
-        video.src = URL.createObjectURL(b)
-      }).catch(() => {
-        const err = document.createElement("div")
-        err.style.fontSize = "12px"
-        err.style.opacity = ".8"
-        err.textContent = "(Falha ao carregar vídeo)"
-        wrap.insertBefore(err, meta)
-      })
+    const after = () => { pane.scrollTop = pane.scrollHeight }
+    if (dataUrl) { video.onloadeddata = after; video.src = dataUrl }
+    else if (url) {
+      fetchMediaBlobViaProxy(url)
+        .then(b => { video.onloadeddata = after; video.src = URL.createObjectURL(b) })
+        .catch(() => {
+          const err = document.createElement("div")
+          err.style.fontSize = "12px"
+          err.style.opacity = ".8"
+          err.textContent = "(Falha ao carregar vídeo)"
+          el.insertBefore(err, meta)
+          after()
+        })
     } else {
       const err = document.createElement("div")
       err.style.fontSize = "12px"
       err.style.opacity = ".8"
       err.textContent = "(Vídeo não disponível)"
-      wrap.insertBefore(err, meta)
+      el.insertBefore(err, meta)
+      after()
     }
     return
   }
 
-  // DOCUMENTO
+  // ---------- DOCUMENTO ----------
   if ((mime && /^application\//.test(mime)) || (!mime && url && /\.(pdf|docx?|xlsx?|pptx?)$/i.test(url))) {
+    if (top.childNodes.length) el.appendChild(top)
+
     const link = document.createElement("a")
     link.textContent = caption || plainText || "Documento"
     link.target = "_blank"
@@ -892,25 +1066,42 @@ function appendMessageBubble(pane, m) {
         alert("Falha ao baixar documento")
       }
     }
+    el.appendChild(link)
 
     const meta = document.createElement("small")
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`
     meta.style.display = "block"
     meta.style.marginTop = "6px"
     meta.style.opacity = ".75"
-
-    el.appendChild(link)
     el.appendChild(meta)
+
     pane.appendChild(el)
+    pane.scrollTop = pane.scrollHeight
     return
   }
 
-  // TEXTO (fallback)
-  el.innerHTML = `
+  // ---------- INTERATIVO sem texto ----------
+  if (hadInteractive && !plainText) {
+    if (top.childNodes.length) el.appendChild(top)
+    const meta = document.createElement("small")
+    meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`
+    meta.style.display = "block"
+    meta.style.marginTop = "6px"
+    meta.style.opacity = ".75"
+    el.appendChild(meta)
+    pane.appendChild(el)
+    pane.scrollTop = pane.scrollHeight
+    return
+  }
+
+  // ---------- TEXTO ----------
+  if (top.childNodes.length) el.appendChild(top)
+  el.innerHTML += `
     ${escapeHtml(plainText)}
     <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
   `
   pane.appendChild(el)
+  pane.scrollTop = pane.scrollHeight
 }
 
 /* ========= PILL ========= */
