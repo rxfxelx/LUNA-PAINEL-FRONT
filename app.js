@@ -4,45 +4,33 @@ const $ = (s) => document.querySelector(s);
 const show = (sel) => $(sel).classList.remove("hidden");
 const hide = (sel) => $(sel).classList.add("hidden");
 
-// Idle callback (não bloqueia UI)
-const rIC = (cb) =>
-  (window.requestIdleCallback ? window.requestIdleCallback(cb, { timeout: 200 }) : setTimeout(cb, 0));
+// Idle callback
+const rIC = (cb) => (window.requestIdleCallback ? window.requestIdleCallback(cb, { timeout: 200 }) : setTimeout(cb, 0));
 
-// Limitador de concorrência simples
+// Limitador de concorrência
 async function runLimited(tasks, limit = 8) {
   const results = [];
   let i = 0;
   const workers = new Array(Math.min(limit, tasks.length)).fill(0).map(async () => {
     while (i < tasks.length) {
       const cur = i++;
-      try {
-        results[cur] = await tasks[cur]();
-      } catch {
-        results[cur] = undefined;
-      }
+      try { results[cur] = await tasks[cur](); } catch { results[cur] = undefined; }
     }
   });
   await Promise.all(workers);
   return results;
 }
 
-function isMobile() {
-  return window.matchMedia("(max-width:1023px)").matches;
-}
+function isMobile() { return window.matchMedia("(max-width:1023px)").matches; }
 function setMobileMode(mode) {
-  // "list" | "chat" | ""
   document.body.classList.remove("is-mobile-list", "is-mobile-chat");
   if (!isMobile()) return;
   if (mode === "list") document.body.classList.add("is-mobile-list");
   if (mode === "chat") document.body.classList.add("is-mobile-chat");
 }
 
-function jwt() {
-  return localStorage.getItem("luna_jwt") || "";
-}
-function authHeaders() {
-  return { Authorization: "Bearer " + jwt() };
-}
+function jwt() { return localStorage.getItem("luna_jwt") || ""; }
+function authHeaders() { return { Authorization: "Bearer " + jwt() }; }
 
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
@@ -65,7 +53,7 @@ function truncatePreview(s, max = 90) {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
 }
 
-/* ========= NDJSON STREAM HELPER ========= */
+/* ========= NDJSON STREAM ========= */
 async function* readNDJSONStream(resp) {
   const reader = resp.body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -82,34 +70,25 @@ async function* readNDJSONStream(resp) {
       try { yield JSON.parse(line); } catch {}
     }
   }
-  if (buf.trim()) {
-    try { yield JSON.parse(buf.trim()); } catch {}
-  }
+  if (buf.trim()) { try { yield JSON.parse(buf.trim()); } catch {} }
 }
 
 /* ========= STATE ========= */
 const state = {
   chats: [],
-  current: null, // objeto do chat aberto
-  lastMsg: new Map(), // chatid => preview da última mensagem
-  lastMsgFromMe: new Map(), // chatid => boolean
-  nameCache: new Map(), // chatid => {name,image,imagePreview}
-  unread: new Map(), // chatid => count
+  current: null,
+  lastMsg: new Map(),
+  lastMsgFromMe: new Map(),
+  nameCache: new Map(),
+  unread: new Map(),
   loadingChats: false,
-
-  // Estágio retornado pelo backend (cache leve no front)
-  // chatid -> {stage, at}
   stages: new Map(),
-  stagesLoaded: true, // não usamos mais localStorage
-
-  // Splash
+  stagesLoaded: true,
   splash: { shown: false, timer: null, forceTimer: null },
-
-  // Aba ativa (geral/contatos/lead/lead_quente)
   activeTab: "geral",
 };
 
-/* ========= STAGES (apenas apresentação) ========= */
+/* ========= STAGES (apresentação) ========= */
 const STAGES = ["contatos", "lead", "lead_quente"];
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" };
 const STAGE_RANK = { contatos: 0, lead: 1, lead_quente: 2 };
@@ -121,9 +100,7 @@ function normalizeStage(s) {
   if (k === "lead") return "lead";
   return "contatos";
 }
-function getStage(chatid) {
-  return state.stages.get(chatid) || null;
-}
+function getStage(chatid) { return state.stages.get(chatid) || null; }
 function setStage(chatid, nextStage) {
   const stage = normalizeStage(nextStage);
   const rec = { stage, at: Date.now() };
@@ -131,11 +108,9 @@ function setStage(chatid, nextStage) {
   return rec;
 }
 
-/* ========= CRM (mantido) ========= */
+/* ========= CRM ========= */
 const CRM_STAGES = ["novo", "sem_resposta", "interessado", "em_negociacao", "fechou", "descartado"];
-async function apiCRMViews() {
-  return api("/api/crm/views");
-}
+async function apiCRMViews() { return api("/api/crm/views"); }
 async function apiCRMList(stage, limit = 100, offset = 0) {
   const qs = new URLSearchParams({ stage, limit, offset }).toString();
   return api("/api/crm/list?" + qs);
@@ -143,7 +118,7 @@ async function apiCRMList(stage, limit = 100, offset = 0) {
 async function apiCRMSetStatus(chatid, stage, notes = "") {
   return api("/api/crm/status", { method: "POST", body: JSON.stringify({ chatid, stage, notes }) });
 }
-function ensureCRMBar() { /* no-op */ }
+function ensureCRMBar() {}
 async function refreshCRMCounters() {
   try {
     const data = await apiCRMViews();
@@ -190,12 +165,10 @@ function createSplash() {
   el.style.justifyContent = "center";
   el.style.gap = "18px";
   el.style.zIndex = "9999";
-
   const logo = document.createElement("div");
   logo.textContent = "Luna";
   logo.style.fontSize = "28px";
   logo.style.fontWeight = "700";
-
   const spin = document.createElement("div");
   spin.style.width = "36px";
   spin.style.height = "36px";
@@ -203,36 +176,23 @@ function createSplash() {
   spin.style.borderTopColor = "currentColor";
   spin.style.borderRadius = "50%";
   spin.style.animation = "luna-rot 1s linear infinite";
-
   const note = document.createElement("div");
   note.textContent = "Carregando...";
   note.style.opacity = ".8";
   note.style.fontSize = "13px";
-
   const style = document.createElement("style");
   style.textContent = `@keyframes luna-rot{to{transform:rotate(360deg)}}`;
-
-  el.appendChild(style);
-  el.appendChild(logo);
-  el.appendChild(spin);
-  el.appendChild(note);
+  el.appendChild(style); el.appendChild(logo); el.appendChild(spin); el.appendChild(note);
   document.body.appendChild(el);
   state.splash.shown = true;
-
   state.splash.forceTimer = setTimeout(hideSplash, 7000);
 }
 function hideSplash() {
   const el = document.getElementById("luna-splash");
   if (el) el.remove();
   state.splash.shown = false;
-  if (state.splash.timer) {
-    clearTimeout(state.splash.timer);
-    state.splash.timer = null;
-  }
-  if (state.splash.forceTimer) {
-    clearTimeout(state.splash.forceTimer);
-    state.splash.forceTimer = null;
-  }
+  if (state.splash.timer) { clearTimeout(state.splash.timer); state.splash.timer = null; }
+  if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null; }
 }
 
 /* ========= LOGIN ========= */
@@ -240,24 +200,11 @@ async function doLogin() {
   const token = $("#token")?.value?.trim();
   const msgEl = $("#msg");
   const btnEl = $("#btn-login");
-
-  if (!token) {
-    if (msgEl) msgEl.textContent = "Por favor, cole o token da instância";
-    return;
-  }
-
+  if (!token) { if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"; return; }
   if (msgEl) msgEl.textContent = "";
-  if (btnEl) {
-    btnEl.disabled = true;
-    btnEl.innerHTML = "<span>Conectando...</span>";
-  }
-
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = "<span>Conectando...</span>"; }
   try {
-    const r = await fetch(BACKEND() + "/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
-    });
+    const r = await fetch(BACKEND() + "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) });
     if (!r.ok) throw new Error(await r.text());
     const data = await r.json();
     localStorage.setItem("luna_jwt", data.jwt);
@@ -268,14 +215,12 @@ async function doLogin() {
   } finally {
     if (btnEl) {
       btnEl.disabled = false;
-      btnEl.innerHTML =
-        '<span>Entrar no Sistema</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
+      btnEl.innerHTML = '<span>Entrar no Sistema</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>';
     }
   }
 }
 
 function ensureTopbar() {
-  // Garante que exista .topbar para as abas
   if (!$(".topbar")) {
     const tb = document.createElement("div");
     tb.className = "topbar";
@@ -295,34 +240,22 @@ function switchToApp() {
   ensureTopbar();
   ensureCRMBar();
   ensureStageTabs();
-
   createSplash();
-  loadChats().finally(() => {
-    state.splash.timer = setTimeout(hideSplash, 300);
-  });
+  loadChats().finally(() => { state.splash.timer = setTimeout(hideSplash, 300); });
 }
 
 function ensureRoute() {
   if (jwt()) switchToApp();
-  else {
-    show("#login-view");
-    hide("#app-view");
-  }
+  else { show("#login-view"); hide("#app-view"); }
 }
 
 /* ========= AVATAR/NAME-IMAGE ========= */
 async function fetchNameImage(chatid, preview = true) {
   try {
-    const resp = await api("/api/name-image", {
-      method: "POST",
-      body: JSON.stringify({ number: chatid, preview }),
-    });
-    return resp; // {name,image,imagePreview}
-  } catch {
-    return { name: null, image: null, imagePreview: null };
-  }
+    const resp = await api("/api/name-image", { method: "POST", body: JSON.stringify({ number: chatid, preview }) });
+    return resp;
+  } catch { return { name: null, image: null, imagePreview: null }; }
 }
-
 function initialsOf(str) {
   const s = (str || "").trim();
   if (!s) return "??";
@@ -348,7 +281,6 @@ function ensureStageTabs() {
     b.onclick = () => {
       state.activeTab = key;
       onclick();
-      // marca ativa
       host.querySelectorAll(".stage-tabs .btn").forEach((x) => x.classList.remove("active"));
       b.classList.add("active");
       const mobileSelect = document.getElementById("mobile-stage-select");
@@ -362,10 +294,7 @@ function ensureStageTabs() {
   const btnLead = addBtn("lead", "Lead", () => loadStageTab("lead"));
   const btnLQ = addBtn("lead_quente", "Lead Quente", () => loadStageTab("lead_quente"));
 
-  bar.appendChild(btnGeral);
-  bar.appendChild(btnCont);
-  bar.appendChild(btnLead);
-  bar.appendChild(btnLQ);
+  bar.appendChild(btnGeral); bar.appendChild(btnCont); bar.appendChild(btnLead); bar.appendChild(btnLQ);
 
   const counters = document.createElement("div");
   counters.className = "stage-counters";
@@ -373,32 +302,19 @@ function ensureStageTabs() {
   counters.style.color = "var(--sub2)";
   counters.style.fontSize = "12px";
 
-  host.appendChild(bar);
-  host.appendChild(counters);
+  host.appendChild(bar); host.appendChild(counters);
 
   const mobileSelect = document.getElementById("mobile-stage-select");
   if (mobileSelect) {
     mobileSelect.onchange = (e) => {
       const key = e.target.value;
       state.activeTab = key;
-
-      // Executa a ação correspondente
       switch (key) {
-        case "geral":
-          loadChats();
-          break;
-        case "contatos":
-          loadStageTab("contatos");
-          break;
-        case "lead":
-          loadStageTab("lead");
-          break;
-        case "lead_quente":
-          loadStageTab("lead_quente");
-          break;
+        case "geral": loadChats(); break;
+        case "contatos": loadStageTab("contatos"); break;
+        case "lead": loadStageTab("lead"); break;
+        case "lead_quente": loadStageTab("lead_quente"); break;
       }
-
-      // Sincroniza com botões desktop
       const btn = host.querySelector(`.stage-tabs .btn[data-stage="${key}"]`);
       if (btn) {
         host.querySelectorAll(".stage-tabs .btn").forEach((x) => x.classList.remove("active"));
@@ -407,7 +323,6 @@ function ensureStageTabs() {
     };
   }
 
-  // ativa a guia atual
   setTimeout(() => {
     const btn = host.querySelector(`.stage-tabs .btn[data-stage="${state.activeTab}"]`) || btnGeral;
     btn.click();
@@ -428,7 +343,6 @@ function refreshStageCounters() {
   const mobileContatos = document.getElementById("mobile-counter-contatos");
   const mobileLead = document.getElementById("mobile-counter-lead");
   const mobileLeadQuente = document.getElementById("mobile-counter-lead_quente");
-
   if (mobileContatos) mobileContatos.textContent = counts.contatos;
   if (mobileLead) mobileLead.textContent = counts.lead;
   if (mobileLeadQuente) mobileLeadQuente.textContent = counts.lead_quente;
@@ -448,8 +362,7 @@ async function loadStageTab(stageKey) {
   await prefetchCards(filtered);
 }
 
-/* ========= CHATS ========= */
-// NOVA VERSÃO: usa stream incremental + prefetch leve (última msg + classificar)
+/* ========= CHATS (STREAM + PREFETCH) ========= */
 async function loadChats() {
   if (state.loadingChats) return;
   state.loadingChats = true;
@@ -469,10 +382,7 @@ async function loadChats() {
     state.chats = [];
 
     let prefetchQueue = [];
-    const FLUSH = async () => {
-      const tasks = prefetchQueue.splice(0).map((fn) => fn);
-      await runLimited(tasks, 8);
-    };
+    const FLUSH = async () => { const tasks = prefetchQueue.splice(0); await runLimited(tasks, 8); };
 
     for await (const item of readNDJSONStream(res)) {
       if (item?.error) continue;
@@ -480,13 +390,12 @@ async function loadChats() {
 
       appendChatSkeleton(list, item);
 
-      // Prefetch leve: nome/imagem + última mensagem + classificação
       prefetchQueue.push(async () => {
         const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
         if (!id) return;
 
+        // nome/imagem
         try {
-          // nome/imagem
           if (!state.nameCache.has(id)) {
             const resp = await fetchNameImage(id);
             state.nameCache.set(id, resp || {});
@@ -494,72 +403,54 @@ async function loadChats() {
           }
         } catch {}
 
+        // última mensagem + preview + horário + classificação
         try {
-          // última mensagem + preview + horário
           const data = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid: id, limit: 1, sort: "-messageTimestamp" }),
           });
           const last = Array.isArray(data?.items) ? data.items[0] : null;
-          if (last) {
-            const pv = (
-              last.text ||
-              last.caption ||
-              last?.message?.text ||
-              last?.message?.conversation ||
-              last?.body ||
-              ""
-            ).replace(/\s+/g, " ").trim();
-            state.lastMsg.set(id, pv);
-            const fromMe = isFromMe(last);
-            state.lastMsgFromMe.set(id, fromMe);
+          const pv = last
+            ? (last.text || last.caption || last?.message?.text || last?.message?.conversation || last?.body || "").replace(/\s+/g, " ").trim()
+            : "";
+          state.lastMsg.set(id, pv);
+          const fromMe = last ? isFromMe(last) : false;
+          state.lastMsgFromMe.set(id, fromMe);
 
-            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
-            if (card) {
-              const txt = (fromMe ? "Você: " : "") + (pv ? truncatePreview(pv, 90) : "Sem mensagens");
-              card.textContent = txt;
-              card.title = (fromMe ? "Você: " : "") + pv;
-            }
-            const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`);
-            if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
+          const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
+          if (card) {
+            const txt = pv ? ((fromMe ? "Você: " : "") + truncatePreview(pv, 90)) : "Sem mensagens";
+            card.textContent = txt;
+            card.title = pv ? (fromMe ? "Você: " : "") + pv : "Sem mensagens";
           }
+          const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`);
+          if (tEl && last) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
+        } catch {
+          const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
+          if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
+        }
 
-          // classificar no back com base no chatid
-          try {
-            const r = await api("/api/media/stage/classify", {
-              method: "POST",
-              body: JSON.stringify({ chatid: id }),
-            });
-            const stage = normalizeStage(r?.stage || "");
-            if (stage) {
-              const rec = setStage(id, stage);
-              if (state.current && (state.current.wa_chatid || state.current.chatid) === id) {
-                upsertStagePill(rec.stage);
-              }
-              rIC(refreshStageCounters);
-            }
-          } catch {}
+        // classificar
+        try {
+          const r = await api("/api/media/stage/classify", { method: "POST", body: JSON.stringify({ chatid: id }) });
+          const stage = normalizeStage(r?.stage || "");
+          if (stage) {
+            const rec = setStage(id, stage);
+            if (state.current && (state.current.wa_chatid || state.current.chatid) === id) upsertStagePill(rec.stage);
+            rIC(refreshStageCounters);
+          }
         } catch {}
       });
 
-      // escoa o lote para não travar a UI
       if (prefetchQueue.length >= 12) await FLUSH();
-
       rIC(refreshStageCounters);
     }
 
-    // drena qualquer sobra
     await FLUSH();
 
-    if (state.activeTab !== "geral") {
-      await loadStageTab(state.activeTab);
-    }
+    if (state.activeTab !== "geral") await loadStageTab(state.activeTab);
 
-    // CRM opcional
-    try {
-      await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) });
-      refreshCRMCounters();
-    } catch {}
+    try { await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) }); refreshCRMCounters(); } catch {}
   } catch (e) {
     console.error(e);
     if (list) list.innerHTML = `<div class='error'>${escapeHtml(e.message || "Falha ao carregar conversas")}</div>`;
@@ -568,24 +459,18 @@ async function loadChats() {
   }
 }
 
-// Renderiza chats progressivamente
+/* ========= LISTA ========= */
 async function progressiveRenderChats(chats) {
   const list = $("#chat-list");
   if (!list) return;
   list.innerHTML = "";
-
-  if (chats.length === 0) {
-    list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>";
-    return;
-  }
-
+  if (chats.length === 0) { list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>"; return; }
   const BATCH = 14;
   for (let i = 0; i < chats.length; i += BATCH) {
     const slice = chats.slice(i, i + BATCH);
     slice.forEach((ch) => appendChatSkeleton(list, ch));
     await new Promise((r) => rIC(r));
   }
-
   chats.forEach((ch) => hydrateChatCard(ch));
 }
 
@@ -611,8 +496,7 @@ function appendChatSkeleton(list, ch) {
   tm.className = "time";
   const lastTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || "";
   tm.textContent = lastTs ? formatTime(lastTs) : "";
-  top.appendChild(nm);
-  top.appendChild(tm);
+  top.appendChild(nm); top.appendChild(tm);
 
   const bottom = document.createElement("div");
   bottom.className = "row2";
@@ -624,16 +508,11 @@ function appendChatSkeleton(list, ch) {
   const unread = document.createElement("span");
   unread.className = "badge";
   const count = state.unread.get(el.dataset.chatid) || ch.wa_unreadCount || 0;
-  if (count > 0) unread.textContent = count;
-  else unread.style.display = "none";
+  if (count > 0) unread.textContent = count; else unread.style.display = "none";
 
-  bottom.appendChild(preview);
-  bottom.appendChild(unread);
-
-  main.appendChild(top);
-  main.appendChild(bottom);
-  el.appendChild(avatar);
-  el.appendChild(main);
+  bottom.appendChild(preview); bottom.appendChild(unread);
+  main.appendChild(top); main.appendChild(bottom);
+  el.appendChild(avatar); el.appendChild(main);
   list.appendChild(el);
 
   attachCRMControlsToCard(el, ch);
@@ -643,7 +522,6 @@ function hydrateChatCard(ch) {
   const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
   const cache = state.nameCache.get(chatid);
   if (!chatid || !cache) return;
-
   const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
   if (!el) return;
 
@@ -661,47 +539,34 @@ function hydrateChatCard(ch) {
   if (cache.name) nameEl.textContent = cache.name;
 }
 
-// Prefetch paralelo limitado (mantido para usos como CRM/abas)
+/* ========= PREFETCH (para abas/CRM) ========= */
 async function prefetchCards(items) {
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
     return async () => {
       if (!chatid) return;
       if (!state.nameCache.has(chatid)) {
-        try {
-          const resp = await fetchNameImage(chatid);
-          state.nameCache.set(chatid, resp);
-          hydrateChatCard(ch);
-        } catch {}
+        try { const resp = await fetchNameImage(chatid); state.nameCache.set(chatid, resp); hydrateChatCard(ch); } catch {}
       }
       if (!state.lastMsg.has(chatid) && !ch.wa_lastMessageText) {
         try {
-          const data = await api("/api/messages", {
-            method: "POST",
-            body: JSON.stringify({ chatid, limit: 1, sort: "-messageTimestamp" }),
-          });
+          const data = await api("/api/messages", { method: "POST", body: JSON.stringify({ chatid, limit: 1, sort: "-messageTimestamp" }) });
           const last = Array.isArray(data?.items) ? data.items[0] : null;
           if (last) {
-            const pv = (
-              last.text ||
-              last.caption ||
-              last?.message?.text ||
-              last?.message?.conversation ||
-              last?.body ||
-              ""
-            ).replace(/\s+/g, " ").trim();
+            const pv = (last.text || last.caption || last?.message?.text || last?.message?.conversation || last?.body || "").replace(/\s+/g, " ").trim();
             state.lastMsg.set(chatid, pv);
             const fromMe = isFromMe(last);
             state.lastMsgFromMe.set(chatid, fromMe);
-
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
             if (card) {
               const txt = (fromMe ? "Você: " : "") + (pv ? truncatePreview(pv, 90) : "Sem mensagens");
-              card.textContent = txt;
-              card.title = (fromMe ? "Você: " : "") + pv;
+              card.textContent = txt; card.title = (fromMe ? "Você: " : "") + pv;
             }
             const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`);
             if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
+          } else {
+            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
+            if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
           }
         } catch {}
       }
@@ -727,9 +592,7 @@ function formatTime(timestamp) {
     if (hours < 24) return `${hours}h`;
     if (hours < 48) return "Ontem";
     return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-  } catch (e) {
-    return timestamp;
-  }
+  } catch { return timestamp; }
 }
 
 /* ========= OPEN CHAT / MESSAGES ========= */
@@ -754,13 +617,9 @@ async function openChat(ch) {
   if (status) status.textContent = "Online";
 }
 
-// >>> Classificação APENAS VIA BACKEND
 async function classifyInstant(chatid, items) {
   try {
-    const r = await api("/api/media/stage/classify", {
-      method: "POST",
-      body: JSON.stringify({ chatid, messages: items }),
-    });
+    const r = await api("/api/media/stage/classify", { method: "POST", body: JSON.stringify({ chatid, messages: items }) });
     const stage = normalizeStage(r?.stage || "");
     if (stage) {
       const rec = setStage(chatid, stage);
@@ -775,37 +634,22 @@ async function classifyInstant(chatid, items) {
 async function loadMessages(chatid) {
   const pane = $("#messages");
   if (pane) pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>";
-
   try {
-    const data = await api("/api/messages", {
-      method: "POST",
-      body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }),
-    });
+    const data = await api("/api/messages", { method: "POST", body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }) });
     const items = Array.isArray(data?.items) ? data.items : [];
-
-    // Classificação INSTANTÂNEA pelo backend (antes de renderizar)
     await classifyInstant(chatid, items);
-
     await progressiveRenderMessages(items.slice().reverse());
-
     const last = items[0];
-    const pv = (
-      last?.text ||
-      last?.caption ||
-      last?.message?.text ||
-      last?.message?.conversation ||
-      last?.body ||
-      ""
-    ).replace(/\s+/g, " ").trim();
-    state.lastMsg.set(chatid, pv);
-    state.lastMsgFromMe.set(chatid, isFromMe(last));
+    const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "").replace(/\s+/g, " ").trim();
+    if (pv) state.lastMsg.set(chatid, pv);
+    state.lastMsgFromMe.set(chatid, isFromMe(last || {}));
   } catch (e) {
     console.error(e);
     if (pane) pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`;
   }
 }
 
-/* ========= renderização PROGRESSIVA ========= */
+/* ========= RENDER MSGs ========= */
 async function progressiveRenderMessages(msgs) {
   const pane = $("#messages");
   if (!pane) return;
@@ -817,8 +661,7 @@ async function progressiveRenderMessages(msgs) {
         <div class="empty-icon">💬</div>
         <h3>Nenhuma mensagem</h3>
         <p>Esta conversa ainda não possui mensagens</p>
-      </div>
-    `;
+      </div>`;
     return;
   }
 
@@ -826,13 +669,11 @@ async function progressiveRenderMessages(msgs) {
   for (let i = 0; i < msgs.length; i += BATCH) {
     const slice = msgs.slice(i, i + BATCH);
     slice.forEach((m) => {
-      try {
-        appendMessageBubble(pane, m);
-      } catch {
+      try { appendMessageBubble(pane, m); }
+      catch {
         const el = document.createElement("div");
         el.className = "msg you";
-        el.innerHTML =
-          "(mensagem não suportada)<small style='display:block;opacity:.7;margin-top:6px'>Erro ao renderizar</small>";
+        el.innerHTML = "(mensagem não suportada)<small style='display:block;opacity:.7;margin-top:6px'>Erro ao renderizar</small>";
         pane.appendChild(el);
       }
     });
@@ -841,55 +682,57 @@ async function progressiveRenderMessages(msgs) {
   }
 }
 
-/* ========= MÍDIA & INTERATIVOS: helpers ========= */
+/* ========= MÍDIA & INTERATIVOS ========= */
 function pickMediaInfo(m) {
   const mm = m.message || m;
+
+  // mime
   const mime =
-    m.mimetype ||
-    m.mime ||
+    m.mimetype || m.mime ||
     mm?.imageMessage?.mimetype ||
     mm?.videoMessage?.mimetype ||
     mm?.documentMessage?.mimetype ||
     mm?.audioMessage?.mimetype ||
+    (mm?.stickerMessage ? "image/webp" : "") ||
     "";
 
+  // url
   const url =
-    m.mediaUrl ||
-    m.url ||
-    m.fileUrl ||
-    m.downloadUrl ||
-    m.image ||
-    m.video ||
-    mm?.imageMessage?.url ||
-    mm?.videoMessage?.url ||
-    mm?.documentMessage?.url ||
+    m.mediaUrl || m.url || m.fileUrl || m.downloadUrl || m.image || m.video ||
+    mm?.imageMessage?.url || mm?.videoMessage?.url || mm?.documentMessage?.url ||
+    mm?.stickerMessage?.url || mm?.audioMessage?.url ||
     "";
 
-  const dataUrl = m.dataUrl || mm?.imageMessage?.dataUrl || mm?.videoMessage?.dataUrl || "";
+  const dataUrl =
+    m.dataUrl ||
+    mm?.imageMessage?.dataUrl || mm?.videoMessage?.dataUrl ||
+    mm?.documentMessage?.dataUrl || mm?.stickerMessage?.dataUrl ||
+    mm?.audioMessage?.dataUrl || "";
 
-  const caption = m.caption || mm?.imageMessage?.caption || mm?.videoMessage?.caption || m.text || mm?.conversation || "";
+  const caption =
+    m.caption || mm?.imageMessage?.caption || mm?.videoMessage?.caption ||
+    m.text || mm?.conversation || m.body || "";
 
   return { mime: String(mime || ""), url: String(url || ""), dataUrl: String(dataUrl || ""), caption: String(caption || "") };
 }
 
-// >>> proxy via GET ?u=
 async function fetchMediaBlobViaProxy(rawUrl) {
   const q = encodeURIComponent(String(rawUrl || ""));
-  const r = await fetch(BACKEND() + "/api/media/proxy?u=" + q, {
-    method: "GET",
-    headers: { ...authHeaders() },
-  });
+  const r = await fetch(BACKEND() + "/api/media/proxy?u=" + q, { method: "GET", headers: { ...authHeaders() } });
   if (!r.ok) throw new Error("Falha ao baixar mídia");
   return await r.blob();
 }
 
-// Caixinha de reply
+// Reply preview
 function renderReplyPreview(container, m) {
   const qm =
     m?.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
     m?.contextInfo?.quotedMessage ||
     m?.message?.imageMessage?.contextInfo?.quotedMessage ||
-    m?.message?.videoMessage?.contextInfo?.quotedMessage;
+    m?.message?.videoMessage?.contextInfo?.quotedMessage ||
+    m?.message?.stickerMessage?.contextInfo?.quotedMessage ||
+    m?.message?.documentMessage?.contextInfo?.quotedMessage ||
+    m?.message?.audioMessage?.contextInfo?.quotedMessage;
   if (!qm) return;
   const qt =
     qm?.extendedTextMessage?.text ||
@@ -908,7 +751,7 @@ function renderReplyPreview(container, m) {
   container.appendChild(box);
 }
 
-// Cartões de lista/botões (enviados e respostas)
+// Interativos
 function renderInteractive(container, m) {
   const listMsg = m?.message?.listMessage;
   const btnsMsg = m?.message?.buttonsMessage || m?.message?.templateMessage?.hydratedTemplate;
@@ -922,30 +765,10 @@ function renderInteractive(container, m) {
     card.style.borderRadius = "8px";
     card.style.padding = "8px";
     card.style.maxWidth = "320px";
-    if (listMsg.title) {
-      const h = document.createElement("div");
-      h.style.fontWeight = "600";
-      h.style.marginBottom = "6px";
-      h.textContent = listMsg.title;
-      card.appendChild(h);
-    }
-    if (listMsg.description) {
-      const d = document.createElement("div");
-      d.style.fontSize = "12px";
-      d.style.opacity = ".85";
-      d.style.marginBottom = "6px";
-      d.textContent = listMsg.description;
-      card.appendChild(d);
-    }
+    if (listMsg.title) { const h = document.createElement("div"); h.style.fontWeight = "600"; h.style.marginBottom = "6px"; h.textContent = listMsg.title; card.appendChild(h); }
+    if (listMsg.description) { const d = document.createElement("div"); d.style.fontSize = "12px"; d.style.opacity = ".85"; d.style.marginBottom = "6px"; d.textContent = listMsg.description; card.appendChild(d); }
     (listMsg.sections || []).forEach((sec) => {
-      if (sec.title) {
-        const st = document.createElement("div");
-        st.style.margin = "6px 0 4px";
-        st.style.fontSize = "12px";
-        st.style.opacity = ".8";
-        st.textContent = sec.title;
-        card.appendChild(st);
-      }
+      if (sec.title) { const st = document.createElement("div"); st.style.margin = "6px 0 4px"; st.style.fontSize = "12px"; st.style.opacity = ".8"; st.textContent = sec.title; card.appendChild(st); }
       (sec.rows || []).forEach((row) => {
         const opt = document.createElement("div");
         opt.style.padding = "6px 8px";
@@ -969,29 +792,11 @@ function renderInteractive(container, m) {
     card.style.maxWidth = "320px";
     const title = btnsMsg.title || btnsMsg.hydratedTitle;
     const text = btnsMsg.text || btnsMsg.hydratedContentText;
-    if (title) {
-      const h = document.createElement("div");
-      h.style.fontWeight = "600";
-      h.style.marginBottom = "6px";
-      h.textContent = title;
-      card.appendChild(h);
-    }
-    if (text) {
-      const d = document.createElement("div");
-      d.style.fontSize = "12px";
-      d.style.opacity = ".85";
-      d.style.marginBottom = "6px";
-      d.textContent = text;
-      card.appendChild(d);
-    }
+    if (title) { const h = document.createElement("div"); h.style.fontWeight = "600"; h.style.marginBottom = "6px"; h.textContent = title; card.appendChild(h); }
+    if (text) { const d = document.createElement("div"); d.style.fontSize = "12px"; d.style.opacity = ".85"; d.style.marginBottom = "6px"; d.textContent = text; card.appendChild(d); }
     const buttons = btnsMsg.buttons || btnsMsg.hydratedButtons || [];
     buttons.forEach((b) => {
-      const lbl =
-        b?.quickReplyButton?.displayText ||
-        b?.urlButton?.displayText ||
-        b?.callButton?.displayText ||
-        b?.displayText ||
-        "Opção";
+      const lbl = b?.quickReplyButton?.displayText || b?.urlButton?.displayText || b?.callButton?.displayText || b?.displayText || "Opção";
       const btn = document.createElement("div");
       btn.textContent = lbl;
       btn.style.display = "inline-block";
@@ -1008,8 +813,7 @@ function renderInteractive(container, m) {
   }
 
   if (listResp) {
-    const picked =
-      listResp?.singleSelectReply?.selectedRowId || listResp?.title || "(resposta de lista)";
+    const picked = listResp?.singleSelectReply?.selectedRowId || listResp?.title || "(resposta de lista)";
     const tag = document.createElement("div");
     tag.style.display = "inline-block";
     tag.style.padding = "6px 10px";
@@ -1047,189 +851,138 @@ function isFromMe(m) {
   );
 }
 
-/* ========= renderização de uma bolha ========= */
+/* ========= BOLHA ========= */
 function appendMessageBubble(pane, m) {
   const me = isFromMe(m);
   const el = document.createElement("div");
   el.className = "msg " + (me ? "me" : "you");
 
-  // topo: reply + interativo
   const top = document.createElement("div");
   renderReplyPreview(top, m);
   const hadInteractive = renderInteractive(top, m);
 
   const { mime, url, dataUrl, caption } = pickMediaInfo(m);
   const plainText =
-    m.text ||
-    m.message?.text ||
-    m?.message?.extendedTextMessage?.text ||
-    m?.message?.conversation ||
-    m.caption ||
-    m.body ||
-    "";
+    m.text || m.message?.text || m?.message?.extendedTextMessage?.text ||
+    m?.message?.conversation || m.caption || m.body || "";
   const who = m.senderName || m.pushName || "";
   const ts = m.messageTimestamp || m.timestamp || "";
 
-  // ---------- IMAGEM ----------
+  // Sticker (image/webp sem legenda)
+  if (mime && /^image\/webp$/i.test(mime) && (url || dataUrl)) {
+    const img = document.createElement("img");
+    img.alt = "figurinha";
+    img.style.maxWidth = "160px";
+    img.style.borderRadius = "8px";
+    if (top.childNodes.length) el.appendChild(top);
+    el.appendChild(img);
+    const meta = document.createElement("small");
+    meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
+    el.appendChild(meta);
+    pane.appendChild(el);
+    const after = () => { pane.scrollTop = pane.scrollHeight; };
+    if (dataUrl) { img.onload = after; img.src = dataUrl; }
+    else if (url) {
+      fetchMediaBlobViaProxy(url).then((b) => { img.onload = after; img.src = URL.createObjectURL(b); })
+        .catch(() => { img.alt = "(Falha ao carregar figurinha)"; after(); });
+    }
+    return;
+  }
+
+  // IMAGEM
   if ((mime && mime.startsWith("image/")) || (!mime && url && /\.(png|jpe?g|gif|webp)(\?|$)/i.test(url))) {
     const figure = document.createElement("figure");
-    figure.style.maxWidth = "280px";
-    figure.style.margin = "0";
-
+    figure.style.maxWidth = "280px"; figure.style.margin = "0";
     const img = document.createElement("img");
-    img.alt = "imagem";
-    img.style.maxWidth = "100%";
-    img.style.borderRadius = "8px";
-    img.style.display = "block";
-
+    img.alt = "imagem"; img.style.maxWidth = "100%"; img.style.borderRadius = "8px"; img.style.display = "block";
     const cap = document.createElement("figcaption");
-    cap.style.fontSize = "12px";
-    cap.style.opacity = ".8";
-    cap.style.marginTop = "6px";
-    cap.textContent = caption || plainText || "";
-
+    cap.style.fontSize = "12px"; cap.style.opacity = ".8"; cap.style.marginTop = "6px"; cap.textContent = caption || plainText || "";
     if (top.childNodes.length) el.appendChild(top);
-    figure.appendChild(img);
-    if (cap.textContent) figure.appendChild(cap);
-    el.appendChild(figure);
-
+    figure.appendChild(img); if (cap.textContent) figure.appendChild(cap); el.appendChild(figure);
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
-    el.appendChild(meta);
-
-    pane.appendChild(el);
-
-    const after = () => {
-      pane.scrollTop = pane.scrollHeight;
-    };
-    if (dataUrl) {
-      img.onload = after;
-      img.src = dataUrl;
-    } else if (url) {
-      fetchMediaBlobViaProxy(url)
-        .then((b) => {
-          img.onload = after;
-          img.src = URL.createObjectURL(b);
-        })
-        .catch(() => {
-          img.alt = "(Falha ao carregar imagem)";
-          after();
-        });
-    } else {
-      img.alt = "(Imagem não disponível)";
-      after();
-    }
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
+    el.appendChild(meta); pane.appendChild(el);
+    const after = () => { pane.scrollTop = pane.scrollHeight; };
+    if (dataUrl) { img.onload = after; img.src = dataUrl; }
+    else if (url) {
+      fetchMediaBlobViaProxy(url).then((b) => { img.onload = after; img.src = URL.createObjectURL(b); })
+        .catch(() => { img.alt = "(Falha ao carregar imagem)"; after(); });
+    } else { img.alt = "(Imagem não disponível)"; after(); }
     return;
   }
 
-  // ---------- VÍDEO ----------
+  // VÍDEO
   if ((mime && mime.startsWith("video/")) || (!mime && url && /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url))) {
     const video = document.createElement("video");
-    video.controls = true;
-    video.style.maxWidth = "320px";
-    video.style.borderRadius = "8px";
-    video.preload = "metadata";
-
+    video.controls = true; video.style.maxWidth = "320px"; video.style.borderRadius = "8px"; video.preload = "metadata";
     if (top.childNodes.length) el.appendChild(top);
     el.appendChild(video);
-
     const cap = document.createElement("div");
-    cap.style.fontSize = "12px";
-    cap.style.opacity = ".8";
-    cap.style.marginTop = "6px";
-    cap.textContent = caption || "";
+    cap.style.fontSize = "12px"; cap.style.opacity = ".8"; cap.style.marginTop = "6px"; cap.textContent = caption || "";
     if (cap.textContent) el.appendChild(cap);
-
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
-    el.appendChild(meta);
-
-    pane.appendChild(el);
-
-    const after = () => {
-      pane.scrollTop = pane.scrollHeight;
-    };
-    if (dataUrl) {
-      video.onloadeddata = after;
-      video.src = dataUrl;
-    } else if (url) {
-      fetchMediaBlobViaProxy(url)
-        .then((b) => {
-          video.onloadeddata = after;
-          video.src = URL.createObjectURL(b);
-        })
-        .catch(() => {
-          const err = document.createElement("div");
-          err.style.fontSize = "12px";
-          err.style.opacity = ".8";
-          err.textContent = "(Falha ao carregar vídeo)";
-          el.insertBefore(err, meta);
-          after();
-        });
-    } else {
-      const err = document.createElement("div");
-      err.style.fontSize = "12px";
-      err.style.opacity = ".8";
-      err.textContent = "(Vídeo não disponível)";
-      el.insertBefore(err, meta);
-      after();
-    }
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
+    el.appendChild(meta); pane.appendChild(el);
+    const after = () => { pane.scrollTop = pane.scrollHeight; };
+    if (dataUrl) { video.onloadeddata = after; video.src = dataUrl; }
+    else if (url) {
+      fetchMediaBlobViaProxy(url).then((b) => { video.onloadeddata = after; video.src = URL.createObjectURL(b); })
+        .catch(() => { const err = document.createElement("div"); err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Falha ao carregar vídeo)"; el.insertBefore(err, meta); after(); });
+    } else { const err = document.createElement("div"); err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Vídeo não disponível)"; el.insertBefore(err, meta); after(); }
     return;
   }
 
-  // ---------- DOCUMENTO ----------
+  // ÁUDIO
+  if ((mime && mime.startsWith("audio/")) || (!mime && url && /\.(mp3|ogg|m4a|wav)(\?|$)/i.test(url))) {
+    const audio = document.createElement("audio");
+    audio.controls = true; audio.preload = "metadata";
+    if (top.childNodes.length) el.appendChild(top);
+    el.appendChild(audio);
+    const meta = document.createElement("small");
+    meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
+    el.appendChild(meta); pane.appendChild(el);
+    const after = () => { pane.scrollTop = pane.scrollHeight; };
+    if (dataUrl) { audio.onloadeddata = after; audio.src = dataUrl; }
+    else if (url) {
+      fetchMediaBlobViaProxy(url).then((b) => { audio.onloadeddata = after; audio.src = URL.createObjectURL(b); })
+        .catch(() => { const err = document.createElement("div"); err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Falha ao carregar áudio)"; el.insertBefore(err, meta); after(); });
+    } else { const err = document.createElement("div"); err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Áudio não disponível)"; el.insertBefore(err, meta); after(); }
+    return;
+  }
+
+  // DOCUMENTO
   if ((mime && /^application\//.test(mime)) || (!mime && url && /\.(pdf|docx?|xlsx?|pptx?)$/i.test(url))) {
     if (top.childNodes.length) el.appendChild(top);
-
     const link = document.createElement("a");
     link.textContent = caption || plainText || "Documento";
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.href = "javascript:void(0)";
+    link.target = "_blank"; link.rel = "noopener noreferrer"; link.href = "javascript:void(0)";
     link.onclick = async () => {
-      try {
-        const b = await fetchMediaBlobViaProxy(url);
-        const blobUrl = URL.createObjectURL(b);
-        window.open(blobUrl, "_blank");
-      } catch {
-        alert("Falha ao baixar documento");
-      }
+      try { const b = await fetchMediaBlobViaProxy(url); const blobUrl = URL.createObjectURL(b); window.open(blobUrl, "_blank"); }
+      catch { alert("Falha ao baixar documento"); }
     };
     el.appendChild(link);
-
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
-    el.appendChild(meta);
-
-    pane.appendChild(el);
-    pane.scrollTop = pane.scrollHeight;
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
+    el.appendChild(meta); pane.appendChild(el); pane.scrollTop = pane.scrollHeight;
     return;
   }
 
-  // ---------- INTERATIVO sem texto ----------
+  // INTERATIVO sem texto
   if (hadInteractive && !plainText) {
     if (top.childNodes.length) el.appendChild(top);
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
-    el.appendChild(meta);
-    pane.appendChild(el);
-    pane.scrollTop = pane.scrollHeight;
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
+    el.appendChild(meta); pane.appendChild(el); pane.scrollTop = pane.scrollHeight;
     return;
   }
 
-  // ---------- TEXTO ----------
+  // TEXTO
   if (top.childNodes.length) el.appendChild(top);
   el.innerHTML += `
     ${escapeHtml(plainText)}
@@ -1259,23 +1012,20 @@ function upsertStagePill(stage) {
   pill.title = "";
 }
 
-/* ========= RENDER “CLÁSSICO” (texto puro) ========= */
+/* ========= RENDER “CLÁSSICO” ========= */
 function renderMessages(msgs) {
   const pane = $("#messages");
   if (!pane) return;
   pane.innerHTML = "";
-
   if (msgs.length === 0) {
     pane.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">💬</div>
         <h3>Nenhuma mensagem</h3>
         <p>Esta conversa ainda não possui mensagens</p>
-      </div>
-    `;
+      </div>`;
     return;
   }
-
   msgs.forEach((m) => {
     const me = isFromMe(m);
     const el = document.createElement("div");
@@ -1283,14 +1033,9 @@ function renderMessages(msgs) {
     const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "";
     const who = m.senderName || m.pushName || "";
     const ts = m.messageTimestamp || m.timestamp || "";
-
-    el.innerHTML = `
-      ${escapeHtml(text)}
-      <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
-    `;
+    el.innerHTML = `${escapeHtml(text)}<small>${escapeHtml(who)} • ${formatTime(ts)}</small>`;
     pane.appendChild(el);
   });
-
   pane.scrollTop = pane.scrollHeight;
 }
 
@@ -1303,17 +1048,12 @@ async function sendNow() {
 
   if (btnEl) {
     btnEl.disabled = true;
-    btnEl.innerHTML =
-      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
+    btnEl.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
   }
 
   try {
-    await api("/api/send-text", {
-      method: "POST",
-      body: JSON.stringify({ number, text }),
-    });
+    await api("/api/send-text", { method: "POST", body: JSON.stringify({ number, text }) });
     if ($("#send-text")) $("#send-text").value = "";
-
     if (state.current && (state.current.wa_chatid || state.current.chatid) === number) {
       setTimeout(() => loadMessages(number), 500);
     }
@@ -1322,8 +1062,7 @@ async function sendNow() {
   } finally {
     if (btnEl) {
       btnEl.disabled = false;
-      btnEl.innerHTML =
-        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+      btnEl.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
     }
   }
 }
@@ -1331,40 +1070,27 @@ async function sendNow() {
 /* ========= BOOT ========= */
 document.addEventListener("DOMContentLoaded", () => {
   $("#btn-login") && ($("#btn-login").onclick = doLogin);
-  $("#btn-logout") &&
-    ($("#btn-logout").onclick = () => {
-      localStorage.clear();
-      location.reload();
-    });
+  $("#btn-logout") && ($("#btn-logout").onclick = () => { localStorage.clear(); location.reload(); });
   $("#btn-send") && ($("#btn-send").onclick = sendNow);
-  $("#btn-refresh") &&
-    ($("#btn-refresh").onclick = () => {
-      if (state.current) {
-        const chatid = state.current.wa_chatid || state.current.chatid;
-        loadMessages(chatid);
-      } else {
-        loadChats();
-      }
-    });
+  $("#btn-refresh") && ($("#btn-refresh").onclick = () => {
+    if (state.current) {
+      const chatid = state.current.wa_chatid || state.current.chatid;
+      loadMessages(chatid);
+    } else {
+      loadChats();
+    }
+  });
 
   const backBtn = document.getElementById("btn-back-mobile");
   if (backBtn) backBtn.onclick = () => setMobileMode("list");
 
-  $("#send-text") &&
-    $("#send-text").addEventListener("keypress", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        sendNow();
-      }
-    });
+  $("#send-text") && $("#send-text").addEventListener("keypress", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendNow(); }
+  });
 
-  $("#token") &&
-    $("#token").addEventListener("keypress", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        doLogin();
-      }
-    });
+  $("#token") && $("#token").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); doLogin(); }
+  });
 
   ensureRoute();
 });
