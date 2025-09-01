@@ -86,6 +86,8 @@ const state = {
   stagesLoaded: true,
   splash: { shown: false, timer: null, forceTimer: null },
   activeTab: "geral",
+  // <<< novo: controla versão de renderização da lista
+  listReqId: 0,
 };
 
 /* ========= STAGES ========= */
@@ -349,6 +351,8 @@ function refreshStageCounters() {
 }
 
 async function loadStageTab(stageKey) {
+  // <<< versão nova (isola render desta aba)
+  const reqId = ++state.listReqId;
   const list = $("#chat-list");
   list.innerHTML = "<div class='hint'>Carregando…</div>";
 
@@ -358,7 +362,7 @@ async function loadStageTab(stageKey) {
     return st === stageKey;
   });
 
-  await progressiveRenderChats(filtered);
+  await progressiveRenderChats(filtered, reqId);
   await prefetchCards(filtered);
 }
 
@@ -366,6 +370,9 @@ async function loadStageTab(stageKey) {
 async function loadChats() {
   if (state.loadingChats) return;
   state.loadingChats = true;
+
+  const reqId = ++state.listReqId;          // <<< novo: versão desta carga
+  const startTab = state.activeTab;         // <<< trava a aba que iniciou
 
   const list = $("#chat-list");
   if (list) list.innerHTML = "<div class='hint'>Carregando conversas...</div>";
@@ -378,19 +385,31 @@ async function loadChats() {
     });
     if (!res.ok || !res.body) throw new Error("Falha no stream de conversas");
 
+    if (reqId !== state.listReqId) return; // aborta se já houve nova requisição
     if (list) list.innerHTML = "";
     state.chats = [];
 
     let prefetchQueue = [];
-    const FLUSH = async () => { const tasks = prefetchQueue.splice(0); await runLimited(tasks, 8); };
+    const FLUSH = async () => {
+      const tasks = prefetchQueue.splice(0);
+      if (reqId !== state.listReqId) return;
+      await runLimited(tasks, 8);
+    };
 
     for await (const item of readNDJSONStream(res)) {
       if (item?.error) continue;
+      if (reqId !== state.listReqId) break;
+
       state.chats.push(item);
 
-      appendChatSkeleton(list, item);
+      // Só append no DOM se ainda estamos na mesma aba que iniciou (geral)
+      if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
+        const curList = $("#chat-list");
+        if (curList) appendChatSkeleton(curList, item);
+      }
 
       prefetchQueue.push(async () => {
+        if (reqId !== state.listReqId) return;
         const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
         if (!id) return;
 
@@ -398,46 +417,55 @@ async function loadChats() {
         try {
           if (!state.nameCache.has(id)) {
             const resp = await fetchNameImage(id);
+            if (reqId !== state.listReqId) return;
             state.nameCache.set(id, resp || {});
             hydrateChatCard(item);
           }
         } catch {}
 
-        // última mensagem para preview rápido
+        // última mensagem (preview)
         try {
           const latest = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid: id, limit: 1, sort: "-messageTimestamp" }),
           });
+          if (reqId !== state.listReqId) return;
           const last = Array.isArray(latest?.items) ? latest.items[0] : null;
           const pv = last
             ? (last.text || last.caption || last?.message?.text || last?.message?.conversation || last?.body || "").replace(/\s+/g, " ").trim()
             : "";
-          state.lastMsg.set(id, pv);
           const fromMe = last ? isFromMe(last) : false;
+
+          state.lastMsg.set(id, pv);
           state.lastMsgFromMe.set(id, fromMe);
 
-          const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
-          if (card) {
-            const txt = pv ? ((fromMe ? "Você: " : "") + truncatePreview(pv, 90)) : "Sem mensagens";
-            card.textContent = txt;
-            card.title = pv ? (fromMe ? "Você: " : "") + pv : "Sem mensagens";
+          if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
+            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
+            if (card) {
+              const txt = pv ? ((fromMe ? "Você: " : "") + truncatePreview(pv, 90)) : "Sem mensagens";
+              card.textContent = txt;
+              card.title = pv ? (fromMe ? "Você: " : "") + pv : "Sem mensagens";
+            }
+            const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`);
+            if (tEl && last) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
           }
-          const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`);
-          if (tEl && last) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
         } catch {
-          const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
-          if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
+          if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
+            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
+            if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
+          }
         }
 
-        // classificação sem abrir o chat: pega últimas 20 msgs e envia
+        // classificação leve (sem abrir)
         try {
           const pack = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid: id, limit: 20, sort: "-messageTimestamp" }),
           });
+          if (reqId !== state.listReqId) return;
           const items = Array.isArray(pack?.items) ? pack.items : [];
           const r = await api("/api/media/stage/classify", { method: "POST", body: JSON.stringify({ chatid: id, messages: items }) });
+          if (reqId !== state.listReqId) return;
           const stage = normalizeStage(r?.stage || "");
           if (stage) {
             const rec = setStage(id, stage);
@@ -453,30 +481,42 @@ async function loadChats() {
 
     await FLUSH();
 
+    // se usuário trocou para outra aba, renderiza filtrado
     if (state.activeTab !== "geral") await loadStageTab(state.activeTab);
 
     try { await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) }); refreshCRMCounters(); } catch {}
   } catch (e) {
     console.error(e);
-    if (list) list.innerHTML = `<div class='error'>${escapeHtml(e.message || "Falha ao carregar conversas")}</div>`;
+    if (list && reqId === state.listReqId) list.innerHTML = `<div class='error'>${escapeHtml(e.message || "Falha ao carregar conversas")}</div>`;
   } finally {
-    state.loadingChats = false;
+    if (reqId === state.listReqId) state.loadingChats = false;
   }
 }
 
 /* ========= LISTA ========= */
-async function progressiveRenderChats(chats) {
+async function progressiveRenderChats(chats, reqId = null) {
   const list = $("#chat-list");
   if (!list) return;
   list.innerHTML = "";
-  if (chats.length === 0) { list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>"; return; }
+  if (chats.length === 0) {
+    if (reqId !== null && reqId !== state.listReqId) return;
+    list.innerHTML = "<div class='hint'>Nenhuma conversa encontrada</div>";
+    return;
+  }
   const BATCH = 14;
   for (let i = 0; i < chats.length; i += BATCH) {
+    if (reqId !== null && reqId !== state.listReqId) return;
     const slice = chats.slice(i, i + BATCH);
-    slice.forEach((ch) => appendChatSkeleton(list, ch));
+    slice.forEach((ch) => {
+      if (reqId !== null && reqId !== state.listReqId) return;
+      appendChatSkeleton(list, ch);
+    });
     await new Promise((r) => rIC(r));
   }
-  chats.forEach((ch) => hydrateChatCard(ch));
+  chats.forEach((ch) => {
+    if (reqId !== null && reqId !== state.listReqId) return;
+    hydrateChatCard(ch);
+  });
 }
 
 function appendChatSkeleton(list, ch) {
@@ -858,7 +898,7 @@ function isFromMe(m) {
     m?.key?.fromMe || m?.message?.key?.fromMe ||
     (typeof m?.participant === "string" && m.participant.endsWith(":me")) ||
     (typeof m?.author === "string" && (m.author.endsWith(":me") || m.author.includes("@s.whatsapp.net") && m.fromMe === true)) ||
-    (typeof m?.id === "string" && /^true_/.test(m.id)) // padrões comuns
+    (typeof m?.id === "string" && /^true_/.test(m.id))
   );
 }
 
@@ -1059,7 +1099,8 @@ async function sendNow() {
 
   if (btnEl) {
     btnEl.disabled = true;
-    btnEl.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
+    btnEl.innerHTML =
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
   }
 
   try {
@@ -1073,7 +1114,8 @@ async function sendNow() {
   } finally {
     if (btnEl) {
       btnEl.disabled = false;
-      btnEl.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
+      btnEl.innerHTML =
+        '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>';
     }
   }
 }
