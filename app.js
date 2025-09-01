@@ -422,7 +422,7 @@ async function loadStageTab(stageKey) {
 
 /* ========= CHATS ========= */
 
-// Helper: ler NDJSON de um Response
+// Helper para ler NDJSON do Response (STREAM)
 async function* readNDJSONStream(resp) {
   const reader = resp.body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -444,7 +444,7 @@ async function* readNDJSONStream(resp) {
   }
 }
 
-// paginação substituída por stream
+// NOVA loadChats() usando /api/chats/stream
 async function loadChats() {
   if (state.loadingChats) return;
   state.loadingChats = true;
@@ -459,20 +459,23 @@ async function loadChats() {
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp" }),
     });
-    if (!res.ok || !res.body) throw new Error("Falha no stream de conversas");
+    if (!res.ok || !res.body) {
+      throw new Error("Falha no stream de conversas");
+    }
 
-    // limpa lista e estado
+    // prepara lista vazia
     if (list) list.innerHTML = "";
     state.chats = [];
 
     // renderiza conforme chegam
     for await (const item of readNDJSONStream(res)) {
-      if (!item || item.error) continue;
-
+      if (item?.error) continue;
       state.chats.push(item);
+
+      // cria skeleton e hidrata
       appendChatSkeleton(list, item);
 
-      // prefetch leve e hidratação do card
+      // prefetch leve: nome/imagem/última msg (não bloqueia)
       rIC(() => {
         const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
         if (!id) return;
@@ -488,12 +491,12 @@ async function loadChats() {
       rIC(refreshStageCounters);
     }
 
-    // se estiver em aba filtrada, aplica filtro
+    // fallback: se usuário estiver em aba filtrada, aplica filtro
     if (state.activeTab !== "geral") {
       await loadStageTab(state.activeTab);
     }
 
-    // CRM opcional
+    // CRM sync (opcional)
     try {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) });
       refreshCRMCounters();
@@ -693,7 +696,6 @@ async function openChat(ch) {
 // >>> Classificação APENAS VIA BACKEND
 async function classifyInstant(chatid, items) {
   try {
-    // preferimos enviar só o chatid; se seu backend exigir mensagens, mantenha "messages"
     const r = await api("/api/media/stage/classify", {
       method: "POST",
       body: JSON.stringify({ chatid, messages: items }),
