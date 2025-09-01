@@ -421,7 +421,30 @@ async function loadStageTab(stageKey) {
 }
 
 /* ========= CHATS ========= */
-// paginação para não limitar em 100
+
+// Helper: ler NDJSON de um Response
+async function* readNDJSONStream(resp) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      try { yield JSON.parse(line); } catch {}
+    }
+  }
+  if (buf.trim()) {
+    try { yield JSON.parse(buf.trim()); } catch {}
+  }
+}
+
+// paginação substituída por stream
 async function loadChats() {
   if (state.loadingChats) return;
   state.loadingChats = true;
@@ -430,39 +453,54 @@ async function loadChats() {
   if (list) list.innerHTML = "<div class='hint'>Carregando conversas...</div>";
 
   try {
-    const LIMIT = 200; // pega bastante por página
-    let offset = 0;
-    const all = [];
+    // inicia stream
+    const res = await fetch(BACKEND() + "/api/chats/stream", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp" }),
+    });
+    if (!res.ok || !res.body) throw new Error("Falha no stream de conversas");
 
-    while (true) {
-      const page = await api("/api/chats", {
-        method: "POST",
-        body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp", limit: LIMIT, offset }),
+    // limpa lista e estado
+    if (list) list.innerHTML = "";
+    state.chats = [];
+
+    // renderiza conforme chegam
+    for await (const item of readNDJSONStream(res)) {
+      if (!item || item.error) continue;
+
+      state.chats.push(item);
+      appendChatSkeleton(list, item);
+
+      // prefetch leve e hidratação do card
+      rIC(() => {
+        const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
+        if (!id) return;
+        fetchNameImage(id)
+          .then((resp) => {
+            state.nameCache.set(id, resp || {});
+            hydrateChatCard(item);
+          })
+          .catch(() => {});
       });
-      const items = Array.isArray(page?.items) ? page.items : [];
-      all.push(...items);
-      if (items.length < LIMIT) break;
-      offset += LIMIT;
-      // evita travar a UI
-      await new Promise((r) => rIC(r));
+
+      // counters por estágio
+      rIC(refreshStageCounters);
     }
 
-    state.chats = all;
+    // se estiver em aba filtrada, aplica filtro
+    if (state.activeTab !== "geral") {
+      await loadStageTab(state.activeTab);
+    }
 
-    await progressiveRenderChats(all);
-    await prefetchCards(all);
-
-    // counters (estágios serão preenchidos conforme abrimos as conversas)
-    refreshStageCounters();
-
-    // CRM sync (opcional)
+    // CRM opcional
     try {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) });
       refreshCRMCounters();
     } catch {}
   } catch (e) {
     console.error(e);
-    if (list) list.innerHTML = `<div class='error'>Falha ao carregar conversas: ${escapeHtml(e.message || "")}</div>`;
+    if (list) list.innerHTML = `<div class='error'>${escapeHtml(e.message || "Falha ao carregar conversas")}</div>`;
   } finally {
     state.loadingChats = false;
   }
