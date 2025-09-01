@@ -88,7 +88,7 @@ const state = {
   activeTab: "geral",
 };
 
-/* ========= STAGES (apresentação) ========= */
+/* ========= STAGES ========= */
 const STAGES = ["contatos", "lead", "lead_quente"];
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" };
 const STAGE_RANK = { contatos: 0, lead: 1, lead_quente: 2 };
@@ -403,13 +403,13 @@ async function loadChats() {
           }
         } catch {}
 
-        // última mensagem + preview + horário + classificação
+        // última mensagem para preview rápido
         try {
-          const data = await api("/api/messages", {
+          const latest = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid: id, limit: 1, sort: "-messageTimestamp" }),
           });
-          const last = Array.isArray(data?.items) ? data.items[0] : null;
+          const last = Array.isArray(latest?.items) ? latest.items[0] : null;
           const pv = last
             ? (last.text || last.caption || last?.message?.text || last?.message?.conversation || last?.body || "").replace(/\s+/g, " ").trim()
             : "";
@@ -430,9 +430,14 @@ async function loadChats() {
           if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
         }
 
-        // classificar
+        // classificação sem abrir o chat: pega últimas 20 msgs e envia
         try {
-          const r = await api("/api/media/stage/classify", { method: "POST", body: JSON.stringify({ chatid: id }) });
+          const pack = await api("/api/messages", {
+            method: "POST",
+            body: JSON.stringify({ chatid: id, limit: 20, sort: "-messageTimestamp" }),
+          });
+          const items = Array.isArray(pack?.items) ? pack.items : [];
+          const r = await api("/api/media/stage/classify", { method: "POST", body: JSON.stringify({ chatid: id, messages: items }) });
           const stage = normalizeStage(r?.stage || "");
           if (stage) {
             const rec = setStage(id, stage);
@@ -442,7 +447,7 @@ async function loadChats() {
         } catch {}
       });
 
-      if (prefetchQueue.length >= 12) await FLUSH();
+      if (prefetchQueue.length >= 10) await FLUSH();
       rIC(refreshStageCounters);
     }
 
@@ -539,7 +544,7 @@ function hydrateChatCard(ch) {
   if (cache.name) nameEl.textContent = cache.name;
 }
 
-/* ========= PREFETCH (para abas/CRM) ========= */
+/* ========= PREFETCH (abas/CRM) ========= */
 async function prefetchCards(items) {
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
@@ -570,6 +575,14 @@ async function prefetchCards(items) {
           }
         } catch {}
       }
+      // classificação leve
+      try {
+        const pack = await api("/api/messages", { method: "POST", body: JSON.stringify({ chatid, limit: 20, sort: "-messageTimestamp" }) });
+        const items = Array.isArray(pack?.items) ? pack.items : [];
+        const r = await api("/api/media/stage/classify", { method: "POST", body: JSON.stringify({ chatid, messages: items }) });
+        const stage = normalizeStage(r?.stage || "");
+        if (stage) { setStage(chatid, stage); rIC(refreshStageCounters); }
+      } catch {}
     };
   });
 
@@ -686,7 +699,6 @@ async function progressiveRenderMessages(msgs) {
 function pickMediaInfo(m) {
   const mm = m.message || m;
 
-  // mime
   const mime =
     m.mimetype || m.mime ||
     mm?.imageMessage?.mimetype ||
@@ -696,12 +708,10 @@ function pickMediaInfo(m) {
     (mm?.stickerMessage ? "image/webp" : "") ||
     "";
 
-  // url
   const url =
     m.mediaUrl || m.url || m.fileUrl || m.downloadUrl || m.image || m.video ||
     mm?.imageMessage?.url || mm?.videoMessage?.url || mm?.documentMessage?.url ||
-    mm?.stickerMessage?.url || mm?.audioMessage?.url ||
-    "";
+    mm?.stickerMessage?.url || mm?.audioMessage?.url || "";
 
   const dataUrl =
     m.dataUrl ||
@@ -844,10 +854,11 @@ function renderInteractive(container, m) {
 /* ========= autoria ========= */
 function isFromMe(m) {
   return !!(
-    m?.fromMe || m?.fromme || m?.from_me || m?.me ||
+    m?.fromMe || m?.fromme || m?.from_me ||
     m?.key?.fromMe || m?.message?.key?.fromMe ||
-    (typeof m?.author === "string" && m.author.endsWith(":me")) ||
-    (typeof m?.participant === "string" && m.participant.endsWith(":me"))
+    (typeof m?.participant === "string" && m.participant.endsWith(":me")) ||
+    (typeof m?.author === "string" && (m.author.endsWith(":me") || m.author.includes("@s.whatsapp.net") && m.fromMe === true)) ||
+    (typeof m?.id === "string" && /^true_/.test(m.id)) // padrões comuns
   );
 }
 
@@ -868,7 +879,7 @@ function appendMessageBubble(pane, m) {
   const who = m.senderName || m.pushName || "";
   const ts = m.messageTimestamp || m.timestamp || "";
 
-  // Sticker (image/webp sem legenda)
+  // Sticker
   if (mime && /^image\/webp$/i.test(mime) && (url || dataUrl)) {
     const img = document.createElement("img");
     img.alt = "figurinha";
