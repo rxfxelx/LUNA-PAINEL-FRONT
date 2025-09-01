@@ -86,9 +86,25 @@ const state = {
   stagesLoaded: true,
   splash: { shown: false, timer: null, forceTimer: null },
   activeTab: "geral",
-  // <<< novo: controla versão de renderização da lista
-  listReqId: 0,
+  listReqId: 0,            // versão de render da lista (evita poluir DOM ao trocar de aba)
 };
+
+/* ========= FILA GLOBAL DE BACKGROUND (NÃO PARA QUANDO TROCA ABA) ========= */
+let bgQueue = [];
+let bgRunning = false;
+function pushBg(task) {
+  bgQueue.push(task);
+  if (!bgRunning) runBg();
+}
+async function runBg() {
+  bgRunning = true;
+  while (bgQueue.length) {
+    const batch = bgQueue.splice(0, 16);
+    await runLimited(batch, 8);
+    await new Promise((r) => rIC(r));
+  }
+  bgRunning = false;
+}
 
 /* ========= STAGES ========= */
 const STAGES = ["contatos", "lead", "lead_quente"];
@@ -351,7 +367,6 @@ function refreshStageCounters() {
 }
 
 async function loadStageTab(stageKey) {
-  // <<< versão nova (isola render desta aba)
   const reqId = ++state.listReqId;
   const list = $("#chat-list");
   list.innerHTML = "<div class='hint'>Carregando…</div>";
@@ -371,8 +386,8 @@ async function loadChats() {
   if (state.loadingChats) return;
   state.loadingChats = true;
 
-  const reqId = ++state.listReqId;          // <<< novo: versão desta carga
-  const startTab = state.activeTab;         // <<< trava a aba que iniciou
+  const reqId = ++state.listReqId;
+  const startTab = state.activeTab;
 
   const list = $("#chat-list");
   if (list) list.innerHTML = "<div class='hint'>Carregando conversas...</div>";
@@ -385,51 +400,44 @@ async function loadChats() {
     });
     if (!res.ok || !res.body) throw new Error("Falha no stream de conversas");
 
-    if (reqId !== state.listReqId) return; // aborta se já houve nova requisição
+    if (reqId !== state.listReqId) return;
     if (list) list.innerHTML = "";
     state.chats = [];
 
-    let prefetchQueue = [];
-    const FLUSH = async () => {
-      const tasks = prefetchQueue.splice(0);
-      if (reqId !== state.listReqId) return;
-      await runLimited(tasks, 8);
-    };
-
     for await (const item of readNDJSONStream(res)) {
       if (item?.error) continue;
-      if (reqId !== state.listReqId) break;
 
+      // mantém o array completo
       state.chats.push(item);
 
-      // Só append no DOM se ainda estamos na mesma aba que iniciou (geral)
+      // DOM só se ainda estiver na mesma visão
       if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
         const curList = $("#chat-list");
         if (curList) appendChatSkeleton(curList, item);
       }
 
-      prefetchQueue.push(async () => {
-        if (reqId !== state.listReqId) return;
-        const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
-        if (!id) return;
+      // --- BACKGROUND: nome/imagem + preview + classificação (não é cancelado ao trocar abaa)
+      const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
+      if (!id) continue;
 
+      pushBg(async () => {
         // nome/imagem
         try {
           if (!state.nameCache.has(id)) {
             const resp = await fetchNameImage(id);
-            if (reqId !== state.listReqId) return;
             state.nameCache.set(id, resp || {});
-            hydrateChatCard(item);
+            // write no DOM apenas se card ainda existir
+            const cardEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"]`);
+            if (cardEl) hydrateChatCard(item);
           }
         } catch {}
 
-        // última mensagem (preview)
+        // última mensagem para preview
         try {
           const latest = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid: id, limit: 1, sort: "-messageTimestamp" }),
           });
-          if (reqId !== state.listReqId) return;
           const last = Array.isArray(latest?.items) ? latest.items[0] : null;
           const pv = last
             ? (last.text || last.caption || last?.message?.text || last?.message?.conversation || last?.body || "").replace(/\s+/g, " ").trim()
@@ -439,33 +447,27 @@ async function loadChats() {
           state.lastMsg.set(id, pv);
           state.lastMsgFromMe.set(id, fromMe);
 
-          if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
-            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
-            if (card) {
-              const txt = pv ? ((fromMe ? "Você: " : "") + truncatePreview(pv, 90)) : "Sem mensagens";
-              card.textContent = txt;
-              card.title = pv ? (fromMe ? "Você: " : "") + pv : "Sem mensagens";
-            }
-            const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`);
-            if (tEl && last) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
+          const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
+          if (card) {
+            const txt = pv ? ((fromMe ? "Você: " : "") + truncatePreview(pv, 90)) : "Sem mensagens";
+            card.textContent = txt;
+            card.title = pv ? (fromMe ? "Você: " : "") + pv : "Sem mensagens";
           }
+          const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`);
+          if (tEl && last) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
         } catch {
-          if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
-            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
-            if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
-          }
+          const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
+          if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
         }
 
-        // classificação leve (sem abrir)
+        // classificação
         try {
           const pack = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid: id, limit: 20, sort: "-messageTimestamp" }),
           });
-          if (reqId !== state.listReqId) return;
           const items = Array.isArray(pack?.items) ? pack.items : [];
           const r = await api("/api/media/stage/classify", { method: "POST", body: JSON.stringify({ chatid: id, messages: items }) });
-          if (reqId !== state.listReqId) return;
           const stage = normalizeStage(r?.stage || "");
           if (stage) {
             const rec = setStage(id, stage);
@@ -474,14 +476,9 @@ async function loadChats() {
           }
         } catch {}
       });
-
-      if (prefetchQueue.length >= 10) await FLUSH();
-      rIC(refreshStageCounters);
     }
 
-    await FLUSH();
-
-    // se usuário trocou para outra aba, renderiza filtrado
+    // se usuário trocou de aba, renderiza filtrado
     if (state.activeTab !== "geral") await loadStageTab(state.activeTab);
 
     try { await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) }); refreshCRMCounters(); } catch {}
@@ -684,15 +681,25 @@ async function classifyInstant(chatid, items) {
   return null;
 }
 
+/* ========= ORDEM POR TIMESTAMP REAL ========= */
+function tsOf(m) {
+  return Number(m?.messageTimestamp || m?.timestamp || 0);
+}
+
 async function loadMessages(chatid) {
   const pane = $("#messages");
   if (pane) pane.innerHTML = "<div class='hint'>Carregando mensagens...</div>";
   try {
     const data = await api("/api/messages", { method: "POST", body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }) });
-    const items = Array.isArray(data?.items) ? data.items : [];
+    let items = Array.isArray(data?.items) ? data.items : [];
+
+    // ordena por timestamp asc (mais antigas em cima, novas embaixo)
+    items = items.slice().sort((a, b) => tsOf(a) - tsOf(b));
+
     await classifyInstant(chatid, items);
-    await progressiveRenderMessages(items.slice().reverse());
-    const last = items[0];
+    await progressiveRenderMessages(items);
+
+    const last = items[items.length - 1];
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "").replace(/\s+/g, " ").trim();
     if (pv) state.lastMsg.set(chatid, pv);
     state.lastMsgFromMe.set(chatid, isFromMe(last || {}));
@@ -898,8 +905,8 @@ function isFromMe(m) {
     m?.key?.fromMe || m?.message?.key?.fromMe ||
     (typeof m?.participant === "string" && m.participant.endsWith(":me")) ||
     (typeof m?.author === "string" && (m.author.endsWith(":me") || m.author.includes("@s.whatsapp.net") && m.fromMe === true)) ||
-    (typeof m?.id === "string" && /^true_/.test(m.id))
-  );
+    (typeof m?.id === "string" && /^true_/.test(m.id)
+  ));
 }
 
 /* ========= BOLHA ========= */
