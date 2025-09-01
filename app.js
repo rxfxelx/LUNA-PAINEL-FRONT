@@ -1,4 +1,6 @@
-/* ========= CONFIG/HELPERS ========= */
+/* =========================================
+ * 1) CONFIG / HELPERS BÁSICOS
+ * ======================================= */
 const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "");
 const $ = (s) => document.querySelector(s);
 const show = (sel) => $(sel).classList.remove("hidden");
@@ -73,7 +75,9 @@ async function* readNDJSONStream(resp) {
   if (buf.trim()) { try { yield JSON.parse(buf.trim()); } catch {} }
 }
 
-/* ========= STATE ========= */
+/* =========================================
+ * 2) STATE GLOBAL + ORDENAÇÃO POR RECÊNCIA
+ * ======================================= */
 const state = {
   chats: [],
   current: null,
@@ -86,10 +90,54 @@ const state = {
   stagesLoaded: true,
   splash: { shown: false, timer: null, forceTimer: null },
   activeTab: "geral",
-  listReqId: 0,            // versão de render da lista (evita poluir DOM ao trocar de aba)
+  listReqId: 0,            // versão da renderização atual da lista
+  lastTs: new Map(),       // chatid -> timestamp (ms) da última atividade conhecida
+  orderDirty: false,       // sinaliza reordenação pendente
 };
 
-/* ========= FILA GLOBAL DE BACKGROUND (NÃO PARA QUANDO TROCA ABA) ========= */
+// Utilitários de timestamp/ordenação
+function toMs(x) {
+  const n = Number(x || 0);
+  if (String(x).length === 10) return n * 1000; // epoch em segundos
+  return isNaN(n) ? 0 : n;
+}
+function updateLastActivity(chatid, ts) {
+  if (!chatid) return;
+  const cur = state.lastTs.get(chatid) || 0;
+  const val = toMs(ts);
+  if (val > cur) {
+    state.lastTs.set(chatid, val);
+    state.orderDirty = true;
+    scheduleReorder();
+  }
+}
+let reorderTimer = null;
+function scheduleReorder() {
+  if (reorderTimer) return;
+  reorderTimer = setTimeout(() => {
+    reorderTimer = null;
+    if (!state.orderDirty) return;
+    state.orderDirty = false;
+    reorderChatList();
+  }, 60);
+}
+function reorderChatList() {
+  const list = document.getElementById("chat-list");
+  if (!list) return;
+  const cards = Array.from(list.querySelectorAll(".chat-item"));
+  if (!cards.length) return;
+
+  cards.sort((a, b) => {
+    const ta = state.lastTs.get(a.dataset.chatid) || 0;
+    const tb = state.lastTs.get(b.dataset.chatid) || 0;
+    return tb - ta; // mais recente no topo
+  });
+  cards.forEach((el) => list.appendChild(el));
+}
+
+/* =========================================
+ * 3) FILA GLOBAL DE BACKGROUND (não para ao trocar de aba)
+ * ======================================= */
 let bgQueue = [];
 let bgRunning = false;
 function pushBg(task) { bgQueue.push(task); if (!bgRunning) runBg(); }
@@ -103,7 +151,9 @@ async function runBg() {
   bgRunning = false;
 }
 
-/* ========= STAGES ========= */
+/* =========================================
+ * 4) PIPE DE STAGES (classificação)
+ * ======================================= */
 const STAGES = ["contatos", "lead", "lead_quente"];
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" };
 const STAGE_RANK = { contatos: 0, lead: 1, lead_quente: 2 };
@@ -123,7 +173,9 @@ function setStage(chatid, nextStage) {
   return rec;
 }
 
-/* ========= CRM ========= */
+/* =========================================
+ * 5) CRM (contadores/visões)
+ * ======================================= */
 const CRM_STAGES = ["novo", "sem_resposta", "interessado", "em_negociacao", "fechou", "descartado"];
 async function apiCRMViews() { return api("/api/crm/views"); }
 async function apiCRMList(stage, limit = 100, offset = 0) {
@@ -166,7 +218,9 @@ async function loadCRMStage(stage) {
 }
 function attachCRMControlsToCard() {}
 
-/* ========= SPLASH ========= */
+/* =========================================
+ * 6) SPLASH / LOGIN / ROUTER
+ * ======================================= */
 function createSplash() {
   if (state.splash.shown) return;
   const el = document.createElement("div");
@@ -210,7 +264,6 @@ function hideSplash() {
   if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null; }
 }
 
-/* ========= LOGIN ========= */
 async function doLogin() {
   const token = $("#token")?.value?.trim();
   const msgEl = $("#msg");
@@ -258,13 +311,14 @@ function switchToApp() {
   createSplash();
   loadChats().finally(() => { state.splash.timer = setTimeout(hideSplash, 300); });
 }
-
 function ensureRoute() {
   if (jwt()) switchToApp();
   else { show("#login-view"); hide("#app-view"); }
 }
 
-/* ========= AVATAR/NAME-IMAGE ========= */
+/* =========================================
+ * 7) AVATAR / NOME
+ * ======================================= */
 async function fetchNameImage(chatid, preview = true) {
   try {
     const resp = await api("/api/name-image", { method: "POST", body: JSON.stringify({ number: chatid, preview }) });
@@ -278,7 +332,9 @@ function initialsOf(str) {
   return parts.map((p) => p[0]?.toUpperCase() || "").join("") || "??";
 }
 
-/* ========= STAGE TABS ========= */
+/* =========================================
+ * 8) ABAS DE STAGE (UI)
+ * ======================================= */
 function ensureStageTabs() {
   const host = document.querySelector(".topbar");
   if (!host || host.querySelector(".stage-tabs")) return;
@@ -378,7 +434,9 @@ async function loadStageTab(stageKey) {
   await prefetchCards(filtered);
 }
 
-/* ========= CHATS (STREAM + PREFETCH) ========= */
+/* =========================================
+ * 9) CHATS (stream + prefetch + ordenação)
+ * ======================================= */
 async function loadChats() {
   if (state.loadingChats) return;
   state.loadingChats = true;
@@ -407,6 +465,11 @@ async function loadChats() {
       // mantém o array completo
       state.chats.push(item);
 
+      // timestamp base do card (fallback do backend)
+      const baseTs = item.wa_lastMsgTimestamp || item.messageTimestamp || item.updatedAt || 0;
+      const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
+      updateLastActivity(id, baseTs);
+
       // DOM só se ainda estiver na mesma visão
       if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
         const curList = $("#chat-list");
@@ -414,7 +477,6 @@ async function loadChats() {
       }
 
       // --- BACKGROUND: nome/imagem + preview + classificação
-      const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
       if (!id) continue;
 
       pushBg(async () => {
@@ -449,11 +511,17 @@ async function loadChats() {
             card.textContent = txt;
             card.title = pv ? (fromMe ? "Você: " : "") + pv : "Sem mensagens";
           }
-          const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`);
-          if (tEl && last) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
+          if (last) {
+            updateLastActivity(id, last.messageTimestamp || last.timestamp || last.t || Date.now());
+            const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`);
+            if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || last.t || "");
+          }
         } catch {
           const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
           if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
+          // fallback: mantém ordenação com base no ts do chat
+          const base = (state.chats.find(c => (c.wa_chatid||c.chatid||c.wa_fastid||c.wa_id||"") === id) || {});
+          updateLastActivity(id, base.wa_lastMsgTimestamp || base.messageTimestamp || base.updatedAt || 0);
         }
 
         // classificação
@@ -486,7 +554,9 @@ async function loadChats() {
   }
 }
 
-/* ========= LISTA ========= */
+/* =========================================
+ * 10) LISTA (render + cards)
+ * ======================================= */
 async function progressiveRenderChats(chats, reqId = null) {
   const list = $("#chat-list");
   if (!list) return;
@@ -510,6 +580,8 @@ async function progressiveRenderChats(chats, reqId = null) {
     if (reqId !== null && reqId !== state.listReqId) return;
     hydrateChatCard(ch);
   });
+  // garante ordem inicial
+  reorderChatList();
 }
 
 function appendChatSkeleton(list, ch) {
@@ -553,6 +625,10 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(avatar); el.appendChild(main);
   list.appendChild(el);
 
+  // alimenta atividade base para ordenação
+  const baseTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ch.updatedAt || 0;
+  updateLastActivity(el.dataset.chatid, baseTs);
+
   attachCRMControlsToCard(el, ch);
 }
 
@@ -577,7 +653,9 @@ function hydrateChatCard(ch) {
   if (cache.name) nameEl.textContent = cache.name;
 }
 
-/* ========= PREFETCH (abas/CRM) ========= */
+/* =========================================
+ * 11) PREFETCH (nomes/últimas/classificação leve)
+ * ======================================= */
 async function prefetchCards(items) {
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
@@ -601,10 +679,12 @@ async function prefetchCards(items) {
               card.textContent = txt; card.title = (fromMe ? "Você: " : "") + pv;
             }
             const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`);
-            if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
+            if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || last.t || "");
+            updateLastActivity(chatid, last.messageTimestamp || last.timestamp || last.t || Date.now());
           } else {
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
             if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
+            updateLastActivity(chatid, ch.wa_lastMsgTimestamp || ch.messageTimestamp || ch.updatedAt || 0);
           }
         } catch {}
       }
@@ -627,21 +707,29 @@ async function prefetchCards(items) {
   }
 }
 
-function formatTime(timestamp) {
-  if (!timestamp) return "";
+/* =========================================
+ * 12) FORMATAÇÃO DE HORA (HH:mm) e DIAS (Xd)
+ * ======================================= */
+function formatTime(ts) {
+  if (!ts) return "";
   try {
-    const date = new Date(timestamp);
+    const d = new Date(ts);
     const now = new Date();
-    const diff = now - date;
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    if (hours < 1) return "Agora";
-    if (hours < 24) return `${hours}h`;
-    if (hours < 48) return "Ontem";
-    return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-  } catch { return timestamp; }
+    const diffMs = now - d;
+    const diffH = diffMs / 36e5;
+    if (diffH < 24) {
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      return `${hh}:${mm}`;
+    }
+    const diffD = Math.floor(diffMs / 86400000);
+    return `${diffD}d`;
+  } catch { return ""; }
 }
 
-/* ========= OPEN CHAT / MESSAGES ========= */
+/* =========================================
+ * 13) ABRIR CHAT / CARREGAR MENSAGENS
+ * ======================================= */
 async function openChat(ch) {
   state.current = ch;
   const title = $("#chat-header");
@@ -677,7 +765,7 @@ async function classifyInstant(chatid, items) {
   return null;
 }
 
-/* ========= ORDEM POR TIMESTAMP REAL ========= */
+// Ordenação por timestamp real
 function tsOf(m) {
   return Number(
     m?.messageTimestamp ??
@@ -695,7 +783,7 @@ async function loadMessages(chatid) {
     const data = await api("/api/messages", { method: "POST", body: JSON.stringify({ chatid, limit: 200, sort: "-messageTimestamp" }) });
     let items = Array.isArray(data?.items) ? data.items : [];
 
-    // ordena por timestamp asc (mais antigas em cima, novas embaixo)
+    // ordem cronológica ascendente
     items = items.slice().sort((a, b) => tsOf(a) - tsOf(b));
 
     await classifyInstant(chatid, items);
@@ -705,13 +793,21 @@ async function loadMessages(chatid) {
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "").replace(/\s+/g, " ").trim();
     if (pv) state.lastMsg.set(chatid, pv);
     state.lastMsgFromMe.set(chatid, isFromMe(last || {}));
+
+    if (last) {
+      updateLastActivity(chatid, last.messageTimestamp || last.timestamp || last.t || Date.now());
+      const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`);
+      if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || last.t || "");
+    }
   } catch (e) {
     console.error(e);
     if (pane) pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`;
   }
 }
 
-/* ========= RENDER MSGs ========= */
+/* =========================================
+ * 14) RENDERIZAÇÃO DE MENSAGENS (batches)
+ * ======================================= */
 async function progressiveRenderMessages(msgs) {
   const pane = $("#messages");
   if (!pane) return;
@@ -744,7 +840,9 @@ async function progressiveRenderMessages(msgs) {
   }
 }
 
-/* ========= MÍDIA & INTERATIVOS ========= */
+/* =========================================
+ * 15) MÍDIA / INTERATIVOS / REPLIES
+ * ======================================= */
 function pickMediaInfo(m) {
   const mm = m.message || m;
 
@@ -911,7 +1009,9 @@ function renderInteractive(container, m) {
   return false;
 }
 
-/* ========= autoria (corrigida e robusta) ========= */
+/* =========================================
+ * 16) AUTORIA (robusta)
+ * ======================================= */
 function isFromMe(m) {
   return !!(
     m?.fromMe || m?.fromme || m?.from_me ||
@@ -924,7 +1024,9 @@ function isFromMe(m) {
   );
 }
 
-/* ========= BOLHA ========= */
+/* =========================================
+ * 17) BOLHA DE MENSAGEM (mídias, texto, replies)
+ * ======================================= */
 function appendMessageBubble(pane, m) {
   const me = isFromMe(m);
   const el = document.createElement("div");
@@ -1065,7 +1167,9 @@ function appendMessageBubble(pane, m) {
   pane.scrollTop = pane.scrollHeight;
 }
 
-/* ========= PILL ========= */
+/* =========================================
+ * 18) PILL DE STAGE NO HEADER
+ * ======================================= */
 function upsertStagePill(stage) {
   let pill = document.getElementById("ai-pill");
   if (!pill) {
@@ -1085,7 +1189,9 @@ function upsertStagePill(stage) {
   pill.title = "";
 }
 
-/* ========= RENDER “CLÁSSICO” ========= */
+/* =========================================
+ * 19) RENDER “CLÁSSICO” (fallback simples)
+ * ======================================= */
 function renderMessages(msgs) {
   const pane = $("#messages");
   if (!pane) return;
@@ -1112,7 +1218,9 @@ function renderMessages(msgs) {
   pane.scrollTop = pane.scrollHeight;
 }
 
-/* ========= SEND ========= */
+/* =========================================
+ * 20) ENVIO (atualiza ordenação imediatamente)
+ * ======================================= */
 async function sendNow() {
   const number = $("#send-number")?.value?.trim();
   const text = $("#send-text")?.value?.trim();
@@ -1127,6 +1235,7 @@ async function sendNow() {
 
   try {
     await api("/api/send-text", { method: "POST", body: JSON.stringify({ number, text }) });
+    updateLastActivity(number, Date.now()); // sobe o chat na hora
     if ($("#send-text")) $("#send-text").value = "";
     if (state.current && (state.current.wa_chatid || state.current.chatid) === number) {
       setTimeout(() => loadMessages(number), 500);
@@ -1142,7 +1251,9 @@ async function sendNow() {
   }
 }
 
-/* ========= BOOT ========= */
+/* =========================================
+ * 21) BOOT
+ * ======================================= */
 document.addEventListener("DOMContentLoaded", () => {
   $("#btn-login") && ($("#btn-login").onclick = doLogin);
   $("#btn-logout") && ($("#btn-logout").onclick = () => { localStorage.clear(); location.reload(); });
