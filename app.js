@@ -60,6 +60,34 @@ function escapeHtml(s) {
   return String(s || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[m]);
 }
 
+/* ========= Helper NDJSON (NOVO) ========= */
+async function* readNDJSONStream(resp) {
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buf = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      try { yield JSON.parse(line); } catch {}
+    }
+  }
+  if (buf.trim()) {
+    try { yield JSON.parse(buf.trim()); } catch {}
+  }
+}
+
+/* ========= helpers de preview (NOVO) ========= */
+function truncatePreview(s, max = 90) {
+  const t = String(s || "").replace(/\s+/g, " ").trim();
+  return t.length > max ? t.slice(0, max - 1) + "…" : t;
+}
+
 /* ========= STATE ========= */
 const state = {
   chats: [],
@@ -421,30 +449,7 @@ async function loadStageTab(stageKey) {
 }
 
 /* ========= CHATS ========= */
-
-// Helper para ler NDJSON do Response (STREAM)
-async function* readNDJSONStream(resp) {
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let buf = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (!line) continue;
-      try { yield JSON.parse(line); } catch {}
-    }
-  }
-  if (buf.trim()) {
-    try { yield JSON.parse(buf.trim()); } catch {}
-  }
-}
-
-// NOVA loadChats() usando /api/chats/stream
+/* NOVA loadChats: stream + prévias + classificação sem abrir chat */
 async function loadChats() {
   if (state.loadingChats) return;
   state.loadingChats = true;
@@ -453,45 +458,50 @@ async function loadChats() {
   if (list) list.innerHTML = "<div class='hint'>Carregando conversas...</div>";
 
   try {
-    // inicia stream
     const res = await fetch(BACKEND() + "/api/chats/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify({ operator: "AND", sort: "-wa_lastMsgTimestamp" }),
     });
-    if (!res.ok || !res.body) {
-      throw new Error("Falha no stream de conversas");
-    }
+    if (!res.ok || !res.body) throw new Error("Falha no stream de conversas");
 
-    // prepara lista vazia
     if (list) list.innerHTML = "";
     state.chats = [];
 
-    // renderiza conforme chegam
+    const queue = [];
+    const LIM = 8;
+
     for await (const item of readNDJSONStream(res)) {
       if (item?.error) continue;
+
       state.chats.push(item);
+      appendChatSkeleton(list, item); // mostra card rápido
 
-      // cria skeleton e hidrata
-      appendChatSkeleton(list, item);
-
-      // prefetch leve: nome/imagem/última msg (não bloqueia)
+      // nome/imagem em background
       rIC(() => {
-        const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
-        if (!id) return;
-        fetchNameImage(id)
+        fetchNameImage(item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "")
           .then((resp) => {
-            state.nameCache.set(id, resp || {});
-            hydrateChatCard(item);
+            const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
+            if (id) {
+              state.nameCache.set(id, resp || {});
+              hydrateChatCard(item);
+            }
           })
           .catch(() => {});
       });
 
-      // counters por estágio
+      // último msg + hora + classificação em background
+      queue.push(() => prefetchLastAndClassify(item));
+      if (queue.length >= LIM) {
+        const batch = queue.splice(0, LIM);
+        rIC(() => runLimited(batch, LIM).catch(() => {}));
+      }
+
       rIC(refreshStageCounters);
     }
 
-    // fallback: se usuário estiver em aba filtrada, aplica filtro
+    if (queue.length) await runLimited(queue.splice(0), LIM);
+
     if (state.activeTab !== "geral") {
       await loadStageTab(state.activeTab);
     }
@@ -509,7 +519,7 @@ async function loadChats() {
   }
 }
 
-// Renderiza chats progressivamente
+// Renderiza chats progressivamente (mantido para listas filtradas)
 async function progressiveRenderChats(chats) {
   const list = $("#chat-list");
   if (!list) return;
@@ -559,7 +569,13 @@ function appendChatSkeleton(list, ch) {
   bottom.className = "row2";
   const preview = document.createElement("div");
   preview.className = "preview";
-  const pvText = (state.lastMsg.get(el.dataset.chatid) || ch.wa_lastMessageText || "").replace(/\s+/g, " ").trim();
+
+  // estilos para aparecer "..." numa linha
+  preview.style.whiteSpace = "nowrap";
+  preview.style.overflow = "hidden";
+  preview.style.textOverflow = "ellipsis";
+
+  const pvText = truncatePreview((state.lastMsg.get(el.dataset.chatid) || ch.wa_lastMessageText || ""), 90);
   preview.textContent = pvText || "Carregando...";
   preview.title = pvText;
 
@@ -636,7 +652,7 @@ async function prefetchCards(items) {
 
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
             if (card) {
-              card.textContent = pv || "Sem mensagens";
+              card.textContent = truncatePreview(pv, 90) || "Sem mensagens";
               card.title = pv;
             }
             const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`);
@@ -653,6 +669,47 @@ async function prefetchCards(items) {
     await runLimited(slice, 8);
     await new Promise((r) => rIC(r));
   }
+}
+
+/* ========= prefetch último + classificar (NOVO) ========= */
+async function prefetchLastAndClassify(ch) {
+  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
+  if (!chatid) return;
+
+  try {
+    const data = await api("/api/messages", {
+      method: "POST",
+      body: JSON.stringify({ chatid, limit: 1, sort: "-messageTimestamp" }),
+    });
+
+    const last = Array.isArray(data?.items) ? data.items[0] : null;
+    const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
+    if (last) {
+      const pv = (
+        last.text ||
+        last.caption ||
+        last?.message?.text ||
+        last?.message?.conversation ||
+        last?.body ||
+        ""
+      ).replace(/\s+/g, " ").trim();
+
+      state.lastMsg.set(chatid, pv);
+
+      if (el) {
+        const pvEl = el.querySelector(".preview");
+        if (pvEl) {
+          pvEl.textContent = pv ? truncatePreview(pv, 90) : "Sem mensagens";
+          pvEl.title = pv;
+        }
+        const tEl = el.querySelector(".time");
+        if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
+      }
+    }
+
+    rIC(() => classifyInstant(chatid, last ? [last] : []).catch(() => {}));
+    rIC(refreshStageCounters);
+  } catch {}
 }
 
 function formatTime(timestamp) {
