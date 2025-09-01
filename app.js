@@ -59,8 +59,13 @@ async function api(path, opts = {}) {
 function escapeHtml(s) {
   return String(s || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[m]);
 }
+function truncatePreview(s, max = 90) {
+  const t = String(s || "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
+}
 
-/* ========= Helper NDJSON (NOVO) ========= */
+/* ========= NDJSON STREAM HELPER ========= */
 async function* readNDJSONStream(resp) {
   const reader = resp.body.getReader();
   const decoder = new TextDecoder("utf-8");
@@ -82,17 +87,12 @@ async function* readNDJSONStream(resp) {
   }
 }
 
-/* ========= helpers de preview (NOVO) ========= */
-function truncatePreview(s, max = 90) {
-  const t = String(s || "").replace(/\s+/g, " ").trim();
-  return t.length > max ? t.slice(0, max - 1) + "…" : t;
-}
-
 /* ========= STATE ========= */
 const state = {
   chats: [],
   current: null, // objeto do chat aberto
   lastMsg: new Map(), // chatid => preview da última mensagem
+  lastMsgFromMe: new Map(), // chatid => boolean
   nameCache: new Map(), // chatid => {name,image,imagePreview}
   unread: new Map(), // chatid => count
   loadingChats: false,
@@ -449,7 +449,7 @@ async function loadStageTab(stageKey) {
 }
 
 /* ========= CHATS ========= */
-/* NOVA loadChats: stream + prévias + classificação sem abrir chat */
+// NOVA VERSÃO: usa stream incremental + prefetch leve (última msg + classificar)
 async function loadChats() {
   if (state.loadingChats) return;
   state.loadingChats = true;
@@ -468,45 +468,94 @@ async function loadChats() {
     if (list) list.innerHTML = "";
     state.chats = [];
 
-    const queue = [];
-    const LIM = 8;
+    let prefetchQueue = [];
+    const FLUSH = async () => {
+      const tasks = prefetchQueue.splice(0).map((fn) => fn);
+      await runLimited(tasks, 8);
+    };
 
     for await (const item of readNDJSONStream(res)) {
       if (item?.error) continue;
-
       state.chats.push(item);
-      appendChatSkeleton(list, item); // mostra card rápido
 
-      // nome/imagem em background
-      rIC(() => {
-        fetchNameImage(item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "")
-          .then((resp) => {
-            const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
-            if (id) {
-              state.nameCache.set(id, resp || {});
-              hydrateChatCard(item);
+      appendChatSkeleton(list, item);
+
+      // Prefetch leve: nome/imagem + última mensagem + classificação
+      prefetchQueue.push(async () => {
+        const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
+        if (!id) return;
+
+        try {
+          // nome/imagem
+          if (!state.nameCache.has(id)) {
+            const resp = await fetchNameImage(id);
+            state.nameCache.set(id, resp || {});
+            hydrateChatCard(item);
+          }
+        } catch {}
+
+        try {
+          // última mensagem + preview + horário
+          const data = await api("/api/messages", {
+            method: "POST",
+            body: JSON.stringify({ chatid: id, limit: 1, sort: "-messageTimestamp" }),
+          });
+          const last = Array.isArray(data?.items) ? data.items[0] : null;
+          if (last) {
+            const pv = (
+              last.text ||
+              last.caption ||
+              last?.message?.text ||
+              last?.message?.conversation ||
+              last?.body ||
+              ""
+            ).replace(/\s+/g, " ").trim();
+            state.lastMsg.set(id, pv);
+            const fromMe = isFromMe(last);
+            state.lastMsgFromMe.set(id, fromMe);
+
+            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
+            if (card) {
+              const txt = (fromMe ? "Você: " : "") + (pv ? truncatePreview(pv, 90) : "Sem mensagens");
+              card.textContent = txt;
+              card.title = (fromMe ? "Você: " : "") + pv;
             }
-          })
-          .catch(() => {});
+            const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`);
+            if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
+          }
+
+          // classificar no back com base no chatid
+          try {
+            const r = await api("/api/media/stage/classify", {
+              method: "POST",
+              body: JSON.stringify({ chatid: id }),
+            });
+            const stage = normalizeStage(r?.stage || "");
+            if (stage) {
+              const rec = setStage(id, stage);
+              if (state.current && (state.current.wa_chatid || state.current.chatid) === id) {
+                upsertStagePill(rec.stage);
+              }
+              rIC(refreshStageCounters);
+            }
+          } catch {}
+        } catch {}
       });
 
-      // último msg + hora + classificação em background
-      queue.push(() => prefetchLastAndClassify(item));
-      if (queue.length >= LIM) {
-        const batch = queue.splice(0, LIM);
-        rIC(() => runLimited(batch, LIM).catch(() => {}));
-      }
+      // escoa o lote para não travar a UI
+      if (prefetchQueue.length >= 12) await FLUSH();
 
       rIC(refreshStageCounters);
     }
 
-    if (queue.length) await runLimited(queue.splice(0), LIM);
+    // drena qualquer sobra
+    await FLUSH();
 
     if (state.activeTab !== "geral") {
       await loadStageTab(state.activeTab);
     }
 
-    // CRM sync (opcional)
+    // CRM opcional
     try {
       await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) });
       refreshCRMCounters();
@@ -519,7 +568,7 @@ async function loadChats() {
   }
 }
 
-// Renderiza chats progressivamente (mantido para listas filtradas)
+// Renderiza chats progressivamente
 async function progressiveRenderChats(chats) {
   const list = $("#chat-list");
   if (!list) return;
@@ -569,15 +618,8 @@ function appendChatSkeleton(list, ch) {
   bottom.className = "row2";
   const preview = document.createElement("div");
   preview.className = "preview";
-
-  // estilos para aparecer "..." numa linha
-  preview.style.whiteSpace = "nowrap";
-  preview.style.overflow = "hidden";
-  preview.style.textOverflow = "ellipsis";
-
-  const pvText = truncatePreview((state.lastMsg.get(el.dataset.chatid) || ch.wa_lastMessageText || ""), 90);
-  preview.textContent = pvText || "Carregando...";
-  preview.title = pvText;
+  preview.textContent = "Carregando...";
+  preview.title = "Carregando...";
 
   const unread = document.createElement("span");
   unread.className = "badge";
@@ -619,7 +661,7 @@ function hydrateChatCard(ch) {
   if (cache.name) nameEl.textContent = cache.name;
 }
 
-// Prefetch paralelo limitado
+// Prefetch paralelo limitado (mantido para usos como CRM/abas)
 async function prefetchCards(items) {
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
@@ -649,11 +691,14 @@ async function prefetchCards(items) {
               ""
             ).replace(/\s+/g, " ").trim();
             state.lastMsg.set(chatid, pv);
+            const fromMe = isFromMe(last);
+            state.lastMsgFromMe.set(chatid, fromMe);
 
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
             if (card) {
-              card.textContent = truncatePreview(pv, 90) || "Sem mensagens";
-              card.title = pv;
+              const txt = (fromMe ? "Você: " : "") + (pv ? truncatePreview(pv, 90) : "Sem mensagens");
+              card.textContent = txt;
+              card.title = (fromMe ? "Você: " : "") + pv;
             }
             const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`);
             if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
@@ -669,47 +714,6 @@ async function prefetchCards(items) {
     await runLimited(slice, 8);
     await new Promise((r) => rIC(r));
   }
-}
-
-/* ========= prefetch último + classificar (NOVO) ========= */
-async function prefetchLastAndClassify(ch) {
-  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
-  if (!chatid) return;
-
-  try {
-    const data = await api("/api/messages", {
-      method: "POST",
-      body: JSON.stringify({ chatid, limit: 1, sort: "-messageTimestamp" }),
-    });
-
-    const last = Array.isArray(data?.items) ? data.items[0] : null;
-    const el = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"]`);
-    if (last) {
-      const pv = (
-        last.text ||
-        last.caption ||
-        last?.message?.text ||
-        last?.message?.conversation ||
-        last?.body ||
-        ""
-      ).replace(/\s+/g, " ").trim();
-
-      state.lastMsg.set(chatid, pv);
-
-      if (el) {
-        const pvEl = el.querySelector(".preview");
-        if (pvEl) {
-          pvEl.textContent = pv ? truncatePreview(pv, 90) : "Sem mensagens";
-          pvEl.title = pv;
-        }
-        const tEl = el.querySelector(".time");
-        if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || "");
-      }
-    }
-
-    rIC(() => classifyInstant(chatid, last ? [last] : []).catch(() => {}));
-    rIC(refreshStageCounters);
-  } catch {}
 }
 
 function formatTime(timestamp) {
@@ -794,6 +798,7 @@ async function loadMessages(chatid) {
       ""
     ).replace(/\s+/g, " ").trim();
     state.lastMsg.set(chatid, pv);
+    state.lastMsgFromMe.set(chatid, isFromMe(last));
   } catch (e) {
     console.error(e);
     if (pane) pane.innerHTML = `<div class='error'>Falha ao carregar mensagens: ${escapeHtml(e.message || "")}</div>`;
@@ -1032,9 +1037,19 @@ function renderInteractive(container, m) {
   return false;
 }
 
+/* ========= autoria ========= */
+function isFromMe(m) {
+  return !!(
+    m?.fromMe || m?.fromme || m?.from_me || m?.me ||
+    m?.key?.fromMe || m?.message?.key?.fromMe ||
+    (typeof m?.author === "string" && m.author.endsWith(":me")) ||
+    (typeof m?.participant === "string" && m.participant.endsWith(":me"))
+  );
+}
+
 /* ========= renderização de uma bolha ========= */
 function appendMessageBubble(pane, m) {
-  const me = m.fromMe || m.fromme || m.from_me || false;
+  const me = isFromMe(m);
   const el = document.createElement("div");
   el.className = "msg " + (me ? "me" : "you");
 
@@ -1262,7 +1277,7 @@ function renderMessages(msgs) {
   }
 
   msgs.forEach((m) => {
-    const me = m.fromMe || m.fromme || m.from_me || false;
+    const me = isFromMe(m);
     const el = document.createElement("div");
     el.className = "msg " + (me ? "me" : "you");
     const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "";
