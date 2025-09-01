@@ -92,10 +92,7 @@ const state = {
 /* ========= FILA GLOBAL DE BACKGROUND (NÃO PARA QUANDO TROCA ABA) ========= */
 let bgQueue = [];
 let bgRunning = false;
-function pushBg(task) {
-  bgQueue.push(task);
-  if (!bgRunning) runBg();
-}
+function pushBg(task) { bgQueue.push(task); if (!bgRunning) runBg(); }
 async function runBg() {
   bgRunning = true;
   while (bgQueue.length) {
@@ -416,7 +413,7 @@ async function loadChats() {
         if (curList) appendChatSkeleton(curList, item);
       }
 
-      // --- BACKGROUND: nome/imagem + preview + classificação (não é cancelado ao trocar abaa)
+      // --- BACKGROUND: nome/imagem + preview + classificação
       const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
       if (!id) continue;
 
@@ -426,7 +423,6 @@ async function loadChats() {
           if (!state.nameCache.has(id)) {
             const resp = await fetchNameImage(id);
             state.nameCache.set(id, resp || {});
-            // write no DOM apenas se card ainda existir
             const cardEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"]`);
             if (cardEl) hydrateChatCard(item);
           }
@@ -683,7 +679,13 @@ async function classifyInstant(chatid, items) {
 
 /* ========= ORDEM POR TIMESTAMP REAL ========= */
 function tsOf(m) {
-  return Number(m?.messageTimestamp || m?.timestamp || 0);
+  return Number(
+    m?.messageTimestamp ??
+    m?.timestamp ??
+    m?.t ??
+    m?.message?.messageTimestamp ??
+    0
+  );
 }
 
 async function loadMessages(chatid) {
@@ -768,6 +770,8 @@ function pickMediaInfo(m) {
 
   const caption =
     m.caption || mm?.imageMessage?.caption || mm?.videoMessage?.caption ||
+    mm?.documentMessage?.caption ||                          // caption de doc
+    mm?.documentMessage?.fileName ||                         // fallback: nome do arquivo
     m.text || mm?.conversation || m.body || "";
 
   return { mime: String(mime || ""), url: String(url || ""), dataUrl: String(dataUrl || ""), caption: String(caption || "") };
@@ -780,23 +784,32 @@ async function fetchMediaBlobViaProxy(rawUrl) {
   return await r.blob();
 }
 
-// Reply preview
+// Reply preview (mais variações)
 function renderReplyPreview(container, m) {
+  const ctx =
+    m?.message?.extendedTextMessage?.contextInfo ||
+    m?.message?.imageMessage?.contextInfo ||
+    m?.message?.videoMessage?.contextInfo ||
+    m?.message?.stickerMessage?.contextInfo ||
+    m?.message?.documentMessage?.contextInfo ||
+    m?.message?.audioMessage?.contextInfo ||
+    m?.contextInfo || {};
+
   const qm =
-    m?.message?.extendedTextMessage?.contextInfo?.quotedMessage ||
-    m?.contextInfo?.quotedMessage ||
-    m?.message?.imageMessage?.contextInfo?.quotedMessage ||
-    m?.message?.videoMessage?.contextInfo?.quotedMessage ||
-    m?.message?.stickerMessage?.contextInfo?.quotedMessage ||
-    m?.message?.documentMessage?.contextInfo?.quotedMessage ||
-    m?.message?.audioMessage?.contextInfo?.quotedMessage;
+    ctx.quotedMessage ||
+    m?.quotedMsg ||
+    m?.quoted_message || null;
+
   if (!qm) return;
   const qt =
     qm?.extendedTextMessage?.text ||
     qm?.conversation ||
     qm?.imageMessage?.caption ||
     qm?.videoMessage?.caption ||
+    qm?.documentMessage?.caption ||
+    qm?.text ||
     "";
+
   const box = document.createElement("div");
   box.className = "bubble-quote";
   box.style.borderLeft = "3px solid var(--muted, #ccc)";
@@ -898,15 +911,17 @@ function renderInteractive(container, m) {
   return false;
 }
 
-/* ========= autoria ========= */
+/* ========= autoria (corrigida e robusta) ========= */
 function isFromMe(m) {
   return !!(
     m?.fromMe || m?.fromme || m?.from_me ||
     m?.key?.fromMe || m?.message?.key?.fromMe ||
-    (typeof m?.participant === "string" && m.participant.endsWith(":me")) ||
-    (typeof m?.author === "string" && (m.author.endsWith(":me") || m.author.includes("@s.whatsapp.net") && m.fromMe === true)) ||
-    (typeof m?.id === "string" && /^true_/.test(m.id)
-  ));
+    m?.sender?.fromMe ||
+    (typeof m?.participant === "string" && /(:me|@s\.whatsapp\.net)$/i.test(m.participant)) ||
+    (typeof m?.author === "string" && (/(:me)$/i.test(m.author) || /@s\.whatsapp\.net/i.test(m.author)) && m.fromMe === true) ||
+    (typeof m?.id === "string" && /^true_/.test(m.id)) ||
+    m?.user === "me"
+  );
 }
 
 /* ========= BOLHA ========= */
@@ -924,7 +939,7 @@ function appendMessageBubble(pane, m) {
     m.text || m.message?.text || m?.message?.extendedTextMessage?.text ||
     m?.message?.conversation || m.caption || m.body || "";
   const who = m.senderName || m.pushName || "";
-  const ts = m.messageTimestamp || m.timestamp || "";
+  const ts = m.messageTimestamp || m.timestamp || m.t || "";
 
   // Sticker
   if (mime && /^image\/webp$/i.test(mime) && (url || dataUrl)) {
@@ -1090,7 +1105,7 @@ function renderMessages(msgs) {
     el.className = "msg " + (me ? "me" : "you");
     const text = m.text || m.message?.text || m.caption || m?.message?.conversation || m?.body || "";
     const who = m.senderName || m.pushName || "";
-    const ts = m.messageTimestamp || m.timestamp || "";
+    const ts = m.messageTimestamp || m.timestamp || m.t || "";
     el.innerHTML = `${escapeHtml(text)}<small>${escapeHtml(who)} • ${formatTime(ts)}</small>`;
     pane.appendChild(el);
   });
