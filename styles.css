@@ -532,9 +532,9 @@ body {
 
 .loading-logos-container {
   position: relative;
-  width: 180px;
-  height: 120px;
-  margin-bottom: 8px;
+  width: 140px; /* reduzido de 180px para 140px */
+  height: 100px; /* reduzido de 120px para 100px */
+  margin-bottom: 20px; /* aumentado espaçamento para a barra de progresso */
   display: flex;
   align-items: center;
   justify-content: center;
@@ -555,11 +555,16 @@ body {
 }
 
 .loading-logo {
-  width: 180px;
+  width: 140px; /* reduzido de 180px para 140px para logo menor */
   max-width: 90vw;
   height: auto;
   filter: drop-shadow(0 0 20px rgba(132, 204, 22, 0.35));
   transition: all 0.5s ease;
+}
+
+/* Estilo específico para logo da Helsenia menor */
+.loading-logo-helsenia .loading-logo {
+  width: 120px; /* logo da Helsenia ainda menor */
 }
 
 /* ========= MOBILE ========= */
