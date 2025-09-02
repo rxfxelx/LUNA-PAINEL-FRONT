@@ -567,6 +567,82 @@ body {
   width: 120px; /* logo da Helsenia ainda menor */
 }
 
+/* ========= SPLASH SCREEN ========= */
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 40px;
+  z-index: 9999;
+  background: linear-gradient(135deg, var(--bg) 0%, #1e293b 100%);
+}
+
+.splash-logos-container {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.splash-logo-luna,
+.splash-logo-helsenia {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.splash-logo-luna.active,
+.splash-logo-helsenia.active {
+  opacity: 1;
+}
+
+.splash-logo {
+  width: 180px;
+  height: auto;
+  filter: drop-shadow(0 0 20px rgba(132, 204, 22, 0.35));
+  transition: all 0.3s ease;
+}
+
+/* Logo da Helsenia menor */
+.splash-logo-helsenia .splash-logo {
+  width: 140px;
+}
+
+.splash-progress-container {
+  width: 250px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.splash-progress-bar {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #ffd700, #ffed4e);
+  border-radius: 3px;
+  transition: width 8s linear;
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+}
+
+.splash-progress-bar.animate {
+  width: 100%;
+}
+
 /* ========= MOBILE ========= */
 @media (max-width: 1023px) {
   .shell {
@@ -744,6 +820,57 @@ body {
   .chat-item {
     padding: 8px;
     min-height: 56px;
+  }
+}
+
+/* ========= MOBILE SPLASH ========= */
+@media (max-width: 768px) {
+  .splash-screen {
+    gap: 30px;
+    padding: 20px;
+  }
+
+  .splash-logos-container {
+    width: 160px;
+    height: 160px;
+  }
+
+  .splash-logo {
+    width: 140px;
+  }
+
+  .splash-logo-helsenia .splash-logo {
+    width: 110px;
+  }
+
+  .splash-progress-container {
+    width: 200px;
+    height: 5px;
+  }
+}
+
+@media (max-width: 480px) {
+  .splash-screen {
+    gap: 25px;
+    padding: 15px;
+  }
+
+  .splash-logos-container {
+    width: 140px;
+    height: 140px;
+  }
+
+  .splash-logo {
+    width: 120px;
+  }
+
+  .splash-logo-helsenia .splash-logo {
+    width: 95px;
+  }
+
+  .splash-progress-container {
+    width: 180px;
+    height: 4px;
   }
 }
 
