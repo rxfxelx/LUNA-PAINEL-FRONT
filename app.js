@@ -501,6 +501,24 @@ function refreshStageCounters() {
   const el = document.querySelector(".stage-counters")
   if (el) el.textContent = `contatos: ${counts.contatos} • lead: ${counts.lead} • lead quente: ${counts.lead_quente}`
 
+  if (el && !document.getElementById("verification-progress")) {
+    const progressEl = document.createElement("div")
+    progressEl.id = "verification-progress"
+    progressEl.className = "verification-progress hidden"
+    progressEl.innerHTML = `
+      <div class="verification-content">
+        <div class="verification-text">
+          <span class="verification-label">Verificando classificações...</span>
+          <span class="verification-counter">0/0 contatos</span>
+        </div>
+        <div class="verification-bar">
+          <div class="verification-fill"></div>
+        </div>
+      </div>
+    `
+    el.parentNode.appendChild(progressEl)
+  }
+
   const mobileContatos = document.getElementById("mobile-counter-contatos")
   const mobileLead = document.getElementById("mobile-counter-lead")
   const mobileLeadQuente = document.getElementById("mobile-counter-lead_quente")
