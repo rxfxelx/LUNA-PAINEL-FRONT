@@ -306,7 +306,12 @@ function createSplash() {
 
 function hideSplash() {
   const el = document.getElementById("luna-splash")
-  if (el) el.remove()
+  if (el) {
+    el.classList.add("fade-out")
+    setTimeout(() => {
+      el.remove()
+    }, 800) // Aguarda a animação terminar
+  }
   state.splash.shown = false
   if (state.splash.timer) {
     clearTimeout(state.splash.timer)
