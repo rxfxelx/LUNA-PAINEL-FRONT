@@ -265,27 +265,26 @@ function createSplash() {
   el.style.gap = "18px"
   el.style.zIndex = "9999"
 
-  // Container das logos com animação CSS
   const logoContainer = document.createElement("div")
-  logoContainer.className = "loading-logos-animation"
+  logoContainer.className = "loading-logos-container"
 
-  // Logo da Luna
-  const lunaLogoDiv = document.createElement("div")
-  lunaLogoDiv.className = "loading-logo-luna"
-  const lunaLogo = document.createElement("img")
-  lunaLogo.src = "lunapngcinza.png"
-  lunaLogo.alt = "Luna Logo"
-  lunaLogo.className = "loading-logo"
-  lunaLogoDiv.appendChild(lunaLogo)
-
-  // Logo da Helsenia
   const helseniaLogoDiv = document.createElement("div")
   helseniaLogoDiv.className = "loading-logo-helsenia"
+  helseniaLogoDiv.style.opacity = "1"
   const helseniaLogo = document.createElement("img")
   helseniaLogo.src = "logohelsenia.png"
   helseniaLogo.alt = "Helsenia Logo"
   helseniaLogo.className = "loading-logo"
   helseniaLogoDiv.appendChild(helseniaLogo)
+
+  const lunaLogoDiv = document.createElement("div")
+  lunaLogoDiv.className = "loading-logo-luna"
+  lunaLogoDiv.style.opacity = "0"
+  const lunaLogo = document.createElement("img")
+  lunaLogo.src = "lunapngcinza.png"
+  lunaLogo.alt = "Luna Logo"
+  lunaLogo.className = "loading-logo"
+  lunaLogoDiv.appendChild(lunaLogo)
 
   const note = document.createElement("div")
   note.textContent = "Carregando..."
@@ -293,14 +292,24 @@ function createSplash() {
   note.style.fontSize = "13px"
   note.style.marginTop = "20px"
 
-  logoContainer.appendChild(lunaLogoDiv)
   logoContainer.appendChild(helseniaLogoDiv)
+  logoContainer.appendChild(lunaLogoDiv)
   el.appendChild(logoContainer)
   el.appendChild(note)
   document.body.appendChild(el)
 
+  setTimeout(() => {
+    // Esconde Helsenia e mostra Luna
+    helseniaLogoDiv.style.transition = "opacity 0.5s ease"
+    lunaLogoDiv.style.transition = "opacity 0.5s ease"
+    helseniaLogoDiv.style.opacity = "0"
+    setTimeout(() => {
+      lunaLogoDiv.style.opacity = "1"
+    }, 500)
+  }, 4000)
+
   state.splash.shown = true
-  state.splash.forceTimer = setTimeout(hideSplash, 12000)
+  state.splash.forceTimer = setTimeout(hideSplash, 8000)
 }
 
 function hideSplash() {
@@ -374,7 +383,7 @@ function switchToApp() {
   ensureStageTabs()
   createSplash()
   loadChats().finally(() => {
-    state.splash.timer = setTimeout(hideSplash, 5300)
+    // state.splash.timer = setTimeout(hideSplash, 5300)
   })
 }
 function ensureRoute() {
