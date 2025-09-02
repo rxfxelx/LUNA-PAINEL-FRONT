@@ -1097,3 +1097,18 @@ body {
     transform: rotate(360deg);
   }
 }
+
+/* Login logo maior e centralizada; esconde qualquer título antigo */
+.login-header .login-logo{
+  display:flex;align-items:center;justify-content:center;margin-bottom:20px;
+}
+.login-header h1{display:none!important;}
+.login-logo img{
+  width:260px; max-width:90vw; height:auto; object-fit:contain;
+  filter: drop-shadow(0 0 18px rgba(132,204,22,.35));
+}
+
+/* responsivo */
+@media (max-width:480px){
+  .login-logo img{width:200px;}
+}
