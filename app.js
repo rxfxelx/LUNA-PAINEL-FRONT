@@ -286,20 +286,34 @@ function createSplash() {
   lunaLogo.className = "loading-logo"
   lunaLogoDiv.appendChild(lunaLogo)
 
-  const note = document.createElement("div")
-  note.textContent = "Carregando..."
-  note.style.opacity = ".8"
-  note.style.fontSize = "13px"
-  note.style.marginTop = "20px"
+  const progressContainer = document.createElement("div")
+  progressContainer.style.width = "200px"
+  progressContainer.style.height = "4px"
+  progressContainer.style.backgroundColor = "rgba(255, 255, 255, 0.2)"
+  progressContainer.style.borderRadius = "2px"
+  progressContainer.style.marginTop = "30px"
+  progressContainer.style.overflow = "hidden"
+
+  const progressBar = document.createElement("div")
+  progressBar.style.width = "0%"
+  progressBar.style.height = "100%"
+  progressBar.style.backgroundColor = "#ffd700"
+  progressBar.style.borderRadius = "2px"
+  progressBar.style.transition = "width 8s linear"
+
+  progressContainer.appendChild(progressBar)
 
   logoContainer.appendChild(helseniaLogoDiv)
   logoContainer.appendChild(lunaLogoDiv)
   el.appendChild(logoContainer)
-  el.appendChild(note)
+  el.appendChild(progressContainer)
   document.body.appendChild(el)
 
   setTimeout(() => {
-    // Esconde Helsenia e mostra Luna
+    progressBar.style.width = "100%"
+  }, 100)
+
+  setTimeout(() => {
     helseniaLogoDiv.style.transition = "opacity 0.5s ease"
     lunaLogoDiv.style.transition = "opacity 0.5s ease"
     helseniaLogoDiv.style.opacity = "0"
