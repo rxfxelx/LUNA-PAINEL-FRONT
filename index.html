@@ -47,9 +47,17 @@
   <section id="loading-view" class="loading hidden">
     <div class="loading-container">
       <!-- LOGO no carregamento -->
-      <div class="loading-icon">
-        <img src="lunapngcinza.png" alt="Luna" class="loading-logo">
+      <div class="loading-logos-animation">
+        <!-- Logo Luna - aparece primeiro -->
+        <div class="loading-logo-luna">
+          <img src="lunapngcinza.png" alt="Luna" class="loading-logo">
+        </div>
+        <!-- Logo Helsenia - aparece depois -->
+        <div class="loading-logo-helsenia">
+          <img src="logohelsenia.png" alt="Helsenia" class="loading-logo" onerror="this.src='lunapngcinza.png'">
+        </div>
       </div>
+      
       <div class="loading-spinner"></div>
       <h2>Carregando Sistema</h2>
       <p>Preparando suas conversas...</p>
