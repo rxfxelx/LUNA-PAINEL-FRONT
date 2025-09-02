@@ -193,7 +193,7 @@ body{background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;overf
 
 /* Aumentar logo do topo sem aumentar a barra */
 .brand-logo {
-  width: 70px;   /* aumenta aqui (pode testar 80px ou mais) */
+  width: 80px;   /* aumenta aqui (pode testar 80px ou mais) */
   height: auto;
   max-height: 48px; /* limita para não estourar a barra */
   object-fit: contain;
