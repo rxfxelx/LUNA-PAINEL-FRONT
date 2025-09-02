@@ -265,35 +265,27 @@ function createSplash() {
   el.style.gap = "18px"
   el.style.zIndex = "9999"
 
+  // Container das logos com animação CSS
   const logoContainer = document.createElement("div")
-  logoContainer.style.position = "relative"
-  logoContainer.style.width = "120px"
-  logoContainer.style.height = "120px"
-  logoContainer.style.display = "flex"
-  logoContainer.style.alignItems = "center"
-  logoContainer.style.justifyContent = "center"
+  logoContainer.className = "loading-logos-animation"
 
+  // Logo da Luna
+  const lunaLogoDiv = document.createElement("div")
+  lunaLogoDiv.className = "loading-logo-luna"
   const lunaLogo = document.createElement("img")
   lunaLogo.src = "lunapngcinza.png"
   lunaLogo.alt = "Luna Logo"
-  lunaLogo.style.position = "absolute"
-  lunaLogo.style.width = "100px"
-  lunaLogo.style.height = "auto"
-  lunaLogo.style.opacity = "0"
-  lunaLogo.style.transform = "scale(0.8)"
-  lunaLogo.style.transition = "all 0.8s ease-in-out"
-  lunaLogo.className = "luna-logo-anim"
+  lunaLogo.className = "loading-logo"
+  lunaLogoDiv.appendChild(lunaLogo)
 
+  // Logo da Helsenia
+  const helseniaLogoDiv = document.createElement("div")
+  helseniaLogoDiv.className = "loading-logo-helsenia"
   const helseniaLogo = document.createElement("img")
   helseniaLogo.src = "logohelsenia.png"
   helseniaLogo.alt = "Helsenia Logo"
-  helseniaLogo.style.position = "absolute"
-  helseniaLogo.style.width = "100px"
-  helseniaLogo.style.height = "auto"
-  helseniaLogo.style.opacity = "0"
-  helseniaLogo.style.transform = "scale(0.8)"
-  helseniaLogo.style.transition = "all 0.8s ease-in-out"
-  helseniaLogo.className = "helsenia-logo-anim"
+  helseniaLogo.className = "loading-logo"
+  helseniaLogoDiv.appendChild(helseniaLogo)
 
   const note = document.createElement("div")
   note.textContent = "Carregando..."
@@ -301,39 +293,11 @@ function createSplash() {
   note.style.fontSize = "13px"
   note.style.marginTop = "20px"
 
-  const style = document.createElement("style")
-  style.textContent = `
-    @keyframes logoFadeIn {
-      0% { opacity: 0; transform: scale(0.8); }
-      100% { opacity: 1; transform: scale(1); }
-    }
-    @keyframes logoFadeOut {
-      0% { opacity: 1; transform: scale(1); }
-      100% { opacity: 0; transform: scale(0.8); }
-    }
-  `
-
-  logoContainer.appendChild(lunaLogo)
-  logoContainer.appendChild(helseniaLogo)
-  el.appendChild(style)
+  logoContainer.appendChild(lunaLogoDiv)
+  logoContainer.appendChild(helseniaLogoDiv)
   el.appendChild(logoContainer)
   el.appendChild(note)
   document.body.appendChild(el)
-
-  setTimeout(() => {
-    lunaLogo.style.opacity = "1"
-    lunaLogo.style.transform = "scale(1)"
-  }, 200)
-
-  setTimeout(() => {
-    lunaLogo.style.opacity = "0"
-    lunaLogo.style.transform = "scale(0.8)"
-  }, 2500)
-
-  setTimeout(() => {
-    helseniaLogo.style.opacity = "1"
-    helseniaLogo.style.transform = "scale(1)"
-  }, 3300)
 
   state.splash.shown = true
   state.splash.forceTimer = setTimeout(hideSplash, 7000)
