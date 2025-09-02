@@ -7,12 +7,7 @@
   <link rel="stylesheet" href="styles.css"/>
   <script defer src="config.js"></script>
   <script defer src="app.js"></script>
-  <style>
-    .hidden{display:none!important}
-    /* logo do login */
-    .login-logo{display:flex;justify-content:center;align-items:center;margin-bottom:16px}
-    .login-logo img{max-width:200px;width:100%;height:auto;object-fit:contain}
-  </style>
+  <style>.hidden{display:none!important}</style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700&family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -23,6 +18,7 @@
   <main id="login-view" class="login">
     <div class="login-card">
       <div class="login-header">
+        <!-- Logo grande centralizada -->
         <div class="login-logo">
           <img src="lunapngcinza.png" alt="Luna">
         </div>
@@ -48,7 +44,6 @@
   <!-- LOADING -->
   <section id="loading-view" class="loading hidden">
     <div class="loading-container">
-      <!-- Substituindo emoji por SVG customizado da lua no loading -->
       <div class="loading-icon">
         <svg width="96" height="96" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
           <defs>
@@ -59,7 +54,7 @@
             </linearGradient>
             <filter id="glowLoading" x="-50%" y="-50%" width="200%" height="200%">
               <feGaussianBlur stdDeviation="5" result="coloredBlur"/>
-              <feMerge> 
+              <feMerge>
                 <feMergeNode in="coloredBlur"/>
                 <feMergeNode in="SourceGraphic"/>
               </feMerge>
@@ -92,7 +87,6 @@
   <section id="app-view" class="app hidden">
     <header class="topbar">
       <div class="brand">
-        <!-- Substituindo emoji por SVG customizado da lua no header -->
         <div class="brand-icon">
           <svg width="36" height="36" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
             <defs>
@@ -103,7 +97,7 @@
               </linearGradient>
               <filter id="glowHeader" x="-50%" y="-50%" width="200%" height="200%">
                 <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-                <feMerge> 
+                <feMerge>
                   <feMergeNode in="coloredBlur"/>
                   <feMergeNode in="SourceGraphic"/>
                 </feMerge>
@@ -146,7 +140,6 @@
       <aside class="sidebar">
         <div class="sidebar-head">
           <h2>Conversas</h2>
-          <!-- Adicionando seletor mobile para as abas -->
           <div class="mobile-stage-selector">
             <select id="mobile-stage-select" class="stage-select">
               <option value="geral">Geral</option>
@@ -159,7 +152,6 @@
             <span class="stats-badge">Ativo</span>
           </div>
         </div>
-        <!-- Removendo contadores mobile completamente -->
         <div id="chat-list" class="chat-list"></div>
       </aside>
 
