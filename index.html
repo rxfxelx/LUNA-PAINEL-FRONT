@@ -7,7 +7,12 @@
   <link rel="stylesheet" href="styles.css"/>
   <script defer src="config.js"></script>
   <script defer src="app.js"></script>
-  <style>.hidden{display:none!important}</style>
+  <style>
+    .hidden{display:none!important}
+    /* logo do login */
+    .login-logo{display:flex;justify-content:center;align-items:center;margin-bottom:16px}
+    .login-logo img{max-width:200px;width:100%;height:auto;object-fit:contain}
+  </style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700&family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
@@ -18,43 +23,9 @@
   <main id="login-view" class="login">
     <div class="login-card">
       <div class="login-header">
-        <!-- Substituindo emoji por SVG customizado da lua mais bonito -->
-        <div class="login-icon">
-          <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <linearGradient id="moonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                <stop offset="0%" style="stop-color:#84cc16;stop-opacity:1" />
-                <stop offset="50%" style="stop-color:#16a34a;stop-opacity:1" />
-                <stop offset="100%" style="stop-color:#15803d;stop-opacity:1" />
-              </linearGradient>
-              <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
-                <feMerge> 
-                  <feMergeNode in="coloredBlur"/>
-                  <feMergeNode in="SourceGraphic"/>
-                </feMerge>
-              </filter>
-              <filter id="innerShadow">
-                <feOffset dx="0" dy="2"/>
-                <feGaussianBlur stdDeviation="2" result="offset-blur"/>
-                <feFlood flood-color="#0f172a" flood-opacity="0.4"/>
-                <feComposite in2="offset-blur" operator="in"/>
-              </filter>
-            </defs>
-            <!-- Lua principal com gradiente -->
-            <circle cx="40" cy="40" r="32" fill="url(#moonGradient)" filter="url(#glow)"/>
-            <!-- Sombra da lua crescente -->
-            <path d="M20 40C20 24.536 32.536 12 48 12C43.582 12 39.582 13.791 36.686 16.686C30.895 22.477 28 30.477 28 40C28 49.523 30.895 57.523 36.686 63.314C39.582 66.209 43.582 68 48 68C32.536 68 20 55.464 20 40Z" fill="#0f172a" opacity="0.4"/>
-            <!-- Crateras da lua -->
-            <circle cx="30" cy="28" r="3" fill="#15803d" opacity="0.6"/>
-            <circle cx="48" cy="24" r="2" fill="#84cc16" opacity="0.8"/>
-            <circle cx="52" cy="36" r="1.5" fill="#a3e635" opacity="0.7"/>
-            <circle cx="34" cy="48" r="2.5" fill="#16a34a" opacity="0.5"/>
-            <circle cx="46" cy="52" r="1" fill="#84cc16" opacity="0.9"/>
-            <!-- Brilho sutil -->
-            <circle cx="32" cy="32" r="1.5" fill="#ffffff" opacity="0.8"/>
-            <circle cx="44" cy="28" r="1" fill="#ffffff" opacity="0.6"/>
-          </svg>
+        <!-- LOGO personalizada -->
+        <div class="login-logo">
+          <img src="lunapngcinza.png" alt="Luna" />
         </div>
         <h1>Luna</h1>
         <p class="login-sub">Supervisor WhatsApp Profissional</p>
