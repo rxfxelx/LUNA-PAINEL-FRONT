@@ -528,45 +528,7 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 16px;
-}
-
-.loading-logos-animation {
-  position: relative;
-  width: 180px;
-  height: 120px;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.loading-logo-luna,
-.loading-logo-helsenia {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.loading-logo-luna {
-  animation: lunaLogoSequence 6s ease-in-out infinite;
-}
-
-.loading-logo-helsenia {
-  animation: helseniaLogoSequence 6s ease-in-out infinite;
-  opacity: 0;
-}
-
-.loading-logo {
-  width: 180px;
-  max-width: 90vw;
-  height: auto;
-  filter: drop-shadow(0 0 20px rgba(132, 204, 22, 0.35));
-  transition: all 0.5s ease;
+  margin-top: 80px; /* Abaixando a posição da logo da Luna */
 }
 
 /* ========= MOBILE ========= */
