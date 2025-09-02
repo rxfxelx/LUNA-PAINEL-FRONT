@@ -255,52 +255,32 @@ function createSplash() {
   if (state.splash.shown) return
   const el = document.createElement("div")
   el.id = "luna-splash"
-  el.style.position = "fixed"
-  el.style.inset = "0"
-  el.style.background = "var(--bg, #0b0b0c)"
-  el.style.display = "flex"
-  el.style.flexDirection = "column"
-  el.style.alignItems = "center"
-  el.style.justifyContent = "center"
-  el.style.gap = "18px"
-  el.style.zIndex = "9999"
+  el.className = "splash-screen"
 
   const logoContainer = document.createElement("div")
-  logoContainer.className = "loading-logos-container"
+  logoContainer.className = "splash-logos-container"
 
   const helseniaLogoDiv = document.createElement("div")
-  helseniaLogoDiv.className = "loading-logo-helsenia"
-  helseniaLogoDiv.style.opacity = "1"
+  helseniaLogoDiv.className = "splash-logo-helsenia active"
   const helseniaLogo = document.createElement("img")
   helseniaLogo.src = "logohelsenia.png"
   helseniaLogo.alt = "Helsenia Logo"
-  helseniaLogo.className = "loading-logo"
+  helseniaLogo.className = "splash-logo"
   helseniaLogoDiv.appendChild(helseniaLogo)
 
   const lunaLogoDiv = document.createElement("div")
-  lunaLogoDiv.className = "loading-logo-luna"
-  lunaLogoDiv.style.opacity = "0"
+  lunaLogoDiv.className = "splash-logo-luna"
   const lunaLogo = document.createElement("img")
   lunaLogo.src = "lunapngcinza.png"
   lunaLogo.alt = "Luna Logo"
-  lunaLogo.className = "loading-logo"
+  lunaLogo.className = "splash-logo"
   lunaLogoDiv.appendChild(lunaLogo)
 
   const progressContainer = document.createElement("div")
-  progressContainer.style.width = "200px"
-  progressContainer.style.height = "4px"
-  progressContainer.style.backgroundColor = "rgba(255, 255, 255, 0.2)"
-  progressContainer.style.borderRadius = "2px"
-  progressContainer.style.marginTop = "30px"
-  progressContainer.style.overflow = "hidden"
+  progressContainer.className = "splash-progress-container"
 
   const progressBar = document.createElement("div")
-  progressBar.style.width = "0%"
-  progressBar.style.height = "100%"
-  progressBar.style.backgroundColor = "#ffd700"
-  progressBar.style.borderRadius = "2px"
-  progressBar.style.transition = "width 8s linear"
-
+  progressBar.className = "splash-progress-bar"
   progressContainer.appendChild(progressBar)
 
   logoContainer.appendChild(helseniaLogoDiv)
@@ -310,15 +290,13 @@ function createSplash() {
   document.body.appendChild(el)
 
   setTimeout(() => {
-    progressBar.style.width = "100%"
+    progressBar.classList.add("animate")
   }, 100)
 
   setTimeout(() => {
-    helseniaLogoDiv.style.transition = "opacity 0.5s ease"
-    lunaLogoDiv.style.transition = "opacity 0.5s ease"
-    helseniaLogoDiv.style.opacity = "0"
+    helseniaLogoDiv.classList.remove("active")
     setTimeout(() => {
-      lunaLogoDiv.style.opacity = "1"
+      lunaLogoDiv.classList.add("active")
     }, 500)
   }, 4000)
 
