@@ -579,6 +579,13 @@ body {
   gap: 40px;
   z-index: 9999;
   background: linear-gradient(135deg, var(--bg) 0%, #1e293b 100%);
+  /* Adicionando transição para fade out */
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+
+.splash-screen.fade-out {
+  opacity: 0;
+  transform: scale(0.95);
 }
 
 .splash-logos-container {
@@ -588,6 +595,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Abaixando a logo da Luna */
+  transform: translateY(20px);
 }
 
 .splash-logo-luna,
@@ -610,15 +619,20 @@ body {
 }
 
 .splash-logo {
-  width: 340px; /* aumentado de 180px para 240px */
+  width: 240px;
   height: auto;
   filter: drop-shadow(0 0 20px rgba(132, 204, 22, 0.35));
   transition: all 0.3s ease;
 }
 
+/* Aumentando logo da Luna para 340px */
+.splash-logo-luna .splash-logo {
+  width: 340px;
+}
+
 /* Logo da Helsenia menor */
 .splash-logo-helsenia .splash-logo {
-  width: 240px; /* aumentado de 140px para 240px */
+  width: 240px;
 }
 
 .splash-progress-container {
@@ -831,16 +845,22 @@ body {
   }
 
   .splash-logos-container {
-    width: 260px; /* aumentado para acomodar logos maiores */
-    height: 260px;
+    width: 300px; /* Aumentado para acomodar logo maior da Luna */
+    height: 300px;
+    transform: translateY(15px); /* Ajuste para mobile */
   }
 
   .splash-logo {
-    width: 200px; /* aumentado para mobile */
+    width: 200px;
+  }
+
+  /* Logo da Luna maior no mobile */
+  .splash-logo-luna .splash-logo {
+    width: 280px;
   }
 
   .splash-logo-helsenia .splash-logo {
-    width: 200px; /* aumentado para mobile */
+    width: 200px;
   }
 
   .splash-progress-container {
@@ -856,16 +876,22 @@ body {
   }
 
   .splash-logos-container {
-    width: 200px; /* aumentado para mobile pequeno */
-    height: 200px;
+    width: 250px; /* Aumentado para mobile pequeno */
+    height: 250px;
+    transform: translateY(10px); /* Ajuste para mobile pequeno */
   }
 
   .splash-logo {
-    width: 160px; /* aumentado para mobile pequeno */
+    width: 160px;
+  }
+
+  /* Logo da Luna maior no mobile pequeno */
+  .splash-logo-luna .splash-logo {
+    width: 220px;
   }
 
   .splash-logo-helsenia .splash-logo {
-    width: 160px; /* aumentado para mobile pequeno */
+    width: 160px;
   }
 
   .splash-progress-container {
@@ -916,7 +942,7 @@ body {
 
 /* Aumentar logo do topo sem aumentar a barra */
 .brand-logo {
-  width: 80px; /* aumenta aqui (pode testar 80px ou mais) */
+  width: 90px; /* aumenta aqui (pode testar 80px ou mais) */
   height: auto;
   max-height: 48px; /* limita para não estourar a barra */
   object-fit: contain;
