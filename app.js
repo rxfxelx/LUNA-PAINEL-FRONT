@@ -297,6 +297,7 @@ function createSplash() {
     lunaLogoDiv.classList.remove("active") // Luna sai primeiro
     setTimeout(() => {
       helseniaLogoDiv.classList.add("active") // Helsenia entra depois
+      progressBar.classList.add("helsenia")
     }, 500)
   }, 4000)
 
