@@ -260,21 +260,21 @@ function createSplash() {
   const logoContainer = document.createElement("div")
   logoContainer.className = "splash-logos-container"
 
-  const helseniaLogoDiv = document.createElement("div")
-  helseniaLogoDiv.className = "splash-logo-helsenia active"
-  const helseniaLogo = document.createElement("img")
-  helseniaLogo.src = "logohelsenia.png"
-  helseniaLogo.alt = "Helsenia Logo"
-  helseniaLogo.className = "splash-logo"
-  helseniaLogoDiv.appendChild(helseniaLogo)
-
   const lunaLogoDiv = document.createElement("div")
-  lunaLogoDiv.className = "splash-logo-luna"
+  lunaLogoDiv.className = "splash-logo-luna active"
   const lunaLogo = document.createElement("img")
   lunaLogo.src = "lunapngcinza.png"
   lunaLogo.alt = "Luna Logo"
   lunaLogo.className = "splash-logo"
   lunaLogoDiv.appendChild(lunaLogo)
+
+  const helseniaLogoDiv = document.createElement("div")
+  helseniaLogoDiv.className = "splash-logo-helsenia"
+  const helseniaLogo = document.createElement("img")
+  helseniaLogo.src = "logohelsenia.png"
+  helseniaLogo.alt = "Helsenia Logo"
+  helseniaLogo.className = "splash-logo"
+  helseniaLogoDiv.appendChild(helseniaLogo)
 
   const progressContainer = document.createElement("div")
   progressContainer.className = "splash-progress-container"
@@ -283,8 +283,8 @@ function createSplash() {
   progressBar.className = "splash-progress-bar"
   progressContainer.appendChild(progressBar)
 
-  logoContainer.appendChild(helseniaLogoDiv)
-  logoContainer.appendChild(lunaLogoDiv)
+  logoContainer.appendChild(lunaLogoDiv) // Luna primeiro
+  logoContainer.appendChild(helseniaLogoDiv) // Helsenia segundo
   el.appendChild(logoContainer)
   el.appendChild(progressContainer)
   document.body.appendChild(el)
@@ -294,9 +294,9 @@ function createSplash() {
   }, 100)
 
   setTimeout(() => {
-    helseniaLogoDiv.classList.remove("active")
+    lunaLogoDiv.classList.remove("active") // Luna sai primeiro
     setTimeout(() => {
-      lunaLogoDiv.classList.add("active")
+      helseniaLogoDiv.classList.add("active") // Helsenia entra depois
     }, 500)
   }, 4000)
 
