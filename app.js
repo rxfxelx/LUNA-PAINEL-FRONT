@@ -300,7 +300,7 @@ function createSplash() {
   document.body.appendChild(el)
 
   state.splash.shown = true
-  state.splash.forceTimer = setTimeout(hideSplash, 12000)
+  state.splash.forceTimer = setTimeout(hideSplash, 7000)
 }
 
 function hideSplash() {
