@@ -764,6 +764,18 @@ function hydrateChatCard(ch) {
  * 11) PREFETCH (nomes/últimas/classificação leve)
  * ======================================= */
 async function prefetchCards(items) {
+  const progressEl = document.getElementById("verification-progress")
+  const counterEl = progressEl?.querySelector(".verification-counter")
+  const fillEl = progressEl?.querySelector(".verification-fill")
+
+  if (progressEl && items.length > 0) {
+    progressEl.classList.remove("hidden")
+    if (counterEl) counterEl.textContent = `0/${items.length} contatos`
+    if (fillEl) fillEl.style.width = "0%"
+  }
+
+  let completed = 0
+
   const tasks = items.map((ch) => {
     const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || ""
     return async () => {
@@ -832,6 +844,10 @@ async function prefetchCards(items) {
           rIC(refreshStageCounters)
         }
       } catch {}
+
+      completed++
+      if (counterEl) counterEl.textContent = `${completed}/${items.length} contatos`
+      if (fillEl) fillEl.style.width = `${(completed / items.length) * 100}%`
     }
   })
 
@@ -840,6 +856,12 @@ async function prefetchCards(items) {
     const slice = tasks.slice(i, i + CHUNK)
     await runLimited(slice, 8)
     await new Promise((r) => rIC(r))
+  }
+
+  if (progressEl) {
+    setTimeout(() => {
+      progressEl.classList.add("hidden")
+    }, 1000)
   }
 }
 
