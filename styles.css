@@ -538,6 +538,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  margin-top: 60px;
 }
 
 .loading-logo-luna,
@@ -550,15 +551,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.loading-logo-luna {
-  animation: lunaLogoSequence 6s ease-in-out infinite;
-}
-
-.loading-logo-helsenia {
-  animation: helseniaLogoSequence 6s ease-in-out infinite;
-  opacity: 0;
+  transform: translateY(40px);
 }
 
 .loading-logo {
