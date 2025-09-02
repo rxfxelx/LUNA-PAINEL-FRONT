@@ -610,7 +610,7 @@ body {
 }
 
 .splash-logo {
-  width: 240px; /* aumentado de 180px para 240px */
+  width: 340px; /* aumentado de 180px para 240px */
   height: auto;
   filter: drop-shadow(0 0 20px rgba(132, 204, 22, 0.35));
   transition: all 0.3s ease;
