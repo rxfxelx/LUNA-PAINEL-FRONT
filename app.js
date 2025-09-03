@@ -111,15 +111,15 @@ const state = {
   stagesLoaded: true,
   splash: { shown: false, timer: null, forceTimer: null },
   activeTab: "geral",
-  listReqId: 0, // versão da renderização atual da lista
-  lastTs: new Map(), // chatid -> timestamp (ms) da última atividade conhecida
-  orderDirty: false, // sinaliza reordenação pendente
+  listReqId: 0,
+  lastTs: new Map(),
+  orderDirty: false,
 }
 
 // Utilitários de timestamp/ordenação
 function toMs(x) {
   const n = Number(x || 0)
-  if (String(x).length === 10) return n * 1000 // epoch em segundos
+  if (String(x).length === 10) return n * 1000
   return isNaN(n) ? 0 : n
 }
 function updateLastActivity(chatid, ts) {
@@ -147,17 +147,16 @@ function reorderChatList() {
   if (!list) return
   const cards = Array.from(list.querySelectorAll(".chat-item"))
   if (!cards.length) return
-
   cards.sort((a, b) => {
     const ta = state.lastTs.get(a.dataset.chatid) || 0
     const tb = state.lastTs.get(b.dataset.chatid) || 0
-    return tb - ta // mais recente no topo
+    return tb - ta
   })
   cards.forEach((el) => list.appendChild(el))
 }
 
 /* =========================================
- * 3) FILA GLOBAL DE BACKGROUND (não para ao trocar de aba)
+ * 3) FILA GLOBAL DE BACKGROUND
  * ======================================= */
 const bgQueue = []
 let bgRunning = false
@@ -183,9 +182,7 @@ const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Que
 const STAGE_RANK = { contatos: 0, lead: 1, lead_quente: 2 }
 
 function normalizeStage(s) {
-  const k = String(s || "")
-    .toLowerCase()
-    .trim()
+  const k = String(s || "").toLowerCase().trim()
   if (k.startsWith("contato")) return "contatos"
   if (k.includes("lead_quente") || k.includes("quente")) return "lead_quente"
   if (k === "lead") return "lead"
@@ -202,12 +199,10 @@ function setStage(chatid, nextStage) {
 }
 
 /* =========================================
- * 5) CRM (contadores/visões)
+ * 5) CRM
  * ======================================= */
 const CRM_STAGES = ["novo", "sem_resposta", "interessado", "em_negociacao", "fechou", "descartado"]
-async function apiCRMViews() {
-  return api("/api/crm/views")
-}
+async function apiCRMViews() { return api("/api/crm/views") }
 async function apiCRMList(stage, limit = 100, offset = 0) {
   const qs = new URLSearchParams({ stage, limit, offset }).toString()
   return api("/api/crm/list?" + qs)
@@ -283,20 +278,17 @@ function createSplash() {
   progressBar.className = "splash-progress-bar"
   progressContainer.appendChild(progressBar)
 
-  logoContainer.appendChild(lunaLogoDiv) // Luna primeiro
-  logoContainer.appendChild(helseniaLogoDiv) // Helsenia segundo
+  logoContainer.appendChild(lunaLogoDiv)
+  logoContainer.appendChild(helseniaLogoDiv)
   el.appendChild(logoContainer)
   el.appendChild(progressContainer)
   document.body.appendChild(el)
 
+  setTimeout(() => { progressBar.classList.add("animate") }, 100)
   setTimeout(() => {
-    progressBar.classList.add("animate")
-  }, 100)
-
-  setTimeout(() => {
-    lunaLogoDiv.classList.remove("active") // Luna sai primeiro
+    lunaLogoDiv.classList.remove("active")
     setTimeout(() => {
-      helseniaLogoDiv.classList.add("active") // Helsenia entra depois
+      helseniaLogoDiv.classList.add("active")
       progressBar.classList.add("helsenia")
     }, 500)
   }, 4000)
@@ -304,52 +296,34 @@ function createSplash() {
   state.splash.shown = true
   state.splash.forceTimer = setTimeout(hideSplash, 8000)
 }
-
 function hideSplash() {
   const el = document.getElementById("luna-splash")
   if (el) {
     el.classList.add("fade-out")
-    setTimeout(() => {
-      el.remove()
-    }, 800) // Aguarda a animação terminar
+    setTimeout(() => { el.remove() }, 800)
   }
   state.splash.shown = false
-  if (state.splash.timer) {
-    clearTimeout(state.splash.timer)
-    state.splash.timer = null
-  }
-  if (state.splash.forceTimer) {
-    clearTimeout(state.splash.forceTimer)
-    state.splash.forceTimer = null
-  }
+  if (state.splash.timer) { clearTimeout(state.splash.timer); state.splash.timer = null }
+  if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
 }
 
 async function doLogin() {
   const token = $("#token")?.value?.trim()
   const msgEl = $("#msg")
   const btnEl = $("#btn-login")
-  if (!token) {
-    if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"
-    return
-  }
+  if (!token) { if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"; return }
   if (msgEl) msgEl.textContent = ""
-  if (btnEl) {
-    btnEl.disabled = true
-    btnEl.innerHTML = "<span>Conectando...</span>"
-  }
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = "<span>Conectando...</span>" }
   try {
     const r = await fetch(BACKEND() + "/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }),
     })
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json()
     localStorage.setItem("luna_jwt", data.jwt)
     switchToApp()
   } catch (e) {
-    console.error(e)
-    if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
+    console.error(e); if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
   } finally {
     if (btnEl) {
       btnEl.disabled = false
@@ -358,7 +332,6 @@ async function doLogin() {
     }
   }
 }
-
 function ensureTopbar() {
   if (!$(".topbar")) {
     const tb = document.createElement("div")
@@ -371,7 +344,6 @@ function ensureTopbar() {
     host.prepend(tb)
   }
 }
-
 function switchToApp() {
   hide("#login-view")
   show("#app-view")
@@ -380,16 +352,11 @@ function switchToApp() {
   ensureCRMBar()
   ensureStageTabs()
   createSplash()
-  loadChats().finally(() => {
-    // state.splash.timer = setTimeout(hideSplash, 5300)
-  })
+  loadChats().finally(() => {})
 }
 function ensureRoute() {
   if (jwt()) switchToApp()
-  else {
-    show("#login-view")
-    hide("#app-view")
-  }
+  else { show("#login-view"); hide("#app-view") }
 }
 
 /* =========================================
@@ -463,18 +430,10 @@ function ensureStageTabs() {
       const key = e.target.value
       state.activeTab = key
       switch (key) {
-        case "geral":
-          loadChats()
-          break
-        case "contatos":
-          loadStageTab("contatos")
-          break
-        case "lead":
-          loadStageTab("lead")
-          break
-        case "lead_quente":
-          loadStageTab("lead_quente")
-          break
+        case "geral": loadChats(); break
+        case "contatos": loadStageTab("contatos"); break
+        case "lead": loadStageTab("lead"); break
+        case "lead_quente": loadStageTab("lead_quente"); break
       }
       const btn = host.querySelector(`.stage-tabs .btn[data-stage="${key}"]`)
       if (btn) {
@@ -570,21 +529,17 @@ async function loadChats() {
     for await (const item of readNDJSONStream(res)) {
       if (item?.error) continue
 
-      // mantém o array completo
       state.chats.push(item)
 
-      // timestamp base do card (fallback do backend)
       const baseTs = item.wa_lastMsgTimestamp || item.messageTimestamp || item.updatedAt || 0
       const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || ""
       updateLastActivity(id, baseTs)
 
-      // DOM só se ainda estiver na mesma visão
       if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
         const curList = $("#chat-list")
         if (curList) appendChatSkeleton(curList, item)
       }
 
-      // --- BACKGROUND: nome/imagem + preview + classificação com cache
       if (!id) continue
 
       pushBg(async () => {
@@ -598,7 +553,7 @@ async function loadChats() {
           }
         } catch {}
 
-        // última mensagem para preview
+        // preview última mensagem
         try {
           const latest = await api("/api/messages", {
             method: "POST",
@@ -628,42 +583,36 @@ async function loadChats() {
           }
         } catch {
           const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`)
-          if (card) {
-            card.textContent = "Sem mensagens"
-            card.title = "Sem mensagens"
-          }
-          // fallback: mantém ordenação com base no ts do chat
+          if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens" }
           const base = state.chats.find((c) => (c.wa_chatid || c.chatid || c.wa_fastid || c.wa_id || "") === id) || {}
           updateLastActivity(id, base.wa_lastMsgTimestamp || base.messageTimestamp || base.updatedAt || 0)
         }
 
-        // classificação com cache
+        // CLASSIFICAÇÃO: cache primeiro, classificar só se não existir no banco
         try {
+          // 1) tenta o cache do banco
+          const rs = await api(`/api/lead-status?chatid=${encodeURIComponent(id)}`, { method: "GET" })
+          if (rs && rs.found) {
+            const stage = normalizeStage(rs.stage || "")
+            if (stage) {
+              setStage(id, stage)
+              if (state.current && (state.current.wa_chatid || state.current.chatid) === id) upsertStagePill(stage)
+              rIC(refreshStageCounters)
+            }
+            return
+          }
+
+          // 2) se não existe no banco, classifica e o backend persiste
           const pack = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid: id, limit: 20, sort: "-messageTimestamp" }),
           })
           const items = Array.isArray(pack?.items) ? pack.items : []
-          const lastTs = items.length ? Math.max(...items.map((m) => tsOf(m))) : 0
-
-          // tenta cache
-          let stage = ""
-          try {
-            const rs = await api(`/api/lead-status?chatid=${encodeURIComponent(id)}`, { method: "GET" })
-            if (rs && rs.found && Number(rs.last_msg_ts || 0) >= Number(lastTs || 0)) {
-              stage = normalizeStage(rs.stage || "")
-            }
-          } catch {}
-
-          // se não houver cache válido, classifica e backend atualiza
-          if (!stage) {
-            const r = await api("/api/media/stage/classify", {
-              method: "POST",
-              body: JSON.stringify({ chatid: id, messages: items }),
-            })
-            stage = normalizeStage(r?.stage || "")
-          }
-
+          const r = await api("/api/media/stage/classify", {
+            method: "POST",
+            body: JSON.stringify({ chatid: id, messages: items }),
+          })
+          const stage = normalizeStage(r?.stage || "")
           if (stage) {
             setStage(id, stage)
             if (state.current && (state.current.wa_chatid || state.current.chatid) === id) upsertStagePill(stage)
@@ -673,13 +622,9 @@ async function loadChats() {
       })
     }
 
-    // se usuário trocou de aba, renderiza filtrado
     if (state.activeTab !== "geral") await loadStageTab(state.activeTab)
 
-    try {
-      await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) })
-      refreshCRMCounters()
-    } catch {}
+    try { await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) }); refreshCRMCounters() } catch {}
   } catch (e) {
     console.error(e)
     if (list && reqId === state.listReqId)
@@ -715,7 +660,6 @@ async function progressiveRenderChats(chats, reqId = null) {
     if (reqId !== null && reqId !== state.listReqId) return
     hydrateChatCard(ch)
   })
-  // garante ordem inicial
   reorderChatList()
 }
 
@@ -741,8 +685,7 @@ function appendChatSkeleton(list, ch) {
   tm.className = "time"
   const lastTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ""
   tm.textContent = lastTs ? formatTime(lastTs) : ""
-  top.appendChild(nm)
-  top.appendChild(tm)
+  top.appendChild(nm); top.appendChild(tm)
 
   const bottom = document.createElement("div")
   bottom.className = "row2"
@@ -765,7 +708,6 @@ function appendChatSkeleton(list, ch) {
   el.appendChild(main)
   list.appendChild(el)
 
-  // alimenta atividade base para ordenação
   const baseTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ch.updatedAt || 0
   updateLastActivity(el.dataset.chatid, baseTs)
 
@@ -835,9 +777,7 @@ async function prefetchCards(items) {
               last?.message?.conversation ||
               last?.body ||
               ""
-            )
-              .replace(/\s+/g, " ")
-              .trim()
+            ).replace(/\s+/g, " ").trim()
             state.lastMsg.set(chatid, pv)
             const fromMe = isFromMe(last)
             state.lastMsgFromMe.set(chatid, fromMe)
@@ -852,43 +792,30 @@ async function prefetchCards(items) {
             updateLastActivity(chatid, last.messageTimestamp || last.timestamp || last.t || Date.now())
           } else {
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`)
-            if (card) {
-              card.textContent = "Sem mensagens"
-              card.title = "Sem mensagens"
-            }
+            if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens" }
             updateLastActivity(chatid, ch.wa_lastMsgTimestamp || ch.messageTimestamp || ch.updatedAt || 0)
           }
         } catch {}
       }
 
-      // classificação leve com cache
+      // classificação leve com cache: usa banco; só classifica se não houver registro
       try {
-        const pack = await api("/api/messages", {
-          method: "POST",
-          body: JSON.stringify({ chatid, limit: 20, sort: "-messageTimestamp" }),
-        })
-        const items = Array.isArray(pack?.items) ? pack.items : []
-        const lastTs = items.length ? Math.max(...items.map((m) => tsOf(m))) : 0
-
-        let stage = ""
-        try {
-          const rs = await api(`/api/lead-status?chatid=${encodeURIComponent(chatid)}`, { method: "GET" })
-          if (rs && rs.found && Number(rs.last_msg_ts || 0) >= Number(lastTs || 0)) {
-            stage = normalizeStage(rs.stage || "")
-          }
-        } catch {}
-
-        if (!stage) {
+        const rs = await api(`/api/lead-status?chatid=${encodeURIComponent(chatid)}`, { method: "GET" })
+        if (rs && rs.found) {
+          const stage = normalizeStage(rs.stage || "")
+          if (stage) { setStage(chatid, stage); rIC(refreshStageCounters) }
+        } else {
+          const pack = await api("/api/messages", {
+            method: "POST",
+            body: JSON.stringify({ chatid, limit: 20, sort: "-messageTimestamp" }),
+          })
+          const items = Array.isArray(pack?.items) ? pack.items : []
           const r = await api("/api/media/stage/classify", {
             method: "POST",
             body: JSON.stringify({ chatid, messages: items }),
           })
-          stage = normalizeStage(r?.stage || "")
-        }
-
-        if (stage) {
-          setStage(chatid, stage)
-          rIC(refreshStageCounters)
+          const stage = normalizeStage(r?.stage || "")
+          if (stage) { setStage(chatid, stage); rIC(refreshStageCounters) }
         }
       } catch {}
 
@@ -905,15 +832,11 @@ async function prefetchCards(items) {
     await new Promise((r) => rIC(r))
   }
 
-  if (progressEl) {
-    setTimeout(() => {
-      progressEl.classList.add("hidden")
-    }, 1000)
-  }
+  if (progressEl) { setTimeout(() => { progressEl.classList.add("hidden") }, 1000) }
 }
 
 /* =========================================
- * 12) FORMATAÇÃO DE HORA (HH:mm) e DIAS (Xd)
+ * 12) FORMATAÇÃO DE HORA
  * ======================================= */
 function formatTime(ts) {
   if (!ts) return ""
@@ -929,9 +852,7 @@ function formatTime(ts) {
     }
     const diffD = Math.floor(diffMs / 86400000)
     return `${diffD}d`
-  } catch {
-    return ""
-  }
+  } catch { return "" }
 }
 
 /* =========================================
@@ -965,28 +886,21 @@ function tsOf(m) {
 
 async function classifyInstant(chatid, items) {
   try {
-    const lastTs = items && items.length ? Math.max(...items.map((m) => tsOf(m))) : 0
-
-    // 1) tenta cache
-    let cached = null
+    // 1) usa cache do banco se existir
     try {
       const rs = await api(`/api/lead-status?chatid=${encodeURIComponent(chatid)}`, { method: "GET" })
-      if (rs && rs.found && Number(rs.last_msg_ts || 0) >= Number(lastTs || 0)) {
-        cached = rs
+      if (rs && rs.found) {
+        const rec = setStage(chatid, normalizeStage(rs.stage || "contatos"))
+        upsertStagePill(rec.stage)
+        refreshStageCounters()
+        return rec
       }
     } catch {}
 
-    if (cached) {
-      const rec = setStage(chatid, normalizeStage(cached.stage || "contatos"))
-      upsertStagePill(rec.stage)
-      refreshStageCounters()
-      return rec
-    }
-
-    // 2) classifica e backend atualiza cache
+    // 2) se não existe no banco, classifica e backend atualiza
     const r = await api("/api/media/stage/classify", {
       method: "POST",
-      body: JSON.stringify({ chatid, messages: items }),
+      body: JSON.stringify({ chatid, messages: items || [] }),
     })
     const stage = normalizeStage(r?.stage || "")
     if (stage) {
@@ -1017,8 +931,7 @@ async function loadMessages(chatid) {
 
     const last = items[items.length - 1]
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "")
-      .replace(/\s+/g, " ")
-      .trim()
+      .replace(/\s+/g, " ").trim()
     if (pv) state.lastMsg.set(chatid, pv)
     state.lastMsgFromMe.set(chatid, isFromMe(last || {}))
 
@@ -1034,7 +947,7 @@ async function loadMessages(chatid) {
 }
 
 /* =========================================
- * 14) RENDERIZAÇÃO DE MENSAGENS (batches)
+ * 14) RENDERIZAÇÃO DE MENSAGENS
  * ======================================= */
 async function progressiveRenderMessages(msgs) {
   const pane = $("#messages")
@@ -1113,19 +1026,14 @@ function pickMediaInfo(m) {
     m.caption ||
     mm?.imageMessage?.caption ||
     mm?.videoMessage?.caption ||
-    mm?.documentMessage?.caption || // caption de doc
-    mm?.documentMessage?.fileName || // fallback: nome do arquivo
+    mm?.documentMessage?.caption ||
+    mm?.documentMessage?.fileName ||
     m.text ||
     mm?.conversation ||
     m.body ||
     ""
 
-  return {
-    mime: String(mime || ""),
-    url: String(url || ""),
-    dataUrl: String(dataUrl || ""),
-    caption: String(caption || ""),
-  }
+  return { mime: String(mime || ""), url: String(url || ""), dataUrl: String(dataUrl || ""), caption: String(caption || "") }
 }
 
 async function fetchMediaBlobViaProxy(rawUrl) {
@@ -1135,7 +1043,7 @@ async function fetchMediaBlobViaProxy(rawUrl) {
   return await r.blob()
 }
 
-// Reply preview (mais variações)
+// Reply preview
 function renderReplyPreview(container, m) {
   const ctx =
     m?.message?.extendedTextMessage?.contextInfo ||
@@ -1148,7 +1056,6 @@ function renderReplyPreview(container, m) {
     {}
 
   const qm = ctx.quotedMessage || m?.quotedMsg || m?.quoted_message || null
-
   if (!qm) return
   const qt =
     qm?.extendedTextMessage?.text ||
@@ -1158,7 +1065,6 @@ function renderReplyPreview(container, m) {
     qm?.documentMessage?.caption ||
     qm?.text ||
     ""
-
   const box = document.createElement("div")
   box.className = "bubble-quote"
   box.style.borderLeft = "3px solid var(--muted, #ccc)"
@@ -1299,7 +1205,7 @@ function renderInteractive(container, m) {
 }
 
 /* =========================================
- * 16) AUTORIA (robusta)
+ * 16) AUTORIA
  * ======================================= */
 function isFromMe(m) {
   return !!(
@@ -1319,7 +1225,7 @@ function isFromMe(m) {
 }
 
 /* =========================================
- * 17) BOLHA DE MENSAGEM (mídias, texto, replies)
+ * 17) BOLHA DE MENSAGEM
  * ======================================= */
 function appendMessageBubble(pane, m) {
   const me = isFromMe(m)
@@ -1357,22 +1263,12 @@ function appendMessageBubble(pane, m) {
     meta.style.opacity = ".75"
     el.appendChild(meta)
     pane.appendChild(el)
-    const after = () => {
-      pane.scrollTop = pane.scrollHeight
-    }
-    if (dataUrl) {
-      img.onload = after
-      img.src = dataUrl
-    } else if (url) {
+    const after = () => { pane.scrollTop = pane.scrollHeight }
+    if (dataUrl) { img.onload = after; img.src = dataUrl }
+    else if (url) {
       fetchMediaBlobViaProxy(url)
-        .then((b) => {
-          img.onload = after
-          img.src = URL.createObjectURL(b)
-        })
-        .catch(() => {
-          img.alt = "(Falha ao carregar figurinha)"
-          after()
-        })
+        .then((b) => { img.onload = after; img.src = URL.createObjectURL(b) })
+        .catch(() => { img.alt = "(Falha ao carregar figurinha)"; after() })
     }
     return
   }
@@ -1403,26 +1299,13 @@ function appendMessageBubble(pane, m) {
     meta.style.opacity = ".75"
     el.appendChild(meta)
     pane.appendChild(el)
-    const after = () => {
-      pane.scrollTop = pane.scrollHeight
-    }
-    if (dataUrl) {
-      img.onload = after
-      img.src = dataUrl
-    } else if (url) {
+    const after = () => { pane.scrollTop = pane.scrollHeight }
+    if (dataUrl) { img.onload = after; img.src = dataUrl }
+    else if (url) {
       fetchMediaBlobViaProxy(url)
-        .then((b) => {
-          img.onload = after
-          img.src = URL.createObjectURL(b)
-        })
-        .catch(() => {
-          img.alt = "(Falha ao carregar imagem)"
-          after()
-        })
-    } else {
-      img.alt = "(Imagem não disponível)"
-      after()
-    }
+        .then((b) => { img.onload = after; img.src = URL.createObjectURL(b) })
+        .catch(() => { img.alt = "(Falha ao carregar imagem)"; after() })
+    } else { img.alt = "(Imagem não disponível)"; after() }
     return
   }
 
@@ -1448,33 +1331,20 @@ function appendMessageBubble(pane, m) {
     meta.style.opacity = ".75"
     el.appendChild(meta)
     pane.appendChild(el)
-    const after = () => {
-      pane.scrollTop = pane.scrollHeight
-    }
-    if (dataUrl) {
-      video.onloadeddata = after
-      video.src = dataUrl
-    } else if (url) {
+    const after = () => { pane.scrollTop = pane.scrollHeight }
+    if (dataUrl) { video.onloadeddata = after; video.src = dataUrl }
+    else if (url) {
       fetchMediaBlobViaProxy(url)
-        .then((b) => {
-          video.onloadeddata = after
-          video.src = URL.createObjectURL(b)
-        })
+        .then((b) => { video.onloadeddata = after; video.src = URL.createObjectURL(b) })
         .catch(() => {
           const err = document.createElement("div")
-          err.style.fontSize = "12px"
-          err.style.opacity = ".8"
-          err.textContent = "(Falha ao carregar vídeo)"
-          el.insertBefore(err, meta)
-          after()
+          err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Falha ao carregar vídeo)"
+          el.insertBefore(err, meta); after()
         })
     } else {
       const err = document.createElement("div")
-      err.style.fontSize = "12px"
-      err.style.opacity = ".8"
-      err.textContent = "(Vídeo não disponível)"
-      el.insertBefore(err, meta)
-      after()
+      err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Vídeo não disponível)"
+      el.insertBefore(err, meta); after()
     }
     return
   }
@@ -1493,33 +1363,20 @@ function appendMessageBubble(pane, m) {
     meta.style.opacity = ".75"
     el.appendChild(meta)
     pane.appendChild(el)
-    const after = () => {
-      pane.scrollTop = pane.scrollHeight
-    }
-    if (dataUrl) {
-      audio.onloadeddata = after
-      audio.src = dataUrl
-    } else if (url) {
+    const after = () => { pane.scrollTop = pane.scrollHeight }
+    if (dataUrl) { audio.onloadeddata = after; audio.src = dataUrl }
+    else if (url) {
       fetchMediaBlobViaProxy(url)
-        .then((b) => {
-          audio.onloadeddata = after
-          audio.src = URL.createObjectURL(b)
-        })
+        .then((b) => { audio.onloadeddata = after; audio.src = URL.createObjectURL(b) })
         .catch(() => {
           const err = document.createElement("div")
-          err.style.fontSize = "12px"
-          err.style.opacity = ".8"
-          err.textContent = "(Falha ao carregar áudio)"
-          el.insertBefore(err, meta)
-          after()
+          err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Falha ao carregar áudio)"
+          el.insertBefore(err, meta); after()
         })
     } else {
       const err = document.createElement("div")
-      err.style.fontSize = "12px"
-      err.style.opacity = ".8"
-      err.textContent = "(Áudio não disponível)"
-      el.insertBefore(err, meta)
-      after()
+      err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Áudio não disponível)"
+      el.insertBefore(err, meta); after()
     }
     return
   }
@@ -1537,9 +1394,7 @@ function appendMessageBubble(pane, m) {
         const b = await fetchMediaBlobViaProxy(url)
         const blobUrl = URL.createObjectURL(b)
         window.open(blobUrl, "_blank")
-      } catch {
-        alert("Falha ao baixar documento")
-      }
+      } catch { alert("Falha ao baixar documento") }
     }
     el.appendChild(link)
     const meta = document.createElement("small")
@@ -1569,10 +1424,7 @@ function appendMessageBubble(pane, m) {
 
   // TEXTO
   if (top.childNodes.length) el.appendChild(top)
-  el.innerHTML += `
-    ${escapeHtml(plainText)}
-    <small>${escapeHtml(who)} • ${formatTime(ts)}</small>
-  `
+  el.innerHTML += `${escapeHtml(plainText)}<small>${escapeHtml(who)} • ${formatTime(ts)}</small>`
   pane.appendChild(el)
   pane.scrollTop = pane.scrollHeight
 }
@@ -1600,7 +1452,7 @@ function upsertStagePill(stage) {
 }
 
 /* =========================================
- * 19) RENDER “CLÁSSICO” (fallback simples)
+ * 19) RENDER “CLÁSSICO”
  * ======================================= */
 function renderMessages(msgs) {
   const pane = $("#messages")
@@ -1629,7 +1481,7 @@ function renderMessages(msgs) {
 }
 
 /* =========================================
- * 20) ENVIO (atualiza ordenação imediatamente)
+ * 20) ENVIO
  * ======================================= */
 async function sendNow() {
   const number = $("#send-number")?.value?.trim()
@@ -1645,7 +1497,7 @@ async function sendNow() {
 
   try {
     await api("/api/send-text", { method: "POST", body: JSON.stringify({ number, text }) })
-    updateLastActivity(number, Date.now()) // sobe o chat na hora
+    updateLastActivity(number, Date.now())
     if ($("#send-text")) $("#send-text").value = ""
     if (state.current && (state.current.wa_chatid || state.current.chatid) === number) {
       setTimeout(() => loadMessages(number), 500)
@@ -1666,40 +1518,27 @@ async function sendNow() {
  * ======================================= */
 document.addEventListener("DOMContentLoaded", () => {
   $("#btn-login") && ($("#btn-login").onclick = doLogin)
-  $("#btn-logout") &&
-    ($("#btn-logout").onclick = () => {
-      localStorage.clear()
-      location.reload()
-    })
+  $("#btn-logout") && ($("#btn-logout").onclick = () => { localStorage.clear(); location.reload() })
   $("#btn-send") && ($("#btn-send").onclick = sendNow)
-  $("#btn-refresh") &&
-    ($("#btn-refresh").onclick = () => {
-      if (state.current) {
-        const chatid = state.current.wa_chatid || state.current.chatid
-        loadMessages(chatid)
-      } else {
-        loadChats()
-      }
-    })
+  $("#btn-refresh") && ($("#btn-refresh").onclick = () => {
+    if (state.current) {
+      const chatid = state.current.wa_chatid || state.current.chatid
+      loadMessages(chatid)
+    } else {
+      loadChats()
+    }
+  })
 
   const backBtn = document.getElementById("btn-back-mobile")
   if (backBtn) backBtn.onclick = () => setMobileMode("list")
 
-  $("#send-text") &&
-    $("#send-text").addEventListener("keypress", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault()
-        sendNow()
-      }
-    })
+  $("#send-text") && $("#send-text").addEventListener("keypress", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendNow() }
+  })
 
-  $("#token") &&
-    $("#token").addEventListener("keypress", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault()
-        doLogin()
-      }
-    })
+  $("#token") && $("#token").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); doLogin() }
+  })
 
   ensureRoute()
 })
