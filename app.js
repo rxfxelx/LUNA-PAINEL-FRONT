@@ -41,8 +41,26 @@ function setMobileMode(mode) {
 function jwt() {
   return localStorage.getItem("luna_jwt") || "";
 }
+
+// >>> AJUSTE: decodifica payload do JWT para extrair instance id <<<
+function jwtPayload() {
+  const t = jwt();
+  if (!t || t.indexOf(".") < 0) return {};
+  try {
+    const b64 = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = atob(b64);
+    return JSON.parse(json);
+  } catch {
+    return {};
+  }
+}
+
 function authHeaders() {
-  return { Authorization: "Bearer " + jwt() };
+  const headers = { Authorization: "Bearer " + jwt() };
+  const p = jwtPayload();
+  const iid = p.instance_id || p.phone_number_id || p.pnid || p.sub || "";
+  if (iid) headers["x-instance-id"] = String(iid);
+  return headers;
 }
 
 async function api(path, opts = {}) {
