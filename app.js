@@ -584,7 +584,7 @@ async function loadChats() {
         if (curList) appendChatSkeleton(curList, item)
       }
 
-      // --- BACKGROUND: nome/imagem + preview + classificação
+      // --- BACKGROUND: nome/imagem + preview + classificação com cache
       if (!id) continue
 
       pushBg(async () => {
@@ -637,21 +637,36 @@ async function loadChats() {
           updateLastActivity(id, base.wa_lastMsgTimestamp || base.messageTimestamp || base.updatedAt || 0)
         }
 
-        // classificação
+        // classificação com cache
         try {
           const pack = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid: id, limit: 20, sort: "-messageTimestamp" }),
           })
           const items = Array.isArray(pack?.items) ? pack.items : []
-          const r = await api("/api/media/stage/classify", {
-            method: "POST",
-            body: JSON.stringify({ chatid: id, messages: items }),
-          })
-          const stage = normalizeStage(r?.stage || "")
+          const lastTs = items.length ? Math.max(...items.map((m) => tsOf(m))) : 0
+
+          // tenta cache
+          let stage = ""
+          try {
+            const rs = await api(`/api/lead-status?chatid=${encodeURIComponent(id)}`, { method: "GET" })
+            if (rs && rs.found && Number(rs.last_msg_ts || 0) >= Number(lastTs || 0)) {
+              stage = normalizeStage(rs.stage || "")
+            }
+          } catch {}
+
+          // se não houver cache válido, classifica e backend atualiza
+          if (!stage) {
+            const r = await api("/api/media/stage/classify", {
+              method: "POST",
+              body: JSON.stringify({ chatid: id, messages: items }),
+            })
+            stage = normalizeStage(r?.stage || "")
+          }
+
           if (stage) {
-            const rec = setStage(id, stage)
-            if (state.current && (state.current.wa_chatid || state.current.chatid) === id) upsertStagePill(rec.stage)
+            setStage(id, stage)
+            if (state.current && (state.current.wa_chatid || state.current.chatid) === id) upsertStagePill(stage)
             rIC(refreshStageCounters)
           }
         } catch {}
@@ -845,18 +860,32 @@ async function prefetchCards(items) {
           }
         } catch {}
       }
-      // classificação leve
+
+      // classificação leve com cache
       try {
         const pack = await api("/api/messages", {
           method: "POST",
           body: JSON.stringify({ chatid, limit: 20, sort: "-messageTimestamp" }),
         })
         const items = Array.isArray(pack?.items) ? pack.items : []
-        const r = await api("/api/media/stage/classify", {
-          method: "POST",
-          body: JSON.stringify({ chatid, messages: items }),
-        })
-        const stage = normalizeStage(r?.stage || "")
+        const lastTs = items.length ? Math.max(...items.map((m) => tsOf(m))) : 0
+
+        let stage = ""
+        try {
+          const rs = await api(`/api/lead-status?chatid=${encodeURIComponent(chatid)}`, { method: "GET" })
+          if (rs && rs.found && Number(rs.last_msg_ts || 0) >= Number(lastTs || 0)) {
+            stage = normalizeStage(rs.stage || "")
+          }
+        } catch {}
+
+        if (!stage) {
+          const r = await api("/api/media/stage/classify", {
+            method: "POST",
+            body: JSON.stringify({ chatid, messages: items }),
+          })
+          stage = normalizeStage(r?.stage || "")
+        }
+
         if (stage) {
           setStage(chatid, stage)
           rIC(refreshStageCounters)
@@ -929,8 +958,32 @@ async function openChat(ch) {
   if (status) status.textContent = "Online"
 }
 
+// Ordenação por timestamp real
+function tsOf(m) {
+  return Number(m?.messageTimestamp ?? m?.timestamp ?? m?.t ?? m?.message?.messageTimestamp ?? 0)
+}
+
 async function classifyInstant(chatid, items) {
   try {
+    const lastTs = items && items.length ? Math.max(...items.map((m) => tsOf(m))) : 0
+
+    // 1) tenta cache
+    let cached = null
+    try {
+      const rs = await api(`/api/lead-status?chatid=${encodeURIComponent(chatid)}`, { method: "GET" })
+      if (rs && rs.found && Number(rs.last_msg_ts || 0) >= Number(lastTs || 0)) {
+        cached = rs
+      }
+    } catch {}
+
+    if (cached) {
+      const rec = setStage(chatid, normalizeStage(cached.stage || "contatos"))
+      upsertStagePill(rec.stage)
+      refreshStageCounters()
+      return rec
+    }
+
+    // 2) classifica e backend atualiza cache
     const r = await api("/api/media/stage/classify", {
       method: "POST",
       body: JSON.stringify({ chatid, messages: items }),
@@ -944,11 +997,6 @@ async function classifyInstant(chatid, items) {
     }
   } catch {}
   return null
-}
-
-// Ordenação por timestamp real
-function tsOf(m) {
-  return Number(m?.messageTimestamp ?? m?.timestamp ?? m?.t ?? m?.message?.messageTimestamp ?? 0)
 }
 
 async function loadMessages(chatid) {
