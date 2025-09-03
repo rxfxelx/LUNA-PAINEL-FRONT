@@ -219,13 +219,18 @@ async function flushStageLookup() {
   if (!ids.length) return;
 
   try {
-    const res = await api("/api/lead-status/bulk", { method: "POST", body: JSON.stringify({ ids }) });
-    const map = res?.items || {};
-    Object.entries(map).forEach(([cid, rec]) => {
-      if (!cid || !rec) return;
-      const st = normalizeStage(rec.stage || "");
-      if (st) setStage(cid, st);
+    // >>> correção: payload e parsing do bulk <<<
+    const res = await api("/api/lead-status/bulk", {
+      method: "POST",
+      body: JSON.stringify({ chatids: ids }),
     });
+    const arr = Array.isArray(res?.items) ? res.items : [];
+    for (const rec of arr) {
+      const cid = rec?.chatid || "";
+      const st = normalizeStage(rec?.stage || "");
+      if (!cid || !st) continue;
+      setStage(cid, st);
+    }
     rIC(refreshStageCounters);
   } catch {}
 }
