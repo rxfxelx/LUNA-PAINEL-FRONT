@@ -212,81 +212,10 @@ async function fetchStageNow(chatid) {
       rIC(refreshStageCounters);
       const cur = state.current;
       if (cur && (cur.wa_chatid || cur.chatid) === chatid) upsertStagePill(st);
-    } else {
-      // fallback se veio vazio
-      await fetchStageAny(chatid);
     }
   } catch (e) {
     console.warn("fetchStageNow falhou:", e);
-    // fallbacks extras
-    await fetchStageAny(chatid);
   }
-}
-
-/* ====== NOVO: tentativa agressiva de descobrir estágio em QUALQUER rota ======
-   Tenta: 1) /api/lead-status/bulk  2) /api/lead-status (POST)  3) /api/lead-status?chatid=... (GET)
-   Sem remover nada do código original.
--------------------------------------------------------------------------------*/
-async function fetchStageAny(chatid) {
-  if (!chatid) return;
-  const headers = { "Content-Type": "application/json", ...authHeaders() };
-
-  // 1) single via BULK (já tentado por fetchStageNow normalmente)
-  try {
-    const r1 = await fetch(BACKEND() + "/api/lead-status/bulk", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ chatids: [chatid] }),
-    });
-    if (r1.ok) {
-      const j = await r1.json().catch(() => ({}));
-      const item = Array.isArray(j?.items) ? j.items.find(x => x?.chatid === chatid) : null;
-      const st = normalizeStage(item?.stage || "");
-      if (st) {
-        setStage(chatid, st);
-        rIC(refreshStageCounters);
-        if (state.current && (state.current.wa_chatid || state.current.chatid) === chatid) upsertStagePill(st);
-        return;
-      }
-    }
-  } catch (e) { console.warn("fallback bulk falhou:", e); }
-
-  // 2) POST /api/lead-status { chatid } (backends que expõem rota single)
-  try {
-    const r2 = await fetch(BACKEND() + "/api/lead-status", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ chatid }),
-    });
-    if (r2.ok) {
-      const j = await r2.json().catch(() => ({}));
-      const st = normalizeStage(j?.stage || j?.data?.stage || "");
-      if (st) {
-        setStage(chatid, st);
-        rIC(refreshStageCounters);
-        if (state.current && (state.current.wa_chatid || state.current.chatid) === chatid) upsertStagePill(st);
-        return;
-      }
-    }
-  } catch (e) { console.warn("fallback single POST falhou:", e); }
-
-  // 3) GET /api/lead-status?chatid=...
-  try {
-    const r3 = await fetch(BACKEND() + "/api/lead-status?chatid=" + encodeURIComponent(chatid), {
-      method: "GET",
-      headers: authHeaders(),
-    });
-    if (r3.ok) {
-      const j = await r3.json().catch(() => ({}));
-      const st = normalizeStage(j?.stage || j?.data?.stage || "");
-      if (st) {
-        setStage(chatid, st);
-        rIC(refreshStageCounters);
-        if (state.current && (state.current.wa_chatid || state.current.chatid) === chatid) upsertStagePill(st);
-        return;
-      }
-    }
-  } catch (e) { console.warn("fallback GET falhou:", e); }
 }
 
 function queueStageLookup(chatid) {
@@ -661,6 +590,21 @@ async function loadChats() {
       const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
       updateLastActivity(id, baseTs);
 
+      // >>> NOVO: aplica estágio vindo direto do stream (backend manda _stage)
+      const stageFromStream = normalizeStage(item?._stage || "");
+      if (id && stageFromStream) {
+        setStage(id, stageFromStream);
+        rIC(refreshStageCounters);
+        if (state.activeTab !== "geral") {
+          const tab = state.activeTab;
+          rIC(() => loadStageTab(tab));
+        }
+        if (state.current && (state.current.wa_chatid || state.current.chatid) === id) {
+          upsertStagePill(stageFromStream);
+        }
+      }
+      // <<< NOVO
+
       if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
         const curList = $("#chat-list");
         if (curList) appendChatSkeleton(curList, item);
@@ -668,11 +612,8 @@ async function loadChats() {
 
       if (!id) continue;
 
-      // Pré-carrega estágio do banco (buffer/flush)
+      // Pré-carrega estágio do banco (fallback caso stream não venha com _stage)
       queueStageLookup(id);
-
-      // HOTFIX: dispara consulta imediata de estágio no backend (gera logs mesmo que o buffer não rode)
-      setTimeout(() => { fetchStageAny(id); }, 0);
 
       pushBg(async () => {
         // nome/imagem
@@ -931,9 +872,11 @@ async function prefetchCards(items) {
  * 12) FORMATAÇÃO DE HORA
  * ======================================= */
 function formatTime(ts) {
-  if (!ts) return "";
+  // >>> corrigido para aceitar segundos e ms
+  const val = toMs(ts);
+  if (!val) return "";
   try {
-    const d = new Date(ts);
+    const d = new Date(val);
     const now = new Date();
     const diffMs = now - d;
     const diffH = diffMs / 36e5;
@@ -965,10 +908,15 @@ async function openChat(ch) {
   setMobileMode("chat");
   await loadMessages(chatid);
 
-  // garante pill com dado do banco (fallback individual)
-  if (!getStage(chatid)) await fetchStageNow(chatid);
-  const st = getStage(chatid);
-  if (st) upsertStagePill(st.stage);
+  // mostra pill imediatamente se já souber, senão busca fallback
+  const known = getStage(chatid);
+  if (known) {
+    upsertStagePill(known.stage);
+  } else {
+    await fetchStageNow(chatid);
+    const st = getStage(chatid);
+    if (st) upsertStagePill(st.stage);
+  }
 
   if (status) status.textContent = "Online";
 }
