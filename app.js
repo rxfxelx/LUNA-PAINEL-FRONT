@@ -214,6 +214,7 @@ async function flushStageLookup() {
   if (!ids.length) return;
 
   try {
+    console.debug("lead-status/bulk →", ids.length, "ids");
     const res = await api("/api/lead-status/bulk", {
       method: "POST",
       body: JSON.stringify({ chatids: ids }),
@@ -225,15 +226,13 @@ async function flushStageLookup() {
       if (!cid || !st) continue;
       setStage(cid, st);
     }
-    // Atualiza contadores e, se estiver numa aba filtrada, recarrega a lista
     rIC(refreshStageCounters);
     if (state.activeTab !== "geral") {
-      const tab = state.activeTab;          // preserva seleção
-      // re-render “não bloqueante”
+      const tab = state.activeTab;
       rIC(() => loadStageTab(tab));
     }
-  } catch {
-    // silencioso
+  } catch (e) {
+    console.error("lead-status/bulk falhou:", e);
   }
 }
 
@@ -491,7 +490,6 @@ function refreshStageCounters() {
   const el = document.querySelector(".stage-counters");
   if (el) el.textContent = `contatos: ${counts.contatos} • lead: ${counts.lead} • lead quente: ${counts.lead_quente}`;
 
-  // mobile badgets (se existirem)
   const mobileContatos = document.getElementById("mobile-counter-contatos");
   const mobileLead = document.getElementById("mobile-counter-lead");
   const mobileLeadQuente = document.getElementById("mobile-counter-lead_quente");
@@ -499,7 +497,6 @@ function refreshStageCounters() {
   if (mobileLead) mobileLead.textContent = counts.lead;
   if (mobileLeadQuente) mobileLeadQuente.textContent = counts.lead_quente;
 
-  // barra de progresso (cria uma vez)
   if (el && !document.getElementById("verification-progress")) {
     const progressEl = document.createElement("div");
     progressEl.id = "verification-progress";
@@ -574,6 +571,10 @@ async function loadChats() {
 
       // Pré-carrega estágio do banco em lote
       queueStageLookup(id);
+      // garante flush periódico durante o stream (evita acumular tudo pro final)
+      if (_stageBuffer.size >= 80) {
+        try { await flushStageLookup(); } catch (e) { console.warn("bulk stages (mid):", e); }
+      }
 
       pushBg(async () => {
         // nome/imagem
@@ -624,7 +625,7 @@ async function loadChats() {
     }
 
     // última descarga do buffer de estágios
-    await flushStageLookup();
+    try { await flushStageLookup(); } catch (e) { console.warn("bulk stages (final):", e); }
 
     // re-render filtrado se o usuário trocou de aba
     if (state.activeTab !== "geral") await loadStageTab(state.activeTab);
