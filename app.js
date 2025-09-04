@@ -17,20 +17,14 @@ async function runLimited(tasks, limit = 8) {
   const workers = new Array(Math.min(limit, tasks.length)).fill(0).map(async () => {
     while (i < tasks.length) {
       const cur = i++;
-      try {
-        results[cur] = await tasks[cur]();
-      } catch {
-        results[cur] = undefined;
-      }
+      try { results[cur] = await tasks[cur](); } catch { results[cur] = undefined; }
     }
   });
   await Promise.all(workers);
   return results;
 }
 
-function isMobile() {
-  return window.matchMedia("(max-width:1023px)").matches;
-}
+function isMobile() { return window.matchMedia("(max-width:1023px)").matches; }
 function setMobileMode(mode) {
   document.body.classList.remove("is-mobile-list", "is-mobile-chat");
   if (!isMobile()) return;
@@ -38,11 +32,9 @@ function setMobileMode(mode) {
   if (mode === "chat") document.body.classList.add("is-mobile-chat");
 }
 
-function jwt() {
-  return localStorage.getItem("luna_jwt") || "";
-}
+function jwt() { return localStorage.getItem("luna_jwt") || ""; }
 
-// >>> AJUSTE: decodifica payload do JWT para extrair instance id <<<
+// --- decodifica payload do JWT para extrair instance id ---
 function jwtPayload() {
   const t = jwt();
   if (!t || t.indexOf(".") < 0) return {};
@@ -50,9 +42,7 @@ function jwtPayload() {
     const b64 = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
     const json = atob(b64);
     return JSON.parse(json);
-  } catch {
-    return {};
-  }
+  } catch { return {}; }
 }
 
 function authHeaders() {
@@ -76,10 +66,9 @@ async function api(path, opts = {}) {
 }
 
 function escapeHtml(s) {
-  return String(s || "").replace(
-    /[&<>"']/g,
-    (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[m],
-  );
+  return String(s || "").replace(/[&<>"']/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[m]);
 }
 function truncatePreview(s, max = 90) {
   const t = String(s || "").replace(/\s+/g, " ").trim();
@@ -101,15 +90,11 @@ async function* readNDJSONStream(resp) {
       const line = buf.slice(0, idx).trim();
       buf = buf.slice(idx + 1);
       if (!line) continue;
-      try {
-        yield JSON.parse(line);
-      } catch {}
+      try { yield JSON.parse(line); } catch {}
     }
   }
   if (buf.trim()) {
-    try {
-      yield JSON.parse(buf.trim());
-    } catch {}
+    try { yield JSON.parse(buf.trim()); } catch {}
   }
 }
 
@@ -124,8 +109,7 @@ const state = {
   nameCache: new Map(),
   unread: new Map(),
   loadingChats: false,
-  stages: new Map(),
-  stagesLoaded: true,
+  stages: new Map(),          // chatid -> {stage, at}
   splash: { shown: false, timer: null, forceTimer: null },
   activeTab: "geral",
   listReqId: 0,
@@ -133,7 +117,6 @@ const state = {
   orderDirty: false,
 };
 
-// Utilitários de timestamp/ordenação
 function toMs(x) {
   const n = Number(x || 0);
   if (String(x).length === 10) return n * 1000;
@@ -177,10 +160,7 @@ function reorderChatList() {
  * ======================================= */
 const bgQueue = [];
 let bgRunning = false;
-function pushBg(task) {
-  bgQueue.push(task);
-  if (!bgRunning) runBg();
-}
+function pushBg(task) { bgQueue.push(task); if (!bgRunning) runBg(); }
 async function runBg() {
   bgRunning = true;
   while (bgQueue.length) {
@@ -196,7 +176,6 @@ async function runBg() {
  * ======================================= */
 const STAGES = ["contatos", "lead", "lead_quente"];
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" };
-const STAGE_RANK = { contatos: 0, lead: 1, lead_quente: 2 };
 
 function normalizeStage(s) {
   const k = String(s || "").toLowerCase().trim();
@@ -205,9 +184,7 @@ function normalizeStage(s) {
   if (k === "lead") return "lead";
   return "contatos";
 }
-function getStage(chatid) {
-  return state.stages.get(chatid) || null;
-}
+function getStage(chatid) { return state.stages.get(chatid) || null; }
 function setStage(chatid, nextStage) {
   const stage = normalizeStage(nextStage);
   const rec = { stage, at: Date.now() };
@@ -237,7 +214,6 @@ async function flushStageLookup() {
   if (!ids.length) return;
 
   try {
-    // >>> correção: payload e parsing do bulk <<<
     const res = await api("/api/lead-status/bulk", {
       method: "POST",
       body: JSON.stringify({ chatids: ids }),
@@ -249,8 +225,16 @@ async function flushStageLookup() {
       if (!cid || !st) continue;
       setStage(cid, st);
     }
+    // Atualiza contadores e, se estiver numa aba filtrada, recarrega a lista
     rIC(refreshStageCounters);
-  } catch {}
+    if (state.activeTab !== "geral") {
+      const tab = state.activeTab;          // preserva seleção
+      // re-render “não bloqueante”
+      rIC(() => loadStageTab(tab));
+    }
+  } catch {
+    // silencioso
+  }
 }
 
 /* =========================================
@@ -409,10 +393,7 @@ function switchToApp() {
   createSplash();
   loadChats().finally(() => {});
 }
-function ensureRoute() {
-  if (jwt()) switchToApp();
-  else { show("#login-view"); hide("#app-view"); }
-}
+function ensureRoute() { if (jwt()) switchToApp(); else { show("#login-view"); hide("#app-view"); } }
 
 /* =========================================
  * 7) AVATAR / NOME
@@ -421,9 +402,7 @@ async function fetchNameImage(chatid, preview = true) {
   try {
     const resp = await api("/api/name-image", { method: "POST", body: JSON.stringify({ number: chatid, preview }) });
     return resp;
-  } catch {
-    return { name: null, image: null, imagePreview: null };
-  }
+  } catch { return { name: null, image: null, imagePreview: null }; }
 }
 function initialsOf(str) {
   const s = (str || "").trim();
@@ -465,10 +444,7 @@ function ensureStageTabs() {
   const btnLead = addBtn("lead", "Lead", () => loadStageTab("lead"));
   const btnLQ = addBtn("lead_quente", "Lead Quente", () => loadStageTab("lead_quente"));
 
-  bar.appendChild(btnGeral);
-  bar.appendChild(btnCont);
-  bar.appendChild(btnLead);
-  bar.appendChild(btnLQ);
+  bar.appendChild(btnGeral); bar.appendChild(btnCont); bar.appendChild(btnLead); bar.appendChild(btnLQ);
 
   const counters = document.createElement("div");
   counters.className = "stage-counters";
@@ -515,6 +491,15 @@ function refreshStageCounters() {
   const el = document.querySelector(".stage-counters");
   if (el) el.textContent = `contatos: ${counts.contatos} • lead: ${counts.lead} • lead quente: ${counts.lead_quente}`;
 
+  // mobile badgets (se existirem)
+  const mobileContatos = document.getElementById("mobile-counter-contatos");
+  const mobileLead = document.getElementById("mobile-counter-lead");
+  const mobileLeadQuente = document.getElementById("mobile-counter-lead_quente");
+  if (mobileContatos) mobileContatos.textContent = counts.contatos;
+  if (mobileLead) mobileLead.textContent = counts.lead;
+  if (mobileLeadQuente) mobileLeadQuente.textContent = counts.lead_quente;
+
+  // barra de progresso (cria uma vez)
   if (el && !document.getElementById("verification-progress")) {
     const progressEl = document.createElement("div");
     progressEl.id = "verification-progress";
@@ -529,13 +514,6 @@ function refreshStageCounters() {
       </div>`;
     el.parentNode.appendChild(progressEl);
   }
-
-  const mobileContatos = document.getElementById("mobile-counter-contatos");
-  const mobileLead = document.getElementById("mobile-counter-lead");
-  const mobileLeadQuente = document.getElementById("mobile-counter-lead_quente");
-  if (mobileContatos) mobileContatos.textContent = counts.contatos;
-  if (mobileLead) mobileLead.textContent = counts.lead;
-  if (mobileLeadQuente) mobileLeadQuente.textContent = counts.lead_quente;
 }
 
 async function loadStageTab(stageKey) {
@@ -791,11 +769,7 @@ async function prefetchCards(items) {
       queueStageLookup(chatid);
 
       if (!state.nameCache.has(chatid)) {
-        try {
-          const resp = await fetchNameImage(chatid);
-          state.nameCache.set(chatid, resp);
-          hydrateChatCard(ch);
-        } catch {}
+        try { const resp = await fetchNameImage(chatid); state.nameCache.set(chatid, resp); hydrateChatCard(ch); } catch {}
       }
       if (!state.lastMsg.has(chatid) && !ch.wa_lastMessageText) {
         try {
@@ -896,20 +870,16 @@ async function openChat(ch) {
 }
 
 // Ordenação por timestamp real
-function tsOf(m) {
-  return Number(m?.messageTimestamp ?? m?.timestamp ?? m?.t ?? m?.message?.messageTimestamp ?? 0);
-}
+function tsOf(m) { return Number(m?.messageTimestamp ?? m?.timestamp ?? m?.t ?? m?.message?.messageTimestamp ?? 0); }
 
 async function classifyInstant(chatid, items) {
   try {
-    // usa cache (pré-carregado em bulk). Se já temos, só exibe.
     const cached = getStage(chatid);
     if (cached?.stage) {
       upsertStagePill(cached.stage);
       refreshStageCounters();
       return cached;
     }
-    // caso extremo: não veio no bulk, classifica e backend vai persistir
     const r = await api("/api/media/stage/classify", {
       method: "POST",
       body: JSON.stringify({ chatid, messages: items || [] }),
@@ -980,13 +950,11 @@ async function progressiveRenderMessages(msgs) {
   for (let i = 0; i < msgs.length; i += BATCH) {
     const slice = msgs.slice(i, i + BATCH);
     slice.forEach((m) => {
-      try {
-        appendMessageBubble(pane, m);
-      } catch {
+      try { appendMessageBubble(pane, m); }
+      catch {
         const el = document.createElement("div");
         el.className = "msg you";
-        el.innerHTML =
-          "(mensagem não suportada)<small style='display:block;opacity:.7;margin-top:6px'>Erro ao renderizar</small>";
+        el.innerHTML = "(mensagem não suportada)<small style='display:block;opacity:.7;margin-top:6px'>Erro ao renderizar</small>";
         pane.appendChild(el);
       }
     });
@@ -1002,48 +970,29 @@ function pickMediaInfo(m) {
   const mm = m.message || m;
 
   const mime =
-    m.mimetype ||
-    m.mime ||
-    mm?.imageMessage?.mimetype ||
-    mm?.videoMessage?.mimetype ||
-    mm?.documentMessage?.mimetype ||
-    mm?.audioMessage?.mimetype ||
-    (mm?.stickerMessage ? "image/webp" : "") ||
-    "";
+    m.mimetype || m.mime ||
+    mm?.imageMessage?.mimetype || mm?.videoMessage?.mimetype ||
+    mm?.documentMessage?.mimetype || mm?.audioMessage?.mimetype ||
+    (mm?.stickerMessage ? "image/webp" : "") || "";
 
   const url =
-    m.mediaUrl ||
-    m.url ||
-    m.fileUrl ||
-    m.downloadUrl ||
-    m.image ||
-    m.video ||
-    mm?.imageMessage?.url ||
-    mm?.videoMessage?.url ||
-    mm?.documentMessage?.url ||
-    mm?.stickerMessage?.url ||
-    mm?.audioMessage?.url ||
-    "";
+    m.mediaUrl || m.url || m.fileUrl || m.downloadUrl ||
+    m.image || m.video ||
+    mm?.imageMessage?.url || mm?.videoMessage?.url ||
+    mm?.documentMessage?.url || mm?.stickerMessage?.url ||
+    mm?.audioMessage?.url || "";
 
   const dataUrl =
     m.dataUrl ||
-    mm?.imageMessage?.dataUrl ||
-    mm?.videoMessage?.dataUrl ||
-    mm?.documentMessage?.dataUrl ||
-    mm?.stickerMessage?.dataUrl ||
-    mm?.audioMessage?.dataUrl ||
-    "";
+    mm?.imageMessage?.dataUrl || mm?.videoMessage?.dataUrl ||
+    mm?.documentMessage?.dataUrl || mm?.stickerMessage?.dataUrl ||
+    mm?.audioMessage?.dataUrl || "";
 
   const caption =
     m.caption ||
-    mm?.imageMessage?.caption ||
-    mm?.videoMessage?.caption ||
-    mm?.documentMessage?.caption ||
-    mm?.documentMessage?.fileName ||
-    m.text ||
-    mm?.conversation ||
-    m.body ||
-    "";
+    mm?.imageMessage?.caption || mm?.videoMessage?.caption ||
+    mm?.documentMessage?.caption || mm?.documentMessage?.fileName ||
+    m.text || mm?.conversation || m.body || "";
 
   return { mime: String(mime || ""), url: String(url || ""), dataUrl: String(dataUrl || ""), caption: String(caption || "") };
 }
@@ -1064,19 +1013,14 @@ function renderReplyPreview(container, m) {
     m?.message?.stickerMessage?.contextInfo ||
     m?.message?.documentMessage?.contextInfo ||
     m?.message?.audioMessage?.contextInfo ||
-    m?.contextInfo ||
-    {};
+    m?.contextInfo || {};
 
   const qm = ctx.quotedMessage || m?.quotedMsg || m?.quoted_message || null;
   if (!qm) return;
   const qt =
-    qm?.extendedTextMessage?.text ||
-    qm?.conversation ||
-    qm?.imageMessage?.caption ||
-    qm?.videoMessage?.caption ||
-    qm?.documentMessage?.caption ||
-    qm?.text ||
-    "";
+    qm?.extendedTextMessage?.text || qm?.conversation ||
+    qm?.imageMessage?.caption || qm?.videoMessage?.caption ||
+    qm?.documentMessage?.caption || qm?.text || "";
   const box = document.createElement("div");
   box.className = "bubble-quote";
   box.style.borderLeft = "3px solid var(--muted, #ccc)";
@@ -1150,28 +1094,14 @@ function renderInteractive(container, m) {
     const title = btnsMsg.title || btnsMsg.hydratedTitle;
     const text = btnsMsg.text || btnsMsg.hydratedContentText;
     if (title) {
-      const h = document.createElement("div");
-      h.style.fontWeight = "600";
-      h.style.marginBottom = "6px";
-      h.textContent = title;
-      card.appendChild(h);
+      const h = document.createElement("div"); h.style.fontWeight = "600"; h.style.marginBottom = "6px"; h.textContent = title; card.appendChild(h);
     }
     if (text) {
-      const d = document.createElement("div");
-      d.style.fontSize = "12px";
-      d.style.opacity = ".85";
-      d.style.marginBottom = "6px";
-      d.textContent = text;
-      card.appendChild(d);
+      const d = document.createElement("div"); d.style.fontSize = "12px"; d.style.opacity = ".85"; d.style.marginBottom = "6px"; d.textContent = text; card.appendChild(d);
     }
     const buttons = btnsMsg.buttons || btnsMsg.hydratedButtons || [];
     buttons.forEach((b) => {
-      const lbl =
-        b?.quickReplyButton?.displayText ||
-        b?.urlButton?.displayText ||
-        b?.callButton?.displayText ||
-        b?.displayText ||
-        "Opção";
+      const lbl = b?.quickReplyButton?.displayText || b?.urlButton?.displayText || b?.callButton?.displayText || b?.displayText || "Opção";
       const btn = document.createElement("div");
       btn.textContent = lbl;
       btn.style.display = "inline-block";
@@ -1221,16 +1151,11 @@ function renderInteractive(container, m) {
  * ======================================= */
 function isFromMe(m) {
   return !!(
-    m?.fromMe ||
-    m?.fromme ||
-    m?.from_me ||
-    m?.key?.fromMe ||
-    m?.message?.key?.fromMe ||
+    m?.fromMe || m?.fromme || m?.from_me ||
+    m?.key?.fromMe || m?.message?.key?.fromMe ||
     m?.sender?.fromMe ||
     (typeof m?.participant === "string" && /(:me|@s\.whatsapp\.net)$/i.test(m.participant)) ||
-    (typeof m?.author === "string" &&
-      (/(:me)$/i.test(m.author) || /@s\.whatsapp\.net/i.test(m.author)) &&
-      m.fromMe === true) ||
+    (typeof m?.author === "string" && ((/(:me)$/i.test(m.author) || /@s\.whatsapp\.net/i.test(m.author)) && m.fromMe === true)) ||
     (typeof m?.id === "string" && /^true_/.test(m.id)) ||
     m?.user === "me"
   );
@@ -1250,13 +1175,8 @@ function appendMessageBubble(pane, m) {
 
   const { mime, url, dataUrl, caption } = pickMediaInfo(m);
   const plainText =
-    m.text ||
-    m.message?.text ||
-    m?.message?.extendedTextMessage?.text ||
-    m?.message?.conversation ||
-    m.caption ||
-    m.body ||
-    "";
+    m.text || m.message?.text || m?.message?.extendedTextMessage?.text ||
+    m?.message?.conversation || m.caption || m.body || "";
   const who = m.senderName || m.pushName || "";
   const ts = m.messageTimestamp || m.timestamp || m.t || "";
 
@@ -1270,9 +1190,7 @@ function appendMessageBubble(pane, m) {
     el.appendChild(img);
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
     el.appendChild(meta);
     pane.appendChild(el);
     const after = () => { pane.scrollTop = pane.scrollHeight; };
@@ -1288,17 +1206,11 @@ function appendMessageBubble(pane, m) {
   // IMAGEM
   if ((mime && mime.startsWith("image/")) || (!mime && url && /\.(png|jpe?g|gif|webp)(\?|$)/i.test(url))) {
     const figure = document.createElement("figure");
-    figure.style.maxWidth = "280px";
-    figure.style.margin = "0";
+    figure.style.maxWidth = "280px"; figure.style.margin = "0";
     const img = document.createElement("img");
-    img.alt = "imagem";
-    img.style.maxWidth = "100%";
-    img.style.borderRadius = "8px";
-    img.style.display = "block";
+    img.alt = "imagem"; img.style.maxWidth = "100%"; img.style.borderRadius = "8px"; img.style.display = "block";
     const cap = document.createElement("figcaption");
-    cap.style.fontSize = "12px";
-    cap.style.opacity = ".8";
-    cap.style.marginTop = "6px";
+    cap.style.fontSize = "12px"; cap.style.opacity = ".8"; cap.style.marginTop = "6px";
     cap.textContent = caption || plainText || "";
     if (top.childNodes.length) el.appendChild(top);
     figure.appendChild(img);
@@ -1306,9 +1218,7 @@ function appendMessageBubble(pane, m) {
     el.appendChild(figure);
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
     el.appendChild(meta);
     pane.appendChild(el);
     const after = () => { pane.scrollTop = pane.scrollHeight; };
@@ -1324,23 +1234,16 @@ function appendMessageBubble(pane, m) {
   // VÍDEO
   if ((mime && mime.startsWith("video/")) || (!mime && url && /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url))) {
     const video = document.createElement("video");
-    video.controls = true;
-    video.style.maxWidth = "320px";
-    video.style.borderRadius = "8px";
-    video.preload = "metadata";
+    video.controls = true; video.style.maxWidth = "320px"; video.style.borderRadius = "8px"; video.preload = "metadata";
     if (top.childNodes.length) el.appendChild(top);
     el.appendChild(video);
     const cap = document.createElement("div");
-    cap.style.fontSize = "12px";
-    cap.style.opacity = ".8";
-    cap.style.marginTop = "6px";
+    cap.style.fontSize = "12px"; cap.style.opacity = ".8"; cap.style.marginTop = "6px";
     cap.textContent = caption || "";
     if (cap.textContent) el.appendChild(cap);
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
     el.appendChild(meta);
     pane.appendChild(el);
     const after = () => { pane.scrollTop = pane.scrollHeight; };
@@ -1348,15 +1251,9 @@ function appendMessageBubble(pane, m) {
     else if (url) {
       fetchMediaBlobViaProxy(url)
         .then((b) => { video.onloadeddata = after; video.src = URL.createObjectURL(b); })
-        .catch(() => {
-          const err = document.createElement("div");
-          err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Falha ao carregar vídeo)";
-          el.insertBefore(err, meta); after();
-        });
+        .catch(() => { const err = document.createElement("div"); err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Falha ao carregar vídeo)"; el.insertBefore(err, meta); after(); });
     } else {
-      const err = document.createElement("div");
-      err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Vídeo não disponível)";
-      el.insertBefore(err, meta); after();
+      const err = document.createElement("div"); err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Vídeo não disponível)"; el.insertBefore(err, meta); after();
     }
     return;
   }
@@ -1364,15 +1261,12 @@ function appendMessageBubble(pane, m) {
   // ÁUDIO
   if ((mime && mime.startsWith("audio/")) || (!mime && url && /\.(mp3|ogg|m4a|wav)(\?|$)/i.test(url))) {
     const audio = document.createElement("audio");
-    audio.controls = true;
-    audio.preload = "metadata";
+    audio.controls = true; audio.preload = "metadata";
     if (top.childNodes.length) el.appendChild(top);
     el.appendChild(audio);
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
     el.appendChild(meta);
     pane.appendChild(el);
     const after = () => { pane.scrollTop = pane.scrollHeight; };
@@ -1380,15 +1274,9 @@ function appendMessageBubble(pane, m) {
     else if (url) {
       fetchMediaBlobViaProxy(url)
         .then((b) => { audio.onloadeddata = after; audio.src = URL.createObjectURL(b); })
-        .catch(() => {
-          const err = document.createElement("div");
-          err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Falha ao carregar áudio)";
-          el.insertBefore(err, meta); after();
-        });
+        .catch(() => { const err = document.createElement("div"); err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Falha ao carregar áudio)"; el.insertBefore(err, meta); after(); });
     } else {
-      const err = document.createElement("div");
-      err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Áudio não disponível)";
-      el.insertBefore(err, meta); after();
+      const err = document.createElement("div"); err.style.fontSize = "12px"; err.style.opacity = ".8"; err.textContent = "(Áudio não disponível)"; el.insertBefore(err, meta); after();
     }
     return;
   }
@@ -1398,22 +1286,15 @@ function appendMessageBubble(pane, m) {
     if (top.childNodes.length) el.appendChild(top);
     const link = document.createElement("a");
     link.textContent = caption || plainText || "Documento";
-    link.target = "_blank";
-    link.rel = "noopener noreferrer";
-    link.href = "javascript:void(0)";
+    link.target = "_blank"; link.rel = "noopener noreferrer"; link.href = "javascript:void(0)";
     link.onclick = async () => {
-      try {
-        const b = await fetchMediaBlobViaProxy(url);
-        const blobUrl = URL.createObjectURL(b);
-        window.open(blobUrl, "_blank");
-      } catch { alert("Falha ao baixar documento"); }
+      try { const b = await fetchMediaBlobViaProxy(url); const blobUrl = URL.createObjectURL(b); window.open(blobUrl, "_blank"); }
+      catch { alert("Falha ao baixar documento"); }
     };
     el.appendChild(link);
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
     el.appendChild(meta);
     pane.appendChild(el);
     pane.scrollTop = pane.scrollHeight;
@@ -1425,9 +1306,7 @@ function appendMessageBubble(pane, m) {
     if (top.childNodes.length) el.appendChild(top);
     const meta = document.createElement("small");
     meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`;
-    meta.style.display = "block";
-    meta.style.marginTop = "6px";
-    meta.style.opacity = ".75";
+    meta.style.display = "block"; meta.style.marginTop = "6px"; meta.style.opacity = ".75";
     el.appendChild(meta);
     pane.appendChild(el);
     pane.scrollTop = pane.scrollHeight;
