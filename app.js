@@ -34,13 +34,13 @@ function setMobileMode(mode) {
 
 function jwt() { return localStorage.getItem("luna_jwt") || ""; }
 
-// --- decodifica payload do JWT com PADDING (corrigido) ---
+// --- decodifica payload do JWT com padding (corrigido) ---
 function jwtPayload() {
   const t = jwt();
   if (!t || t.indexOf(".") < 0) return {};
   try {
     let b64 = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-    b64 += "=".repeat((4 - (b64.length % 4)) % 4); // padding base64url
+    b64 += "=".repeat((4 - (b64.length % 4)) % 4);
     const json = atob(b64);
     return JSON.parse(json);
   } catch { return {}; }
@@ -173,7 +173,7 @@ async function runBg() {
 }
 
 /* =========================================
- * 4) PIPE DE STAGES (classificação) + BULK CACHE
+ * 4) PIPE DE STAGES + BULK + RESERVA
  * ======================================= */
 const STAGES = ["contatos", "lead", "lead_quente"];
 const STAGE_LABEL = { contatos: "Contatos", lead: "Lead", lead_quente: "Lead Quente" };
@@ -193,17 +193,38 @@ function setStage(chatid, nextStage) {
   return rec;
 }
 
-// ------- Bulk seed de estágios do banco (menos requisições) -------
+// ------- Bulk seed de estágios do banco -------
 const _stageBuffer = new Set();
 let _stageTimer = null;
+
+// reserva: busca imediata (bulk com 1 id) se buffer falhar
+async function fetchStageNow(chatid) {
+  if (!chatid) return;
+  try {
+    const res = await api("/api/lead-status/bulk", {
+      method: "POST",
+      body: JSON.stringify({ chatids: [chatid] }),
+    });
+    const item = Array.isArray(res?.items) ? res.items.find(x => x?.chatid === chatid) : null;
+    const st = normalizeStage(item?.stage || "");
+    if (st) {
+      setStage(chatid, st);
+      rIC(refreshStageCounters);
+      const cur = state.current;
+      if (cur && (cur.wa_chatid || cur.chatid) === chatid) upsertStagePill(st);
+    }
+  } catch (e) {
+    console.warn("fetchStageNow falhou:", e);
+  }
+}
 
 function queueStageLookup(chatid) {
   if (!chatid || state.stages.has(chatid)) return;
   _stageBuffer.add(chatid);
-  // >>> FLUSH agressivo para garantir chamadas reais
-  if (_stageBuffer.size >= 10) {
+  if (_stageBuffer.size >= 20) {
     flushStageLookup();
-  } else if (!_stageTimer) {
+  } else {
+    if (_stageTimer) clearTimeout(_stageTimer);
     _stageTimer = setTimeout(flushStageLookup, 200);
   }
 }
@@ -215,22 +236,31 @@ async function flushStageLookup() {
   if (!ids.length) return;
 
   try {
-    console.debug("[lead-status] bulk →", ids.length);
     const res = await api("/api/lead-status/bulk", {
       method: "POST",
       body: JSON.stringify({ chatids: ids }),
     });
     const arr = Array.isArray(res?.items) ? res.items : [];
+    const seen = new Set();
     for (const rec of arr) {
       const cid = rec?.chatid || "";
-      const st  = normalizeStage(rec?.stage || "");
+      const st = normalizeStage(rec?.stage || "");
       if (!cid || !st) continue;
       setStage(cid, st);
+      seen.add(cid);
     }
+    // se algum id do lote não retornou, dispara reserva individual
+    ids.filter(id => !seen.has(id)).forEach(id => fetchStageNow(id));
+
     rIC(refreshStageCounters);
-    if (state.activeTab !== "geral") rIC(() => loadStageTab(state.activeTab));
+    if (state.activeTab !== "geral") {
+      const tab = state.activeTab;
+      rIC(() => loadStageTab(tab));
+    }
   } catch (e) {
-    console.error("[lead-status] bulk falhou:", e);
+    console.error("lead-status/bulk falhou:", e);
+    // fallback: tenta individual pra todos
+    ids.forEach(id => fetchStageNow(id));
   }
 }
 
@@ -567,12 +597,8 @@ async function loadChats() {
 
       if (!id) continue;
 
-      // Pré-carrega estágio em lote
+      // Pré-carrega estágio do banco
       queueStageLookup(id);
-      // força flush durante o stream (não deixa acumular)
-      if (_stageBuffer.size >= 10) {
-        try { await flushStageLookup(); } catch (e) { console.warn("[lead-status] mid flush:", e); }
-      }
 
       pushBg(async () => {
         // nome/imagem
@@ -622,10 +648,9 @@ async function loadChats() {
       });
     }
 
-    // flush final
-    try { await flushStageLookup(); } catch (e) { console.warn("[lead-status] final flush:", e); }
+    // flush final + fallback em falta
+    await flushStageLookup();
 
-    // re-render filtrado se necessário
     if (state.activeTab !== "geral") await loadStageTab(state.activeTab);
 
     try {
@@ -673,7 +698,8 @@ async function progressiveRenderChats(chats, reqId = null) {
 function appendChatSkeleton(list, ch) {
   const el = document.createElement("div");
   el.className = "chat-item";
-  el.dataset.chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
+  const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
+  el.dataset.chatid = chatid;
   el.onclick = () => openChat(ch);
 
   const avatar = document.createElement("div");
@@ -718,6 +744,10 @@ function appendChatSkeleton(list, ch) {
 
   const baseTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ch.updatedAt || 0;
   updateLastActivity(el.dataset.chatid, baseTs);
+
+  // dispara bulk e, se nada vier, reserva individual
+  queueStageLookup(chatid);
+  setTimeout(() => { if (!getStage(chatid)) fetchStageNow(chatid); }, 800);
 
   attachCRMControlsToCard(el, ch);
 }
@@ -764,7 +794,6 @@ async function prefetchCards(items) {
     return async () => {
       if (!chatid) return;
 
-      // reforça o bulk
       queueStageLookup(chatid);
 
       if (!state.nameCache.has(chatid)) {
@@ -862,6 +891,8 @@ async function openChat(ch) {
   setMobileMode("chat");
   await loadMessages(chatid);
 
+  // garante pill com dado do banco (fallback individual)
+  if (!getStage(chatid)) await fetchStageNow(chatid);
   const st = getStage(chatid);
   if (st) upsertStagePill(st.stage);
 
@@ -904,7 +935,6 @@ async function loadMessages(chatid) {
     });
     let items = Array.isArray(data?.items) ? data.items : [];
 
-    // ordem cronológica ascendente
     items = items.slice().sort((a, b) => tsOf(a) - tsOf(b));
 
     await classifyInstant(chatid, items);
