@@ -193,6 +193,46 @@ function setStage(chatid, nextStage) {
   return rec;
 }
 
+// ------- TENTATIVAS DE ENDPOINT (compatibilidade) -------
+async function callLeadStatusEndpointsBulk(ids) {
+  // tenta vários formatos de rota/método/case
+  const attempts = [
+    { path: "/api/lead-status/bulk", method: "POST", body: { chatids: ids } },
+    { path: "/api/lead_status/bulk", method: "POST", body: { chatids: ids } },
+    { path: "/api/lead-status/bulk", method: "POST", body: { ids } },
+    { path: "/api/lead_status/bulk", method: "POST", body: { ids } },
+  ];
+  for (const a of attempts) {
+    try {
+      const res = await api(a.path, { method: a.method, body: JSON.stringify(a.body) });
+      if (res && (Array.isArray(res.items) || Array.isArray(res.data))) {
+        const arr = Array.isArray(res.items) ? res.items : res.data;
+        return arr.map((it) => ({
+          chatid: it.chatid || it.id || it.number || it.chatId || "",
+          stage: it.stage || it.status || it._stage || "",
+        }));
+      }
+    } catch {}
+  }
+  return null;
+}
+async function callLeadStatusSingle(chatid) {
+  const attempts = [
+    { path: "/api/lead-status", method: "POST", body: { chatid } },
+    { path: "/api/lead_status", method: "POST", body: { chatid } },
+    { path: `/api/lead-status?chatid=${encodeURIComponent(chatid)}`, method: "GET" },
+    { path: `/api/lead_status?chatid=${encodeURIComponent(chatid)}`, method: "GET" },
+  ];
+  for (const a of attempts) {
+    try {
+      const res = await api(a.path, a.method === "GET" ? {} : { method: "POST", body: JSON.stringify(a.body) });
+      const st = normalizeStage(res?.stage || res?.status || res?._stage || "");
+      if (st) return { chatid, stage: st };
+    } catch {}
+  }
+  return null;
+}
+
 // ------- Bulk seed de estágios do banco -------
 const _stageBuffer = new Set();
 let _stageTimer = null;
@@ -201,12 +241,10 @@ let _stageTimer = null;
 async function fetchStageNow(chatid) {
   if (!chatid) return;
   try {
-    const res = await api("/api/lead-status/bulk", {
-      method: "POST",
-      body: JSON.stringify({ chatids: [chatid] }),
-    });
-    const item = Array.isArray(res?.items) ? res.items.find(x => x?.chatid === chatid) : null;
-    const st = normalizeStage(item?.stage || "");
+    const bulkOne = await callLeadStatusEndpointsBulk([chatid]);
+    let rec = bulkOne?.find((x) => (x.chatid || "") === chatid) || null;
+    if (!rec) rec = await callLeadStatusSingle(chatid);
+    const st = normalizeStage(rec?.stage || "");
     if (st) {
       setStage(chatid, st);
       rIC(refreshStageCounters);
@@ -221,11 +259,11 @@ async function fetchStageNow(chatid) {
 function queueStageLookup(chatid) {
   if (!chatid || state.stages.has(chatid)) return;
   _stageBuffer.add(chatid);
-  if (_stageBuffer.size >= 20) {
+  if (_stageBuffer.size >= 12) {
     flushStageLookup();
   } else {
     if (_stageTimer) clearTimeout(_stageTimer);
-    _stageTimer = setTimeout(flushStageLookup, 200);
+    _stageTimer = setTimeout(flushStageLookup, 250);
   }
 }
 
@@ -236,21 +274,22 @@ async function flushStageLookup() {
   if (!ids.length) return;
 
   try {
-    const res = await api("/api/lead-status/bulk", {
-      method: "POST",
-      body: JSON.stringify({ chatids: ids }),
-    });
-    const arr = Array.isArray(res?.items) ? res.items : [];
+    const arr = await callLeadStatusEndpointsBulk(ids);
     const seen = new Set();
-    for (const rec of arr) {
-      const cid = rec?.chatid || "";
-      const st = normalizeStage(rec?.stage || "");
-      if (!cid || !st) continue;
-      setStage(cid, st);
-      seen.add(cid);
+    if (Array.isArray(arr)) {
+      for (const rec of arr) {
+        const cid = rec?.chatid || "";
+        const st = normalizeStage(rec?.stage || "");
+        if (!cid || !st) continue;
+        setStage(cid, st);
+        seen.add(cid);
+      }
     }
-    // se algum id do lote não retornou, dispara reserva individual
-    ids.filter(id => !seen.has(id)).forEach(id => fetchStageNow(id));
+    // fallback: tenta individual pros não vistos
+    await runLimited(
+      ids.filter((id) => !seen.has(id)).map((id) => async () => { await fetchStageNow(id); }),
+      6
+    );
 
     rIC(refreshStageCounters);
     if (state.activeTab !== "geral") {
@@ -258,9 +297,8 @@ async function flushStageLookup() {
       rIC(() => loadStageTab(tab));
     }
   } catch (e) {
-    console.error("lead-status/bulk falhou:", e);
-    // fallback: tenta individual pra todos
-    ids.forEach(id => fetchStageNow(id));
+    console.error("lead-status bulk compat falhou:", e);
+    await runLimited(ids.map((id) => async () => { await fetchStageNow(id); }), 6);
   }
 }
 
@@ -590,8 +628,8 @@ async function loadChats() {
       const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
       updateLastActivity(id, baseTs);
 
-      // >>> NOVO: aplica estágio vindo direto do stream (backend manda _stage)
-      const stageFromStream = normalizeStage(item?._stage || "");
+      // aplica estágio vindo do stream (se houver)
+      const stageFromStream = normalizeStage(item?._stage || item?.stage || item?.status || "");
       if (id && stageFromStream) {
         setStage(id, stageFromStream);
         rIC(refreshStageCounters);
@@ -603,7 +641,6 @@ async function loadChats() {
           upsertStagePill(stageFromStream);
         }
       }
-      // <<< NOVO
 
       if (state.activeTab === "geral" && startTab === "geral" && reqId === state.listReqId) {
         const curList = $("#chat-list");
@@ -612,7 +649,7 @@ async function loadChats() {
 
       if (!id) continue;
 
-      // Pré-carrega estágio do banco (fallback caso stream não venha com _stage)
+      // Pré-carrega estágio do banco (fallback)
       queueStageLookup(id);
 
       pushBg(async () => {
@@ -872,7 +909,6 @@ async function prefetchCards(items) {
  * 12) FORMATAÇÃO DE HORA
  * ======================================= */
 function formatTime(ts) {
-  // >>> corrigido para aceitar segundos e ms
   const val = toMs(ts);
   if (!val) return "";
   try {
@@ -908,7 +944,6 @@ async function openChat(ch) {
   setMobileMode("chat");
   await loadMessages(chatid);
 
-  // mostra pill imediatamente se já souber, senão busca fallback
   const known = getStage(chatid);
   if (known) {
     upsertStagePill(known.stage);
