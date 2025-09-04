@@ -212,10 +212,81 @@ async function fetchStageNow(chatid) {
       rIC(refreshStageCounters);
       const cur = state.current;
       if (cur && (cur.wa_chatid || cur.chatid) === chatid) upsertStagePill(st);
+    } else {
+      // fallback se veio vazio
+      await fetchStageAny(chatid);
     }
   } catch (e) {
     console.warn("fetchStageNow falhou:", e);
+    // fallbacks extras
+    await fetchStageAny(chatid);
   }
+}
+
+/* ====== NOVO: tentativa agressiva de descobrir estágio em QUALQUER rota ======
+   Tenta: 1) /api/lead-status/bulk  2) /api/lead-status (POST)  3) /api/lead-status?chatid=... (GET)
+   Sem remover nada do código original.
+-------------------------------------------------------------------------------*/
+async function fetchStageAny(chatid) {
+  if (!chatid) return;
+  const headers = { "Content-Type": "application/json", ...authHeaders() };
+
+  // 1) single via BULK (já tentado por fetchStageNow normalmente)
+  try {
+    const r1 = await fetch(BACKEND() + "/api/lead-status/bulk", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ chatids: [chatid] }),
+    });
+    if (r1.ok) {
+      const j = await r1.json().catch(() => ({}));
+      const item = Array.isArray(j?.items) ? j.items.find(x => x?.chatid === chatid) : null;
+      const st = normalizeStage(item?.stage || "");
+      if (st) {
+        setStage(chatid, st);
+        rIC(refreshStageCounters);
+        if (state.current && (state.current.wa_chatid || state.current.chatid) === chatid) upsertStagePill(st);
+        return;
+      }
+    }
+  } catch (e) { console.warn("fallback bulk falhou:", e); }
+
+  // 2) POST /api/lead-status { chatid } (backends que expõem rota single)
+  try {
+    const r2 = await fetch(BACKEND() + "/api/lead-status", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ chatid }),
+    });
+    if (r2.ok) {
+      const j = await r2.json().catch(() => ({}));
+      const st = normalizeStage(j?.stage || j?.data?.stage || "");
+      if (st) {
+        setStage(chatid, st);
+        rIC(refreshStageCounters);
+        if (state.current && (state.current.wa_chatid || state.current.chatid) === chatid) upsertStagePill(st);
+        return;
+      }
+    }
+  } catch (e) { console.warn("fallback single POST falhou:", e); }
+
+  // 3) GET /api/lead-status?chatid=...
+  try {
+    const r3 = await fetch(BACKEND() + "/api/lead-status?chatid=" + encodeURIComponent(chatid), {
+      method: "GET",
+      headers: authHeaders(),
+    });
+    if (r3.ok) {
+      const j = await r3.json().catch(() => ({}));
+      const st = normalizeStage(j?.stage || j?.data?.stage || "");
+      if (st) {
+        setStage(chatid, st);
+        rIC(refreshStageCounters);
+        if (state.current && (state.current.wa_chatid || state.current.chatid) === chatid) upsertStagePill(st);
+        return;
+      }
+    }
+  } catch (e) { console.warn("fallback GET falhou:", e); }
 }
 
 function queueStageLookup(chatid) {
@@ -597,8 +668,11 @@ async function loadChats() {
 
       if (!id) continue;
 
-      // Pré-carrega estágio do banco
+      // Pré-carrega estágio do banco (buffer/flush)
       queueStageLookup(id);
+
+      // HOTFIX: dispara consulta imediata de estágio no backend (gera logs mesmo que o buffer não rode)
+      setTimeout(() => { fetchStageAny(id); }, 0);
 
       pushBg(async () => {
         // nome/imagem
