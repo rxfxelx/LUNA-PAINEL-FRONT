@@ -34,12 +34,13 @@ function setMobileMode(mode) {
 
 function jwt() { return localStorage.getItem("luna_jwt") || ""; }
 
-// --- decodifica payload do JWT para extrair instance id ---
+// --- decodifica payload do JWT com PADDING (corrigido) ---
 function jwtPayload() {
   const t = jwt();
   if (!t || t.indexOf(".") < 0) return {};
   try {
-    const b64 = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    let b64 = t.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    b64 += "=".repeat((4 - (b64.length % 4)) % 4); // padding base64url
     const json = atob(b64);
     return JSON.parse(json);
   } catch { return {}; }
@@ -199,22 +200,22 @@ let _stageTimer = null;
 function queueStageLookup(chatid) {
   if (!chatid || state.stages.has(chatid)) return;
   _stageBuffer.add(chatid);
-  if (_stageBuffer.size >= 60) {
+  // >>> FLUSH agressivo para garantir chamadas reais
+  if (_stageBuffer.size >= 10) {
     flushStageLookup();
   } else if (!_stageTimer) {
-    _stageTimer = setTimeout(flushStageLookup, 250);
+    _stageTimer = setTimeout(flushStageLookup, 200);
   }
 }
 
 async function flushStageLookup() {
   const ids = Array.from(_stageBuffer);
   _stageBuffer.clear();
-  clearTimeout(_stageTimer);
-  _stageTimer = null;
+  if (_stageTimer) { clearTimeout(_stageTimer); _stageTimer = null; }
   if (!ids.length) return;
 
   try {
-    console.debug("lead-status/bulk →", ids.length, "ids");
+    console.debug("[lead-status] bulk →", ids.length);
     const res = await api("/api/lead-status/bulk", {
       method: "POST",
       body: JSON.stringify({ chatids: ids }),
@@ -222,17 +223,14 @@ async function flushStageLookup() {
     const arr = Array.isArray(res?.items) ? res.items : [];
     for (const rec of arr) {
       const cid = rec?.chatid || "";
-      const st = normalizeStage(rec?.stage || "");
+      const st  = normalizeStage(rec?.stage || "");
       if (!cid || !st) continue;
       setStage(cid, st);
     }
     rIC(refreshStageCounters);
-    if (state.activeTab !== "geral") {
-      const tab = state.activeTab;
-      rIC(() => loadStageTab(tab));
-    }
+    if (state.activeTab !== "geral") rIC(() => loadStageTab(state.activeTab));
   } catch (e) {
-    console.error("lead-status/bulk falhou:", e);
+    console.error("[lead-status] bulk falhou:", e);
   }
 }
 
@@ -569,11 +567,11 @@ async function loadChats() {
 
       if (!id) continue;
 
-      // Pré-carrega estágio do banco em lote
+      // Pré-carrega estágio em lote
       queueStageLookup(id);
-      // garante flush periódico durante o stream (evita acumular tudo pro final)
-      if (_stageBuffer.size >= 80) {
-        try { await flushStageLookup(); } catch (e) { console.warn("bulk stages (mid):", e); }
+      // força flush durante o stream (não deixa acumular)
+      if (_stageBuffer.size >= 10) {
+        try { await flushStageLookup(); } catch (e) { console.warn("[lead-status] mid flush:", e); }
       }
 
       pushBg(async () => {
@@ -587,7 +585,7 @@ async function loadChats() {
           }
         } catch {}
 
-        // preview última mensagem (fallback usa dados do chat)
+        // preview última mensagem
         try {
           const latest = await api("/api/messages", {
             method: "POST",
@@ -624,10 +622,10 @@ async function loadChats() {
       });
     }
 
-    // última descarga do buffer de estágios
-    try { await flushStageLookup(); } catch (e) { console.warn("bulk stages (final):", e); }
+    // flush final
+    try { await flushStageLookup(); } catch (e) { console.warn("[lead-status] final flush:", e); }
 
-    // re-render filtrado se o usuário trocou de aba
+    // re-render filtrado se necessário
     if (state.activeTab !== "geral") await loadStageTab(state.activeTab);
 
     try {
@@ -766,7 +764,7 @@ async function prefetchCards(items) {
     return async () => {
       if (!chatid) return;
 
-      // já deixamos o bulk agendado durante o stream, mas por garantia:
+      // reforça o bulk
       queueStageLookup(chatid);
 
       if (!state.nameCache.has(chatid)) {
