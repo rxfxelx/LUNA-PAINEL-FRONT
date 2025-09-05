@@ -233,28 +233,83 @@ async function callLeadStatusSingle(chatid) {
   return null;
 }
 
+/* ===== STAGE: banco > classifica > salva > cache ===== */
+async function _apiSetStage(chatid, stage, notes = "") {
+  const payload = { chatid, stage, notes };
+  const attempts = [
+    { path: "/api/lead-status/set", method: "POST" },
+    { path: "/api/lead_status/set", method: "POST" },
+    { path: "/api/crm/status", method: "POST" }, // fallback
+  ];
+  for (const a of attempts) {
+    try {
+      await api(a.path, { method: a.method, body: JSON.stringify(payload) });
+      return true;
+    } catch {}
+  }
+  return false;
+}
+async function _fetchLastMessages(chatid, limit = 80) {
+  try {
+    const data = await api("/api/messages", {
+      method: "POST",
+      body: JSON.stringify({ chatid, limit, sort: "-messageTimestamp" }),
+    });
+    const items = Array.isArray(data?.items) ? data.items.slice().sort((a,b)=>tsOf(a)-tsOf(b)) : [];
+    return items;
+  } catch { return []; }
+}
+async function _classifyStage(chatid, messages = []) {
+  try {
+    const r = await api("/api/media/stage/classify", {
+      method: "POST",
+      body: JSON.stringify({ chatid, messages }),
+    });
+    return normalizeStage(r?.stage || "");
+  } catch { return ""; }
+}
+/* === API principal: devolve stage (idempotente) ===
+   1) cache → 2) banco → 3) classifica → 4) salva → 5) cache/UI */
+async function getOrInitStage(chatid, opts = {}) {
+  if (!chatid) return null;
+
+  // 1) cache
+  const cached = getStage(chatid);
+  if (cached?.stage) return cached;
+
+  // 2) banco
+  const fromDb = await callLeadStatusSingle(chatid);
+  if (fromDb?.stage) {
+    const rec = setStage(chatid, fromDb.stage);
+    rIC(refreshStageCounters);
+    const cur = state.current;
+    if (cur && (cur.wa_chatid || cur.chatid) === chatid) upsertStagePill(rec.stage);
+    return rec;
+  }
+
+  // 3) classifica
+  let messages = opts.messages || [];
+  if (!messages.length) messages = await _fetchLastMessages(chatid, 80);
+  const st = await _classifyStage(chatid, messages);
+  if (!st) return null;
+
+  // 4) salva (best effort)
+  await _apiSetStage(chatid, st).catch(() => {});
+
+  // 5) cache/UI
+  const rec = setStage(chatid, st);
+  rIC(refreshStageCounters);
+  const cur = state.current;
+  if (cur && (cur.wa_chatid || cur.chatid) === chatid) upsertStagePill(rec.stage);
+  return rec;
+}
+
 // ------- Bulk seed de estágios do banco -------
 const _stageBuffer = new Set();
 let _stageTimer = null;
 
 // reserva: busca imediata (bulk com 1 id) se buffer falhar
-async function fetchStageNow(chatid) {
-  if (!chatid) return;
-  try {
-    const bulkOne = await callLeadStatusEndpointsBulk([chatid]);
-    let rec = bulkOne?.find((x) => (x.chatid || "") === chatid) || null;
-    if (!rec) rec = await callLeadStatusSingle(chatid);
-    const st = normalizeStage(rec?.stage || "");
-    if (st) {
-      setStage(chatid, st);
-      rIC(refreshStageCounters);
-      const cur = state.current;
-      if (cur && (cur.wa_chatid || cur.chatid) === chatid) upsertStagePill(st);
-    }
-  } catch (e) {
-    console.warn("fetchStageNow falhou:", e);
-  }
-}
+async function fetchStageNow(chatid) { await getOrInitStage(chatid); }
 
 function queueStageLookup(chatid) {
   if (!chatid || state.stages.has(chatid)) return;
@@ -285,9 +340,9 @@ async function flushStageLookup() {
         seen.add(cid);
       }
     }
-    // fallback: tenta individual pros não vistos
+    // faltantes: resolve (classifica+salva)
     await runLimited(
-      ids.filter((id) => !seen.has(id)).map((id) => async () => { await fetchStageNow(id); }),
+      ids.filter((id) => !seen.has(id)).map((id) => async () => { await getOrInitStage(id); }),
       6
     );
 
@@ -298,7 +353,7 @@ async function flushStageLookup() {
     }
   } catch (e) {
     console.error("lead-status bulk compat falhou:", e);
-    await runLimited(ids.map((id) => async () => { await fetchStageNow(id); }), 6);
+    await runLimited(ids.map((id) => async () => { await getOrInitStage(id); }), 6);
   }
 }
 
@@ -942,16 +997,13 @@ async function openChat(ch) {
   if (status) status.textContent = "Carregando mensagens...";
 
   setMobileMode("chat");
+
+  // Carrega as mensagens (classificação vai rodar no loadMessages via getOrInitStage)
   await loadMessages(chatid);
 
-  const known = getStage(chatid);
-  if (known) {
-    upsertStagePill(known.stage);
-  } else {
-    await fetchStageNow(chatid);
-    const st = getStage(chatid);
-    if (st) upsertStagePill(st.stage);
-  }
+  // Garante o pill (usa cache/DB já resolvido por getOrInitStage)
+  const st = getStage(chatid);
+  if (st?.stage) upsertStagePill(st.stage);
 
   if (status) status.textContent = "Online";
 }
@@ -960,25 +1012,13 @@ async function openChat(ch) {
 function tsOf(m) { return Number(m?.messageTimestamp ?? m?.timestamp ?? m?.t ?? m?.message?.messageTimestamp ?? 0); }
 
 async function classifyInstant(chatid, items) {
-  try {
-    const cached = getStage(chatid);
-    if (cached?.stage) {
-      upsertStagePill(cached.stage);
-      refreshStageCounters();
-      return cached;
-    }
-    const r = await api("/api/media/stage/classify", {
-      method: "POST",
-      body: JSON.stringify({ chatid, messages: items || [] }),
-    });
-    const stage = normalizeStage(r?.stage || "");
-    if (stage) {
-      const rec = setStage(chatid, stage);
-      upsertStagePill(rec.stage);
-      refreshStageCounters();
-      return rec;
-    }
-  } catch {}
+  // DB-first: usa getOrInitStage, que classifica e SALVA se não existir
+  const got = await getOrInitStage(chatid, { messages: items || [] });
+  if (got?.stage) {
+    upsertStagePill(got.stage);
+    refreshStageCounters();
+    return got;
+  }
   return null;
 }
 
@@ -994,6 +1034,7 @@ async function loadMessages(chatid) {
 
     items = items.slice().sort((a, b) => tsOf(a) - tsOf(b));
 
+    // Classifica usando DB-first e salva se precisar
     await classifyInstant(chatid, items);
     await progressiveRenderMessages(items);
 
