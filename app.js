@@ -77,6 +77,39 @@ function truncatePreview(s, max = 90) {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
 }
 
+/* ----- CACHE LOCAL (TTL) + DE-DUPE ----- */
+const TTL = {
+  NAME_IMAGE_HIT: 24 * 60 * 60 * 1000,
+  NAME_IMAGE_MISS: 5 * 60 * 1000,
+  PREVIEW: 10 * 60 * 1000,
+};
+const LStore = {
+  get(key) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const { v, exp } = JSON.parse(raw);
+      if (exp && Date.now() > exp) { localStorage.removeItem(key); return null; }
+      return v;
+    } catch { return null; }
+  },
+  set(key, val, ttlMs) {
+    try { localStorage.setItem(key, JSON.stringify({ v: val, exp: Date.now() + (ttlMs || 0) })); } catch {}
+  }
+};
+const inflight = new Map();
+function once(key, fn) {
+  if (inflight.has(key)) return inflight.get(key);
+  const p = Promise.resolve().then(fn).finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+function prettyId(id = "") {
+  const s = String(id);
+  if (/@s\.whatsapp\.net$/i.test(s)) return s.replace(/@s\.whatsapp\.net$/i, "");
+  return s;
+}
+
 /* ========= NDJSON STREAM ========= */
 async function* readNDJSONStream(resp) {
   const reader = resp.body.getReader();
@@ -110,7 +143,7 @@ const state = {
   nameCache: new Map(),
   unread: new Map(),
   loadingChats: false,
-  stages: new Map(),          // chatid -> {stage, at}
+  stages: new Map(),
   splash: { shown: false, timer: null, forceTimer: null },
   activeTab: "geral",
   listReqId: 0,
@@ -236,7 +269,6 @@ async function callLeadStatusSingle(chatid) {
 const _stageBuffer = new Set();
 let _stageTimer = null;
 
-// reserva: busca imediata (bulk com 1 id) se buffer falhar
 async function fetchStageNow(chatid) {
   if (!chatid) return;
   try {
@@ -462,10 +494,25 @@ function ensureRoute() { if (jwt()) switchToApp(); else { show("#login-view"); h
  * 7) AVATAR / NOME
  * ======================================= */
 async function fetchNameImage(chatid, preview = true) {
-  try {
-    const resp = await api("/api/name-image", { method: "POST", body: JSON.stringify({ number: chatid, preview }) });
-    return resp;
-  } catch { return { name: null, image: null, imagePreview: null }; }
+  const key = `ni:${chatid}:${preview ? 1 : 0}`;
+  const hit = LStore.get(key);
+  if (hit) return hit;
+
+  return once(key, async () => {
+    try {
+      const resp = await api("/api/name-image", {
+        method: "POST",
+        body: JSON.stringify({ number: chatid, preview }),
+      });
+      const hasData = !!(resp?.name || resp?.image || resp?.imagePreview);
+      LStore.set(key, resp, hasData ? TTL.NAME_IMAGE_HIT : TTL.NAME_IMAGE_MISS);
+      return resp;
+    } catch {
+      const empty = { name: null, image: null, imagePreview: null };
+      LStore.set(key, empty, TTL.NAME_IMAGE_MISS);
+      return empty;
+    }
+  });
 }
 function initialsOf(str) {
   const s = (str || "").trim();
@@ -626,7 +673,6 @@ async function loadChats() {
       const id = item.wa_chatid || item.chatid || item.wa_fastid || item.wa_id || "";
       updateLastActivity(id, baseTs);
 
-      // aplica estágio vindo do stream (se houver)
       const stageFromStream = normalizeStage(item?._stage || item?.stage || item?.status || "");
       if (id && stageFromStream) {
         setStage(id, stageFromStream);
@@ -647,7 +693,6 @@ async function loadChats() {
 
       if (!id) continue;
 
-      // Pré-carrega estágio do banco (fallback)
       queueStageLookup(id);
 
       pushBg(async () => {
@@ -661,8 +706,21 @@ async function loadChats() {
           }
         } catch {}
 
-        // preview última mensagem
+        // preview última mensagem (usa cache)
         try {
+          const pvKey = `pv:${id}`;
+          const pvHit = LStore.get(pvKey);
+          if (pvHit && !state.lastMsg.has(id)) {
+            state.lastMsg.set(id, pvHit.text || "");
+            state.lastMsgFromMe.set(id, !!pvHit.fromMe);
+            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
+            if (card) {
+              const txt = pvHit.text ? (pvHit.fromMe ? "Você: " : "") + truncatePreview(pvHit.text, 90) : "Sem mensagens";
+              card.textContent = txt;
+              card.title = pvHit.text ? (pvHit.fromMe ? "Você: " : "") + pvHit.text : "Sem mensagens";
+            }
+          }
+
           const latest = await api("/api/messages", {
             method: "POST",
             body: JSON.stringify({ chatid: id, limit: 1, sort: "-messageTimestamp" }),
@@ -677,6 +735,7 @@ async function loadChats() {
 
           state.lastMsg.set(id, pv || "");
           state.lastMsgFromMe.set(id, fromMe);
+          LStore.set(pvKey, { text: pv || "", fromMe }, TTL.PREVIEW);
 
           const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`);
           if (card) {
@@ -698,7 +757,6 @@ async function loadChats() {
       });
     }
 
-    // flush final + fallback em falta
     await flushStageLookup();
 
     if (state.activeTab !== "geral") await loadStageTab(state.activeTab);
@@ -763,7 +821,7 @@ function appendChatSkeleton(list, ch) {
   top.className = "row1";
   const nm = document.createElement("div");
   nm.className = "name";
-  nm.textContent = (ch.wa_contactName || ch.name || el.dataset.chatid || "Contato").toString();
+  nm.textContent = (ch.wa_contactName || ch.name || prettyId(el.dataset.chatid) || "Contato").toString();
   const tm = document.createElement("div");
   tm.className = "time";
   const lastTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || "";
@@ -795,7 +853,6 @@ function appendChatSkeleton(list, ch) {
   const baseTs = ch.wa_lastMsgTimestamp || ch.messageTimestamp || ch.updatedAt || 0;
   updateLastActivity(el.dataset.chatid, baseTs);
 
-  // dispara bulk e, se nada vier, reserva individual
   queueStageLookup(chatid);
   setTimeout(() => { if (!getStage(chatid)) fetchStageNow(chatid); }, 800);
 
@@ -818,9 +875,10 @@ function hydrateChatCard(ch) {
     img.alt = "avatar";
     avatar.appendChild(img);
   } else {
-    avatar.textContent = initialsOf(cache.name || nameEl.textContent);
+    avatar.textContent = initialsOf(cache.name || nameEl.textContent || prettyId(chatid));
   }
   if (cache.name) nameEl.textContent = cache.name;
+  else nameEl.textContent = nameEl.textContent || prettyId(chatid);
 }
 
 /* =========================================
@@ -851,36 +909,52 @@ async function prefetchCards(items) {
       }
       if (!state.lastMsg.has(chatid) && !ch.wa_lastMessageText) {
         try {
-          const data = await api("/api/messages", {
-            method: "POST",
-            body: JSON.stringify({ chatid, limit: 1, sort: "-messageTimestamp" }),
-          });
-          const last = Array.isArray(data?.items) ? data.items[0] : null;
-          if (last) {
-            const pv = (
-              last.text ||
-              last.caption ||
-              last?.message?.text ||
-              last?.message?.conversation ||
-              last?.body ||
-              ""
-            ).replace(/\s+/g, " ").trim();
-            state.lastMsg.set(chatid, pv);
-            const fromMe = isFromMe(last);
-            state.lastMsgFromMe.set(chatid, fromMe);
+          const pvKey = `pv:${chatid}`;
+          const pvHit = LStore.get(pvKey);
+          if (pvHit) {
+            state.lastMsg.set(chatid, pvHit.text || "");
+            state.lastMsgFromMe.set(chatid, !!pvHit.fromMe);
             const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
             if (card) {
-              const txt = (fromMe ? "Você: " : "") + (pv ? truncatePreview(pv, 90) : "Sem mensagens");
+              const txt = (pvHit.fromMe ? "Você: " : "") + (pvHit.text ? truncatePreview(pvHit.text, 90) : "Sem mensagens");
               card.textContent = txt;
-              card.title = (fromMe ? "Você: " : "") + pv;
+              card.title = (pvHit.fromMe ? "Você: " : "") + (pvHit.text || "");
             }
             const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`);
-            if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || last.t || "");
-            updateLastActivity(chatid, last.messageTimestamp || last.timestamp || last.t || Date.now());
+            if (tEl && ch.wa_lastMsgTimestamp) tEl.textContent = formatTime(ch.wa_lastMsgTimestamp);
           } else {
-            const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
-            if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
-            updateLastActivity(chatid, ch.wa_lastMsgTimestamp || ch.messageTimestamp || ch.updatedAt || 0);
+            const data = await api("/api/messages", {
+              method: "POST",
+              body: JSON.stringify({ chatid, limit: 1, sort: "-messageTimestamp" }),
+            });
+            const last = Array.isArray(data?.items) ? data.items[0] : null;
+            if (last) {
+              const pv = (
+                last.text ||
+                last.caption ||
+                last?.message?.text ||
+                last?.message?.conversation ||
+                last?.body ||
+                ""
+              ).replace(/\s+/g, " ").trim();
+              state.lastMsg.set(chatid, pv);
+              const fromMe = isFromMe(last);
+              state.lastMsgFromMe.set(chatid, fromMe);
+              LStore.set(pvKey, { text: pv || "", fromMe }, TTL.PREVIEW);
+              const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
+              if (card) {
+                const txt = (fromMe ? "Você: " : "") + (pv ? truncatePreview(pv, 90) : "Sem mensagens");
+                card.textContent = txt;
+                card.title = (fromMe ? "Você: " : "") + pv;
+              }
+              const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .time`);
+              if (tEl) tEl.textContent = formatTime(last.messageTimestamp || last.timestamp || last.t || "");
+              updateLastActivity(chatid, last.messageTimestamp || last.timestamp || last.t || Date.now());
+            } else {
+              const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`);
+              if (card) { card.textContent = "Sem mensagens"; card.title = "Sem mensagens"; }
+              updateLastActivity(chatid, ch.wa_lastMsgTimestamp || ch.messageTimestamp || ch.updatedAt || 0);
+            }
           }
         } catch {}
       }
@@ -934,7 +1008,7 @@ async function openChat(ch) {
   const chatid = ch.wa_chatid || ch.chatid || ch.wa_fastid || ch.wa_id || "";
 
   const cache = state.nameCache.get(chatid) || {};
-  const nm = (cache.name || ch.wa_contactName || ch.name || chatid || "Chat").toString();
+  const nm = (cache.name || ch.wa_contactName || ch.name || prettyId(chatid) || "Chat").toString();
 
   title.textContent = nm;
   if (status) status.textContent = "Carregando mensagens...";
@@ -954,12 +1028,9 @@ async function openChat(ch) {
   if (status) status.textContent = "Online";
 }
 
-// Ordenação por timestamp real
 function tsOf(m) { return Number(m?.messageTimestamp ?? m?.timestamp ?? m?.t ?? m?.message?.messageTimestamp ?? 0); }
 
 async function classifyInstant(chatid, items) {
-  // DB-first: usa classificação do backend (vem em /api/messages)
-  // e, se precisar, salva via /api/lead-status/upsert (feito no backend via persist)
   const got = await getOrInitStage(chatid, { messages: items || [] });
   if (got?.stage) {
     upsertStagePill(got.stage);
@@ -969,13 +1040,10 @@ async function classifyInstant(chatid, items) {
   return null;
 }
 
-// resolve estágio usando backend (mensagens -> stage) + cache DB
 async function getOrInitStage(chatid, { messages = [] } = {}) {
-  // 1) se já temos em memória, usa
   const c = getStage(chatid);
   if (c?.stage) return c;
 
-  // 2) tenta banco (bulk ou single) já foi disparado; força um single rápido se ainda não chegou
   try {
     const one = await callLeadStatusSingle(chatid);
     if (one?.stage) {
@@ -984,7 +1052,6 @@ async function getOrInitStage(chatid, { messages = [] } = {}) {
     }
   } catch {}
 
-  // 3) tenta obter do backend a partir das mensagens (backend já classifica)
   try {
     if (!messages || !messages.length) {
       const data = await api("/api/messages", {
@@ -997,7 +1064,6 @@ async function getOrInitStage(chatid, { messages = [] } = {}) {
         return rec;
       }
     } else {
-      // se já temos mensagens, chama backend só para padronizar/validar (opcional)
       const data = await api("/api/media/stage/classify", {
         method: "POST",
         body: JSON.stringify({ chatid, messages }),
@@ -1024,7 +1090,6 @@ async function loadMessages(chatid) {
 
     items = items.slice().sort((a, b) => tsOf(a) - tsOf(b));
 
-    // Classifica usando DB-first e salva se precisar
     await classifyInstant(chatid, items);
     await progressiveRenderMessages(items);
 
@@ -1032,7 +1097,9 @@ async function loadMessages(chatid) {
     const pv = (last?.text || last?.caption || last?.message?.text || last?.message?.conversation || last?.body || "")
       .replace(/\s+/g, " ").trim();
     if (pv) state.lastMsg.set(chatid, pv);
-    state.lastMsgFromMe.set(chatid, isFromMe(last || {}));
+    const fromMeFlag = isFromMe(last || {});
+    state.lastMsgFromMe.set(chatid, fromMeFlag);
+    LStore.set(`pv:${chatid}`, { text: pv || "", fromMe: fromMeFlag }, TTL.PREVIEW);
 
     if (last) {
       updateLastActivity(chatid, last.messageTimestamp || last.timestamp || last.t || Date.now());
