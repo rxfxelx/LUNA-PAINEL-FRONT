@@ -30,18 +30,40 @@
         <p class="login-sub">Supervisor WhatsApp Profissional</p>
       </div>
 
-      <div class="login-form">
+      <!-- Etapa 1: login de conta -->
+      <div id="step-account" class="login-step">
         <div class="form-group">
-          <label for="token">Token da Instância</label>
-          <input id="token" class="inp" placeholder="Cole seu token UAZAPI aqui" autocomplete="off" />
+          <label for="acct-email">E-mail</label>
+          <input id="acct-email" class="inp" type="email" placeholder="voce@empresa.com" autocomplete="username" />
+        </div>
+        <div class="form-group">
+          <label for="acct-pass">Senha</label>
+          <input id="acct-pass" class="inp" type="password" placeholder="Sua senha" autocomplete="current-password" />
+        </div>
+        <button id="btn-acct-login" class="btn btn-primary">Entrar</button>
+        <div id="acct-msg" class="msg-err"></div>
+
+        <div class="hint" style="margin-top:12px">
+          Ainda não tem conta?
+          <a id="link-cadastrar" href="/pagamentos/getnet">Cadastrar-se</a>
+        </div>
+      </div>
+
+      <!-- Etapa 2: token da instância (como já era) -->
+      <div id="step-instance" class="login-step hidden">
+        <div class="form-group">
+          <label for="token">Token da Instância (UAZAPI)</label>
+          <input id="token" class="inp" placeholder="Cole o token da sua instância" autocomplete="off" />
         </div>
         <button id="btn-login" class="btn btn-primary">
-          <span>Entrar no Sistema</span>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M5 12h14M12 5l7 7-7 7"/>
-          </svg>
+          <span>Conectar instância</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
         </button>
         <div id="msg" class="msg-err"></div>
+
+        <div class="hint" style="margin-top:12px">
+          <a id="btn-voltar-account" href="javascript:void(0)">Voltar para login por e-mail</a>
+        </div>
       </div>
     </div>
   </main>
