@@ -1,16 +1,21 @@
 <!doctype html>
 <html lang="pt-BR" class="dark">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Luna – Supervisor WhatsApp</title>
-  <link rel="stylesheet" href="styles.css"/>
-  <script defer src="config.js"></script>
-  <script defer src="app.js"></script>
+
+  <link rel="stylesheet" href="styles.css" />
   <style>.hidden{display:none!important}</style>
+
+  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700&family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Config deve vir ANTES do app.js -->
+  <script defer src="config.js"></script>
+  <script defer src="app.js"></script>
 </head>
 <body>
 
@@ -18,19 +23,17 @@
   <main id="login-view" class="login">
     <div class="login-card">
       <div class="login-header">
-        <!-- Logo grande centralizada -->
         <div class="login-logo">
-          <img src="lunapngcinza.png" alt="Luna"/>
+          <img src="lunapngcinza.png" alt="Luna" />
         </div>
-        <!-- título oculto via CSS -->
-        <h1>Luna</h1>
+        <h1 class="hidden">Luna</h1>
         <p class="login-sub">Supervisor WhatsApp Profissional</p>
       </div>
 
       <div class="login-form">
         <div class="form-group">
           <label for="token">Token da Instância</label>
-          <input id="token" class="inp" placeholder="Cole seu token UAZAPI aqui" />
+          <input id="token" class="inp" placeholder="Cole seu token UAZAPI aqui" autocomplete="off" />
         </div>
         <button id="btn-login" class="btn btn-primary">
           <span>Entrar no Sistema</span>
@@ -43,28 +46,22 @@
     </div>
   </main>
 
-  <!-- LOADING -->
+  <!-- LOADING (opcional; o app.js usa um splash próprio, mas deixei aqui caso queira usar) -->
   <section id="loading-view" class="loading hidden">
     <div class="loading-container">
-      <!-- LOGO no carregamento -->
       <div class="loading-logos-animation">
-        <!-- Logo Luna - aparece primeiro -->
         <div class="loading-logo-luna">
           <img src="lunapngcinza.png" alt="Luna" class="loading-logo">
         </div>
-        <!-- Logo Helsenia - aparece depois -->
         <div class="loading-logo-helsenia">
           <img src="logohelsenia.png" alt="Helsenia" class="loading-logo" onerror="this.src='lunapngcinza.png'">
         </div>
       </div>
-      
       <div class="loading-spinner"></div>
       <h2>Carregando Sistema</h2>
       <p>Preparando suas conversas...</p>
       <div class="loading-progress">
-        <div class="progress-bar">
-          <div class="progress-fill"></div>
-        </div>
+        <div class="progress-bar"><div class="progress-fill"></div></div>
         <span class="progress-text">Conectando...</span>
       </div>
     </div>
@@ -74,12 +71,11 @@
   <section id="app-view" class="app hidden">
     <header class="topbar">
       <div class="brand">
-        <!-- LOGO no topo (sem texto Luna) -->
         <div class="brand-icon">
           <img src="lunapngcinza.png" alt="Luna" class="brand-logo">
         </div>
         <div class="brand-text">
-          <span class="brand-name">Luna</span> <!-- ficará oculto por CSS -->
+          <span class="brand-name">Luna</span>
           <small id="profile">Supervisor WhatsApp</small>
         </div>
       </div>
@@ -108,6 +104,8 @@
       <aside class="sidebar">
         <div class="sidebar-head">
           <h2>Conversas</h2>
+
+          <!-- seletor mobile que o app.js usa -->
           <div class="mobile-stage-selector">
             <select id="mobile-stage-select" class="stage-select">
               <option value="geral">Geral</option>
@@ -116,17 +114,25 @@
               <option value="lead_quente">Lead Quente</option>
             </select>
           </div>
+
+          <!-- badges/contadores mobile (opcionais; o app.js atualiza se existir) -->
+          <div class="mobile-counters">
+            <span>Contatos: <b id="mobile-counter-contatos">0</b></span>
+            <span>Lead: <b id="mobile-counter-lead">0</b></span>
+            <span>Lead Quente: <b id="mobile-counter-lead_quente">0</b></span>
+          </div>
+
           <div class="sidebar-stats">
             <span class="stats-badge">Ativo</span>
           </div>
         </div>
-        
+
         <div id="chat-list" class="chat-list"></div>
       </aside>
 
       <main class="main">
         <div class="chatbar">
-          <button id="btn-back-mobile" class="btn btn-icon back">
+          <button id="btn-back-mobile" class="btn btn-icon back" title="Voltar">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M19 12H5M12 19l-7-7 7-7"/>
             </svg>
@@ -144,10 +150,15 @@
             <p>Escolha uma conversa da lista para visualizar as mensagens</p>
           </div>
         </div>
-
       </main>
     </div>
   </section>
+
+  <noscript>
+    <div style="padding:16px;background:#111;color:#fff">
+      Para usar o Luna, ative o JavaScript no seu navegador.
+    </div>
+  </noscript>
 
 </body>
 </html>
