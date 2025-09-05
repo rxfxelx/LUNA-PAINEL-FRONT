@@ -343,7 +343,7 @@ async function loadCRMStage(stage) {
     refreshCRMCounters();
   }
 }
-function attachCRMControlsToCard() {}
+function attachCRMControlsToCard(el, ch) {}
 
 /* =========================================
  * 6) SPLASH / LOGIN / ROUTER
