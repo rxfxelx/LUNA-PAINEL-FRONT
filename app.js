@@ -189,7 +189,8 @@ let billingStatus = null
 
 async function registerTrial() {
   try {
-    await acctApi("/api/billing/register-trial", { method: "POST" })
+    // Trial precisa do JWT da INSTÂNCIA
+    await api("/api/billing/register-trial", { method: "POST" })
     console.log("[v0] Trial registered successfully")
   } catch (e) {
     console.error("[v0] Failed to register trial:", e)
@@ -198,7 +199,8 @@ async function registerTrial() {
 
 async function checkBillingStatus() {
   try {
-    billingStatus = await acctApi("/api/billing/status")
+    // Status com JWT da INSTÂNCIA
+    billingStatus = await api("/api/billing/status")
     console.log("[v0] Billing status:", billingStatus)
 
     if (billingStatus?.require_payment === true) {
@@ -241,15 +243,15 @@ function updateBillingView() {
   }
 
   if (daysRemaining) {
-    daysRemaining.textContent = billingStatus.days_remaining || "0"
+    daysRemaining.textContent = String(billingStatus.days_left ?? "0")
   }
 
   if (trialUntil) {
-    trialUntil.textContent = billingStatus.trial_until || "N/A"
+    trialUntil.textContent = billingStatus.trial_ends_at ? new Date(billingStatus.trial_ends_at).toLocaleString() : "N/A"
   }
 
   if (paidUntil) {
-    paidUntil.textContent = billingStatus.paid_until || "N/A"
+    paidUntil.textContent = billingStatus.paid_until ? new Date(billingStatus.paid_until).toLocaleString() : "N/A"
   }
 }
 
@@ -261,7 +263,8 @@ async function createCheckoutLink() {
       btnEl.innerHTML = "<span>Processando...</span>"
     }
 
-    const response = await acctApi("/api/billing/checkout-link", { method: "POST" })
+    // Checkout com JWT da INSTÂNCIA
+    const response = await api("/api/billing/checkout-link", { method: "POST" })
 
     if (response?.url) {
       window.location.href = response.url
@@ -604,7 +607,8 @@ async function acctLogin() {
     }
     if (msgEl) msgEl.textContent = ""
 
-    const r = await fetch(BACKEND() + "/api/auth/login", {
+    // Backend novo: /api/users/login
+    const r = await fetch(BACKEND() + "/api/users/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password: pass }),
@@ -615,17 +619,6 @@ async function acctLogin() {
     if (!data?.jwt) throw new Error("Resposta inválida do servidor.")
 
     localStorage.setItem(ACCT_JWT_KEY, data.jwt)
-
-    await registerTrial()
-
-    // Confere status da assinatura (opcionalmente você pode bloquear aqui)
-    try {
-      const st = await acctApi("/api/account/status")
-      if (st?.subscription?.active === false) {
-        if (msgEl) msgEl.textContent = "Sua assinatura não está ativa. Conclua o pagamento."
-        // Mantém o usuário logado, mas incentiva a ir ao cadastro/pagamento.
-      }
-    } catch {}
 
     // Avança para o passo do token da instância
     showStepInstance()
@@ -742,6 +735,9 @@ async function doLogin() {
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json()
     localStorage.setItem("luna_jwt", data.jwt)
+
+    // Garante trial com JWT da instância
+    try { await registerTrial() } catch {}
 
     const canAccess = await checkBillingStatus()
     if (canAccess) {
