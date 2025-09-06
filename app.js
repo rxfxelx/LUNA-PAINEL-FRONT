@@ -604,7 +604,7 @@ async function acctLogin() {
     }
     if (msgEl) msgEl.textContent = ""
 
-    const r = await fetch(BACKEND() + "/api/account/login", {
+    const r = await fetch(BACKEND() + "/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password: pass }),
