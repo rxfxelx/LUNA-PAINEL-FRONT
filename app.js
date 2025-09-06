@@ -3,8 +3,8 @@
  * ======================================= */
 const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "")
 const $ = (s) => document.querySelector(s)
-const show = (sel) => $(sel).classList.remove("hidden")
-const hide = (sel) => $(sel).classList.add("hidden")
+const show = (sel) => { const el = $(sel); if (el) el.classList.remove("hidden") }
+const hide = (sel) => { const el = $(sel); if (el) el.classList.add("hidden") }
 
 // Idle callback
 const rIC = (cb) => (window.requestIdleCallback ? window.requestIdleCallback(cb, { timeout: 200 }) : setTimeout(cb, 0))
@@ -1352,7 +1352,7 @@ async function openChat(ch) {
   const cache = state.nameCache.get(chatid) || {}
   const nm = (cache.name || ch.wa_contactName || ch.name || prettyId(chatid) || "Chat").toString()
 
-  title.textContent = nm
+  if (title) title.textContent = nm
   if (status) status.textContent = "Carregando mensagens..."
 
   setMobileMode("chat")
