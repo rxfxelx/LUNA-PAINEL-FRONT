@@ -184,6 +184,131 @@ async function acctApi(path, opts = {}) {
   return res.json().catch(() => ({}))
 }
 
+// ==== Billing System ====
+let billingStatus = null
+
+async function registerTrial() {
+  try {
+    await acctApi("/api/billing/register-trial", { method: "POST" })
+    console.log("[v0] Trial registered successfully")
+  } catch (e) {
+    console.error("[v0] Failed to register trial:", e)
+  }
+}
+
+async function checkBillingStatus() {
+  try {
+    billingStatus = await acctApi("/api/billing/status")
+    console.log("[v0] Billing status:", billingStatus)
+
+    if (billingStatus?.require_payment === true) {
+      showBillingModal()
+      return false
+    }
+
+    updateBillingView()
+    return true
+  } catch (e) {
+    console.error("[v0] Failed to check billing status:", e)
+    return true // Allow access on error
+  }
+}
+
+function showBillingModal() {
+  const modal = $("#billing-modal")
+  if (modal) {
+    modal.classList.remove("hidden")
+  }
+}
+
+function hideBillingModal() {
+  const modal = $("#billing-modal")
+  if (modal) {
+    modal.classList.add("hidden")
+  }
+}
+
+function updateBillingView() {
+  if (!billingStatus) return
+
+  const currentPlan = $("#current-plan")
+  const daysRemaining = $("#days-remaining")
+  const trialUntil = $("#trial-until")
+  const paidUntil = $("#paid-until")
+
+  if (currentPlan) {
+    currentPlan.textContent = billingStatus.plan || "Trial"
+  }
+
+  if (daysRemaining) {
+    daysRemaining.textContent = billingStatus.days_remaining || "0"
+  }
+
+  if (trialUntil) {
+    trialUntil.textContent = billingStatus.trial_until || "N/A"
+  }
+
+  if (paidUntil) {
+    paidUntil.textContent = billingStatus.paid_until || "N/A"
+  }
+}
+
+async function createCheckoutLink() {
+  try {
+    const btnEl = $("#btn-pay-getnet")
+    if (btnEl) {
+      btnEl.disabled = true
+      btnEl.innerHTML = "<span>Processando...</span>"
+    }
+
+    const response = await acctApi("/api/billing/checkout-link", { method: "POST" })
+
+    if (response?.url) {
+      window.location.href = response.url
+    } else {
+      throw new Error("URL de pagamento não recebida")
+    }
+  } catch (e) {
+    console.error("[v0] Failed to create checkout link:", e)
+    alert("Erro ao processar pagamento. Tente novamente.")
+  } finally {
+    const btnEl = $("#btn-pay-getnet")
+    if (btnEl) {
+      btnEl.disabled = false
+      btnEl.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+          <line x1="1" y1="10" x2="23" y2="10"/>
+        </svg>
+        Pagar com GetNet
+      `
+    }
+  }
+}
+
+function showConversasView() {
+  hide("#billing-view")
+  show(".chatbar")
+  show("#messages")
+
+  // Update menu active state
+  document.querySelectorAll(".menu-item").forEach((item) => item.classList.remove("active"))
+  $("#btn-conversas")?.classList.add("active")
+}
+
+function showBillingView() {
+  hide(".chatbar")
+  hide("#messages")
+  show("#billing-view")
+
+  // Update menu active state
+  document.querySelectorAll(".menu-item").forEach((item) => item.classList.remove("active"))
+  $("#btn-pagamentos")?.classList.add("active")
+
+  // Load billing status when showing billing view
+  checkBillingStatus()
+}
+
 /* =========================================
  * 2) STATE GLOBAL + ORDENAÇÃO POR RECÊNCIA
  * ======================================= */
@@ -491,6 +616,8 @@ async function acctLogin() {
 
     localStorage.setItem(ACCT_JWT_KEY, data.jwt)
 
+    await registerTrial()
+
     // Confere status da assinatura (opcionalmente você pode bloquear aqui)
     try {
       const st = await acctApi("/api/account/status")
@@ -615,7 +742,11 @@ async function doLogin() {
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json()
     localStorage.setItem("luna_jwt", data.jwt)
-    switchToApp()
+
+    const canAccess = await checkBillingStatus()
+    if (canAccess) {
+      switchToApp()
+    }
   } catch (e) {
     console.error(e)
     if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
@@ -647,6 +778,9 @@ function switchToApp() {
   ensureCRMBar()
   ensureStageTabs()
   createSplash()
+
+  showConversasView()
+
   loadChats().finally(() => {})
 }
 function ensureRoute() {
@@ -1998,6 +2132,24 @@ document.addEventListener("DOMContentLoaded", () => {
         e.preventDefault()
         acctLogin()
       }
+    })
+
+  // Billing system event listeners
+  $("#btn-conversas") && ($("#btn-conversas").onclick = showConversasView)
+  $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView)
+  $("#btn-pay-getnet") && ($("#btn-pay-getnet").onclick = createCheckoutLink)
+
+  // Billing modal event listeners
+  $("#btn-go-to-payments") &&
+    ($("#btn-go-to-payments").onclick = () => {
+      hideBillingModal()
+      showBillingView()
+    })
+
+  $("#btn-logout-modal") &&
+    ($("#btn-logout-modal").onclick = () => {
+      localStorage.clear()
+      location.reload()
     })
 
   // Voltar para etapa de conta
