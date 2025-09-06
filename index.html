@@ -127,6 +127,23 @@
         <div class="sidebar-head">
           <h2>Conversas</h2>
 
+          <!-- Added Pagamentos menu item -->
+          <div class="sidebar-menu">
+            <button id="btn-conversas" class="menu-item active" data-view="conversas">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              Conversas
+            </button>
+            <button id="btn-pagamentos" class="menu-item" data-view="pagamentos">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                <line x1="1" y1="10" x2="23" y2="10"/>
+              </svg>
+              Pagamentos
+            </button>
+          </div>
+
           <!-- seletor mobile que o app.js usa -->
           <div class="mobile-stage-selector">
             <select id="mobile-stage-select" class="stage-select">
@@ -153,6 +170,57 @@
       </aside>
 
       <main class="main">
+        <!-- Added billing view -->
+        <div id="billing-view" class="billing-view hidden">
+          <div class="billing-header">
+            <h2>Pagamentos</h2>
+            <p>Gerencie sua assinatura da Luna AI</p>
+          </div>
+
+          <div class="billing-content">
+            <div class="billing-plan">
+              <div class="plan-header">
+                <h3>Luna AI Professional</h3>
+                <div class="plan-price">R$ 349,90<span>/mês</span></div>
+              </div>
+              <div class="plan-description">
+                <p>Prospecção inteligente por nicho específico, muito mais eficaz que campanhas aleatórias. Supervisione conversas do WhatsApp com IA avançada.</p>
+              </div>
+            </div>
+
+            <div class="billing-status">
+              <h4>Seu Status</h4>
+              <div id="billing-status-content" class="status-content">
+                <div class="status-item">
+                  <span class="status-label">Plano atual:</span>
+                  <span id="current-plan" class="status-value">Carregando...</span>
+                </div>
+                <div class="status-item">
+                  <span class="status-label">Dias restantes:</span>
+                  <span id="days-remaining" class="status-value">Carregando...</span>
+                </div>
+                <div class="status-item">
+                  <span class="status-label">Trial até:</span>
+                  <span id="trial-until" class="status-value">Carregando...</span>
+                </div>
+                <div class="status-item">
+                  <span class="status-label">Pago até:</span>
+                  <span id="paid-until" class="status-value">Carregando...</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="billing-actions">
+              <button id="btn-pay-getnet" class="btn btn-primary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                  <line x1="1" y1="10" x2="23" y2="10"/>
+                </svg>
+                Pagar com GetNet
+              </button>
+            </div>
+          </div>
+
         <div class="chatbar">
           <button id="btn-back-mobile" class="btn btn-icon back" title="Voltar">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -175,6 +243,23 @@
       </main>
     </div>
   </section>
+
+  <!-- Added billing modal -->
+  <div id="billing-modal" class="billing-modal hidden">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Período de teste expirado</h3>
+      </div>
+      <div class="modal-body">
+        <p>Seu período de teste grátis acabou. Acesse a aba Pagamentos e realize o pagamento para continuar usando a Luna AI.</p>
+      </div>
+      <div class="modal-actions">
+        <button id="btn-go-to-payments" class="btn btn-primary">Ir para Pagamentos</button>
+        <button id="btn-logout-modal" class="btn btn-secondary">Sair</button>
+      </div>
+    </div>
+  </div>
 
   <noscript>
     <div style="padding:16px;background:#111;color:#fff">
