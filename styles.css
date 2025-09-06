@@ -97,9 +97,10 @@ body {
   flex-direction: column;
   gap: 20px;
 }
+/* Making login button full width and centered */
 .login-form .btn {
+  width: 100%;
   align-self: center;
-  width: fit-content;
 }
 .form-group {
   display: flex;
