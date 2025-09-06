@@ -97,6 +97,10 @@ body {
   flex-direction: column;
   gap: 20px;
 }
+.login-form .btn {
+  align-self: center;
+  width: fit-content;
+}
 .form-group {
   display: flex;
   flex-direction: column;
