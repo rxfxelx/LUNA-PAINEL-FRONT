@@ -201,22 +201,15 @@
     const billingView = document.getElementById('billing-view');
 
     function setMode(mode) {
-      // mode: 'chat' | 'billing'
       body.classList.toggle('mode-chat', mode === 'chat');
       body.classList.toggle('mode-billing', mode === 'billing');
-
-      // ativa item de menu
       btnConversas.classList.toggle('active', mode === 'chat');
       btnPagamentos.classList.toggle('active', mode === 'billing');
-
-      // acessibilidade
       if (mode === 'billing') billingView?.focus();
     }
 
-    // -------- Router SPA --------
     function openGetNetIfConfigured() {
       if (window.GETNET_CHECKOUT_URL) {
-        // abre checkout em nova aba/janela se configurado em config.js
         window.open(window.GETNET_CHECKOUT_URL, '_blank', 'noopener,noreferrer');
       }
     }
@@ -231,7 +224,6 @@
         setMode('billing');
         openGetNetIfConfigured();
       } else {
-        // fallback: mantém app e volta pro chat
         setMode('chat');
       }
     }
@@ -244,22 +236,18 @@
       handleRoute(path);
     }
 
-    // Botões -> navegação SPA
     btnConversas?.addEventListener('click', (e) => navTo('/', e));
     btnPagamentos?.addEventListener('click', (e) => navTo('/pagamentos', e));
     btnPayGetnet?.addEventListener('click', (e) => navTo('/pagamentos/getnet', e));
 
-    // Modal -> vai direto pra pagamentos
     document.getElementById('btn-go-to-payments')?.addEventListener('click', () => {
       document.getElementById('billing-modal')?.classList.add('hidden');
       navTo('/pagamentos');
     });
     document.getElementById('btn-logout-modal')?.addEventListener('click', () => {
       document.getElementById('billing-modal')?.classList.add('hidden');
-      // aqui você pode disparar seu logout real
     });
 
-    // Recolher/Expandir rail
     railToggle?.addEventListener('click', () => {
       body.classList.toggle('rail-collapsed');
       railToggle.querySelector('svg').style.transform =
@@ -268,10 +256,7 @@
         body.classList.contains('rail-collapsed') ? 'Expandir' : 'Recolher';
     });
 
-    // back/forward do navegador
     window.addEventListener('popstate', () => handleRoute());
-
-    // rota inicial (deep-link)
     handleRoute();
   })();
   </script>
