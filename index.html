@@ -217,7 +217,6 @@
 
     railToggle?.addEventListener('click', () => {
       body.classList.toggle('rail-collapsed');
-      // troca ícone seta (opcional: inverte direção)
       railToggle.querySelector('svg').style.transform =
         body.classList.contains('rail-collapsed') ? 'rotate(180deg)' : 'rotate(0deg)';
       railToggle.querySelector('.label').textContent =
