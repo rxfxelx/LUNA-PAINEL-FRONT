@@ -174,6 +174,40 @@ body.mode-billing .chatbar,
 body.mode-billing #messages{display:none}
 body.mode-billing #billing-view{display:block}
 
+/* ========= PAGAMENTOS (estilização completa) ========= */
+.billing-view{padding:24px;overflow-y:auto;background:var(--bg)}
+.billing-header{margin-bottom:24px}
+.billing-header h2{margin:0 0 6px;font-family:var(--font-primary);font-size:28px;font-weight:700;color:var(--text)}
+.billing-header p{margin:0;color:var(--text-muted)}
+.billing-content{display:grid;gap:20px;grid-template-columns:1fr;max-width:900px}
+@media (min-width:980px){.billing-content{grid-template-columns:1.1fr .9fr}}
+
+.billing-plan,.billing-status{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow)
+}
+.plan-header{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:18px 20px;border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,rgba(255,255,255,.02),transparent);
+  border-top-left-radius:var(--radius-lg);border-top-right-radius:var(--radius-lg)
+}
+.plan-header h3{margin:0;font-family:var(--font-primary);font-size:20px;font-weight:700;color:var(--text)}
+.plan-price{font-family:var(--font-primary);font-size:32px;font-weight:800;color:var(--primary)}
+.plan-price span{font-size:14px;font-weight:600;color:var(--text-muted)}
+.plan-description{padding:18px 20px;color:var(--text-muted);line-height:1.6}
+
+.billing-status h4{margin:0;padding:18px 20px;border-bottom:1px solid var(--border);font-family:var(--font-primary);font-size:18px;font-weight:700;color:var(--text)}
+.status-content{padding:14px 20px;display:flex;flex-direction:column;gap:0}
+.status-item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--border)}
+.status-item:last-child{border-bottom:none}
+.status-label{color:var(--text-subtle);font-weight:600}
+.status-value{color:var(--text);font-weight:700}
+
+.billing-actions{display:flex;gap:12px;padding:16px 20px;border-top:1px solid var(--border)}
+#btn-pay-getnet{min-width:220px;background:linear-gradient(135deg,var(--primary) 0%,var(--primary-light) 100%);border-color:var(--primary);color:#fff;box-shadow:0 2px 6px rgba(21,128,61,.25)}
+#btn-pay-getnet:hover{transform:translateY(-1px);background:linear-gradient(135deg,var(--primary-light) 0%,var(--accent) 100%)}
+
 /* ========= MOBILE ========= */
 .mobile-stage-selector{display:none}
 @media (max-width:1023px){
@@ -261,11 +295,3 @@ body.mode-billing .nav-rail .label { display: inline !important; }
 /* (opcional) garantir largura/ícone do botão de colapsar */
 .rail-toggle { width: 100%; }
 .rail-toggle svg { width: 16px; height: 16px; }
-
-/* ==== FIX: garantir layout correto da aba Pagamentos ==== */
-body.mode-billing #billing-view { display: block !important; }
-body.mode-billing .chatbar,
-body.mode-billing #messages,
-body.mode-billing .sidebar { display: none !important; }
-body.mode-billing .shell { grid-template-columns: 220px 1fr !important; }
-
