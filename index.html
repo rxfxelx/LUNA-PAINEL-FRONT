@@ -1,4 +1,4 @@
-<!doctype html>
+<!doctype html> 
 <html lang="pt-BR" class="dark">
 <head>
   <meta charset="utf-8" />
@@ -49,7 +49,7 @@
         </div>
       </div>
 
-      <!-- Etapa 2: token da instância (como já era) -->
+      <!-- Etapa 2: token da instância -->
       <div id="step-instance" class="login-step hidden">
         <div class="form-group">
           <label for="token">Token da Instância (UAZAPI)</label>
@@ -68,7 +68,7 @@
     </div>
   </main>
 
-  <!-- LOADING (opcional; o app.js usa um splash próprio, mas deixei aqui caso queira usar) -->
+  <!-- LOADING -->
   <section id="loading-view" class="loading hidden">
     <div class="loading-container">
       <div class="loading-logos-animation">
@@ -127,24 +127,29 @@
         <div class="sidebar-head">
           <h2>Conversas</h2>
 
-          <!-- Added Pagamentos menu item -->
-          <div class="sidebar-menu">
-            <button id="btn-conversas" class="menu-item active" data-view="conversas">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-              Conversas
-            </button>
-            <button id="btn-pagamentos" class="menu-item" data-view="pagamentos">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
-                <line x1="1" y1="10" x2="23" y2="10"/>
-              </svg>
-              Pagamentos
-            </button>
-          </div>
+          <!-- Menu lateral -->
+          <nav class="sidebar-menu">
+            <div class="menu-group">
+              <div class="menu-title">Menu</div>
 
-          <!-- seletor mobile que o app.js usa -->
+              <button id="btn-conversas" class="menu-item active" data-view="conversas">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                Conversas
+              </button>
+
+              <button id="btn-pagamentos" class="menu-item" data-view="pagamentos">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+                  <line x1="1" y1="10" x2="23" y2="10"/>
+                </svg>
+                Pagamentos
+              </button>
+            </div>
+          </nav>
+
+          <!-- seletor mobile usado pelo app.js -->
           <div class="mobile-stage-selector">
             <select id="mobile-stage-select" class="stage-select">
               <option value="geral">Geral</option>
@@ -154,7 +159,7 @@
             </select>
           </div>
 
-          <!-- badges/contadores mobile (opcionais; o app.js atualiza se existir) -->
+          <!-- contadores só no mobile -->
           <div class="mobile-counters">
             <span>Contatos: <b id="mobile-counter-contatos">0</b></span>
             <span>Lead: <b id="mobile-counter-lead">0</b></span>
@@ -170,7 +175,7 @@
       </aside>
 
       <main class="main">
-        <!-- Added billing view -->
+        <!-- Billing view -->
         <div id="billing-view" class="billing-view hidden">
           <div class="billing-header">
             <h2>Pagamentos</h2>
@@ -220,6 +225,7 @@
               </button>
             </div>
           </div>
+        </div> <!-- FIM billing-view -->
 
         <div class="chatbar">
           <button id="btn-back-mobile" class="btn btn-icon back" title="Voltar">
@@ -244,7 +250,7 @@
     </div>
   </section>
 
-  <!-- Added billing modal -->
+  <!-- Billing modal -->
   <div id="billing-modal" class="billing-modal hidden">
     <div class="modal-overlay"></div>
     <div class="modal-content">
