@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Luna – Supervisor WhatsApp</title>
 
-  <link rel="stylesheet" href="styles.css"/>
-  <style>.hidden{display:none!important}</style>
-
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700&family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 
-  <!-- Seus scripts -->
+  <!-- CSS -->
+  <link rel="stylesheet" href="styles.css"/>
+
+  <!-- JS -->
   <script defer src="config.js"></script>
   <script defer src="app.js"></script>
 </head>
@@ -21,7 +21,7 @@
 
   <!-- LOGIN -->
   <main id="login-view" class="login hidden">
-    <!-- ... (mantive sua tela de login igual; omiti só pra encurtar) ... -->
+    <!-- (coloque aqui seu formulário de login se quiser manter igual ao anterior) -->
   </main>
 
   <!-- LOADING -->
@@ -61,7 +61,7 @@
     </header>
 
     <div class="shell">
-      <!-- MENU LATERAL (recolhível) -->
+      <!-- MENU LATERAL -->
       <nav class="nav-rail" aria-label="Menu principal">
         <button id="btn-rail-toggle" class="rail-toggle" aria-label="Recolher/Expandir menu">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -106,15 +106,13 @@
           </div>
           <div class="sidebar-stats"><span class="stats-badge">Ativo</span></div>
         </div>
-        <div id="chat-list" class="chat-list">
-          <!-- itens de conversa renderizados pelo app.js -->
-        </div>
+        <div id="chat-list" class="chat-list"></div>
       </aside>
 
       <!-- CONTEÚDO PRINCIPAL -->
       <main class="main">
         <!-- Pagamentos -->
-        <div id="billing-view" class="billing-view hidden" tabindex="-1">
+        <div id="billing-view" class="billing-view hidden" tabindex="-1" aria-label="Área de pagamentos">
           <div class="billing-header">
             <h2>Pagamentos</h2>
             <p>Gerencie sua assinatura da Luna AI</p>
@@ -175,11 +173,11 @@
     </div>
   </section>
 
-  <!-- MODAL PAGAMENTO (opcional) -->
-  <div id="billing-modal" class="billing-modal hidden">
+  <!-- MODAL PAGAMENTO -->
+  <div id="billing-modal" class="billing-modal hidden" role="dialog" aria-modal="true" aria-labelledby="billing-modal-title">
     <div class="modal-overlay"></div>
     <div class="modal-content">
-      <div class="modal-header"><h3>Período de teste expirado</h3></div>
+      <div class="modal-header"><h3 id="billing-modal-title">Período de teste expirado</h3></div>
       <div class="modal-body"><p>Seu período de teste grátis acabou. Vá em Pagamentos para continuar usando a Luna AI.</p></div>
       <div class="modal-actions">
         <button id="btn-go-to-payments" class="btn btn-primary">Ir para Pagamentos</button>
@@ -189,51 +187,5 @@
   </div>
 
   <noscript><div style="padding:16px;background:#111;color:#fff">Ative o JavaScript para usar a Luna.</div></noscript>
-
-  <!-- JS de UI: alterna modos e recolhe menu -->
-  <script>
-  (function () {
-    const body = document.body;
-    const railToggle = document.getElementById('btn-rail-toggle');
-    const btnConversas = document.getElementById('btn-conversas');
-    const btnPagamentos = document.getElementById('btn-pagamentos');
-    const billingView = document.getElementById('billing-view');
-
-    function setMode(mode) {
-      // mode: 'chat' | 'billing'
-      body.classList.toggle('mode-chat', mode === 'chat');
-      body.classList.toggle('mode-billing', mode === 'billing');
-
-      // ativa item de menu
-      btnConversas.classList.toggle('active', mode === 'chat');
-      btnPagamentos.classList.toggle('active', mode === 'billing');
-
-      // acessibilidade
-      if (mode === 'billing') billingView?.focus();
-    }
-
-    btnConversas?.addEventListener('click', () => setMode('chat'));
-    btnPagamentos?.addEventListener('click', () => setMode('billing'));
-
-    railToggle?.addEventListener('click', () => {
-      body.classList.toggle('rail-collapsed');
-      // troca ícone seta (opcional: inverte direção)
-      railToggle.querySelector('svg').style.transform =
-        body.classList.contains('rail-collapsed') ? 'rotate(180deg)' : 'rotate(0deg)';
-      railToggle.querySelector('.label').textContent =
-        body.classList.contains('rail-collapsed') ? 'Expandir' : 'Recolher';
-    });
-
-    // Modal -> vai direto pra pagamentos
-    document.getElementById('btn-go-to-payments')?.addEventListener('click', () => {
-      document.getElementById('billing-modal')?.classList.add('hidden');
-      setMode('billing');
-    });
-    document.getElementById('btn-logout-modal')?.addEventListener('click', () => {
-      document.getElementById('billing-modal')?.classList.add('hidden');
-      // aqui você pode disparar seu logout real
-    });
-  })();
-  </script>
 </body>
 </html>
