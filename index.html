@@ -20,8 +20,62 @@
 <body class="mode-chat">
 
   <!-- LOGIN -->
+  <!-- A tela de login original foi acidentalmente substituída por um comentário,
+       o que fazia o front‑end quebrar e exibir apenas uma tela em branco. Abaixo
+       reconstruímos a estrutura necessária com os mesmos IDs e classes
+       esperados pelo script app.js para que o fluxo de autenticação funcione
+       novamente.  -->
   <main id="login-view" class="login hidden">
-    <!-- ... (mantive sua tela de login igual; omiti só pra encurtar) ... -->
+    <!-- Etapa 1: Login da conta (e‑mail e senha) -->
+    <div id="step-account" class="login-step">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="login-logo"><img src="lunapngcinza.png" alt="Luna" class="loading-logo"></div>
+          <h1>Luna</h1>
+          <p class="login-sub">Entre com sua conta para continuar</p>
+        </div>
+        <div class="login-form">
+          <div class="form-group">
+            <label for="acct-email">E-mail</label>
+            <input id="acct-email" type="email" class="inp" placeholder="Seu e‑mail" autocomplete="username" />
+          </div>
+          <div class="form-group">
+            <label for="acct-pass">Senha</label>
+            <input id="acct-pass" type="password" class="inp" placeholder="Sua senha" autocomplete="current-password" />
+          </div>
+          <!-- Mensagens de erro do login de conta -->
+          <div id="acct-msg" class="msg-err"></div>
+          <button id="btn-acct-login" class="btn btn-primary">
+            Entrar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Etapa 2: Conexão da instância (token da instância) -->
+    <div id="step-instance" class="login-step hidden">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="login-logo"><img src="lunapngcinza.png" alt="Luna" class="loading-logo"></div>
+          <h1>Luna</h1>
+          <p class="login-sub">Conecte sua instância do WhatsApp</p>
+        </div>
+        <div class="login-form">
+          <div class="form-group">
+            <label for="token">Token da instância</label>
+            <input id="token" type="text" class="inp" placeholder="Cole o token aqui" />
+          </div>
+          <!-- Mensagens de erro do token -->
+          <div id="msg" class="msg-err"></div>
+          <button id="btn-login" class="btn btn-primary">
+            <span>Conectar instância</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12h14M12 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
   </main>
 
   <!-- LOADING -->
