@@ -187,21 +187,52 @@ async function acctApi(path, opts = {}) {
 // ==== Billing System ====
 let billingStatus = null
 
+// Registra o trial para o usuário logado via e‑mail/senha.  Usa o token de
+// conta (ACCT_JWT_KEY) como Authorization.  Mantém idempotência: se já
+// existir registro, simplesmente retorna sucesso.
+async function registerTrialUser() {
+  try {
+    // Dispara o trial no backend usando o JWT do usuário (conta).
+    await acctApi("/api/billing/register-trial", { method: "POST" })
+    console.log("[v1] Trial user registered successfully")
+  } catch (e) {
+    console.error("[v1] Failed to register user trial:", e)
+  }
+}
+
 async function registerTrial() {
   try {
-    // Trial precisa do JWT da INSTÂNCIA
-    await api("/api/billing/register-trial", { method: "POST" })
-    console.log("[v0] Trial registered successfully")
+    // Determine se há um JWT de conta (usuário) para registrar o trial.  Se
+    // existir, usamos o fluxo de conta; caso contrário, recorremos ao JWT da
+    // instância (comportamento legado).
+    if (acctJwt()) {
+      await acctApi("/api/billing/register-trial", { method: "POST" })
+      console.log("[v1] Trial registered successfully (user)")
+    } else {
+      await api("/api/billing/register-trial", { method: "POST" })
+      console.log("[v0] Trial registered successfully (instance)")
+    }
   } catch (e) {
-    console.error("[v0] Failed to register trial:", e)
+    console.error("[v1] Failed to register trial:", e)
   }
 }
 
 async function checkBillingStatus() {
   try {
-    // Status com JWT da INSTÂNCIA
-    billingStatus = await api("/api/billing/status")
-    console.log("[v0] Billing status:", billingStatus)
+    // Busca o status de billing.  Se existir um JWT de conta (e‑mail/senha),
+    // priorizamos esse fluxo, pois o billing passa a ser por usuário.  Caso
+    // contrário, utilizamos o token da instância (legado).
+    let res
+    if (acctJwt()) {
+      res = await acctApi("/api/billing/status")
+    } else {
+      res = await api("/api/billing/status")
+    }
+    console.log("[v1] Billing status response:", res)
+    // A API retorna o objeto completo {ok, billing_key, status}.  Extraímos a
+    // propriedade 'status', mas se não existir assumimos o próprio objeto.
+    const st = res?.status ?? res
+    billingStatus = st
 
     if (billingStatus?.require_payment === true) {
       showBillingModal()
@@ -211,8 +242,8 @@ async function checkBillingStatus() {
     updateBillingView()
     return true
   } catch (e) {
-    console.error("[v0] Failed to check billing status:", e)
-    return true // Allow access on error
+    console.error("[v1] Failed to check billing status:", e)
+    return true // Permite o acesso em caso de erro
   }
 }
 
@@ -581,11 +612,20 @@ function attachCRMControlsToCard(el, ch) {}
 // Etapas de login
 function showStepAccount() {
   hide("#step-instance")
+  hide("#step-register")
   show("#step-account")
 }
 function showStepInstance() {
   hide("#step-account")
+  hide("#step-register")
   show("#step-instance")
+}
+
+// Mostra a etapa de registro de conta e esconde as demais (conta/instância).
+function showStepRegister() {
+  hide("#step-account")
+  hide("#step-instance")
+  show("#step-register")
 }
 
 // Login por e-mail/senha
@@ -620,6 +660,17 @@ async function acctLogin() {
 
     localStorage.setItem(ACCT_JWT_KEY, data.jwt)
 
+    // Registra o trial para o usuário logado (caso ainda não exista) e
+    // obtém o status de billing.  Isso é feito antes de avançar para a
+    // instância para que o modal de cobrança possa aparecer imediatamente
+    // se o trial já estiver expirado.
+    try {
+      await registerTrialUser()
+      await checkBillingStatus()
+    } catch (e) {
+      console.error(e)
+    }
+
     // Avança para o passo do token da instância
     showStepInstance()
     $("#token")?.focus()
@@ -629,6 +680,59 @@ async function acctLogin() {
     if (btnEl) {
       btnEl.disabled = false
       btnEl.textContent = "Entrar"
+    }
+  }
+}
+
+// Registro de conta (e‑mail/senha).  Esta função envia os dados para o
+// endpoint /api/users/register.  Ao registrar a conta, um token JWT de
+// usuário é retornado.  Em seguida, iniciamos o trial para esse usuário
+// (caso ainda não exista) e verificamos o status de billing.  Por fim,
+// avançamos para a etapa de instância.
+async function acctRegister() {
+  const email = $("#reg-email")?.value?.trim()
+  const pass = $("#reg-pass")?.value?.trim()
+  const msgEl = $("#reg-msg")
+  const btnEl = $("#btn-acct-register")
+
+  if (!email || !pass) {
+    if (msgEl) msgEl.textContent = "Informe e-mail e senha."
+    return
+  }
+
+  try {
+    if (btnEl) {
+      btnEl.disabled = true
+      btnEl.textContent = "Criando..."
+    }
+    if (msgEl) msgEl.textContent = ""
+
+    const r = await fetch(BACKEND() + "/api/users/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password: pass }),
+    })
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json()
+    if (!data?.jwt) throw new Error("Resposta inválida do servidor.")
+    // Armazena o JWT da conta
+    localStorage.setItem(ACCT_JWT_KEY, data.jwt)
+    // Inicia trial e lê status
+    try {
+      await registerTrialUser()
+      await checkBillingStatus()
+    } catch (e) {
+      console.error(e)
+    }
+    // Avança para token de instância
+    showStepInstance()
+    $("#token")?.focus()
+  } catch (e) {
+    if (msgEl) msgEl.textContent = e?.message || "Falha no registro."
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false
+      btnEl.textContent = "Criar Conta"
     }
   }
 }
@@ -2158,6 +2262,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Voltar para etapa de conta
   $("#btn-voltar-account") && ($("#btn-voltar-account").onclick = showStepAccount)
+
+  // Link para tela de cadastro
+  $("#link-acct-register") &&
+    ($("#link-acct-register").onclick = (e) => {
+      e.preventDefault()
+      showStepRegister()
+      $("#reg-email")?.focus()
+    })
+  // Botão de voltar do registro para o login
+  $("#btn-back-to-login") &&
+    ($("#btn-back-to-login").onclick = (e) => {
+      e.preventDefault()
+      showStepAccount()
+      $("#acct-email")?.focus()
+    })
+  // Registro de conta
+  $("#btn-acct-register") && ($("#btn-acct-register").onclick = acctRegister)
+  $("#reg-pass") &&
+    $("#reg-pass").addEventListener("keypress", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault()
+        acctRegister()
+      }
+    })
 
   // Link de cadastro (rota bonita)
   $("#link-cadastrar") &&
