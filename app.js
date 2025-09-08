@@ -795,6 +795,7 @@ function ensureRoute() {
     return
   }
   switchToApp()
+  try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
 }
 
 /* =========================================
@@ -1159,6 +1160,13 @@ function appendChatSkeleton(list, ch) {
   const pv = (ch.wa_lastMessageText || "").replace(/\s+/g, " ").trim()
   preview.textContent = pv ? truncatePreview(pv, 90) : "Carregando..."
   preview.title = pv || "Carregando..."
+  // fallback para não travar em 'Carregando...'
+  setTimeout(() => {
+    if (preview && preview.textContent === 'Carregando...') {
+      preview.textContent = 'Sem mensagens'
+      preview.title = 'Sem mensagens'
+    }
+  }, 5000)
 
   const unread = document.createElement("span")
   unread.className = "badge"
