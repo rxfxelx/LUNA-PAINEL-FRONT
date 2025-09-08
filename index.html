@@ -48,6 +48,35 @@
           <button id="btn-acct-login" class="btn btn-primary">
             Entrar
           </button>
+          <!-- Link para criar conta -->
+          <p class="login-register-link">Não tem conta?
+            <a href="#" id="link-acct-register">Criar conta</a>
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Etapa de registro: criação de conta -->
+    <div id="step-register" class="login-step hidden">
+      <div class="login-card">
+        <div class="login-header">
+          <div class="login-logo"><img src="lunapngcinza.png" alt="Luna" class="loading-logo"></div>
+          <h1>Criar Conta</h1>
+          <p class="login-sub">Preencha os campos para criar sua conta</p>
+        </div>
+        <div class="login-form">
+          <div class="form-group">
+            <label for="reg-email">E-mail</label>
+            <input id="reg-email" type="email" class="inp" placeholder="Seu e‑mail" autocomplete="username" />
+          </div>
+          <div class="form-group">
+            <label for="reg-pass">Senha</label>
+            <input id="reg-pass" type="password" class="inp" placeholder="Crie uma senha" autocomplete="new-password" />
+          </div>
+          <!-- Mensagens de erro do registro -->
+          <div id="reg-msg" class="msg-err"></div>
+          <button id="btn-acct-register" class="btn btn-primary">Criar Conta</button>
+          <button id="btn-back-to-login" class="btn btn-secondary">Voltar</button>
         </div>
       </div>
     </div>
