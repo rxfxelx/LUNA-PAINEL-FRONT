@@ -320,6 +320,112 @@ async function createCheckoutLink() {
   }
 }
 
+// ========= PAGAMENTO COM CARTÃO =========
+
+// Abre o modal de pagamento para coletar dados do cartão
+function showCardModal() {
+  const modal = document.getElementById("card-modal")
+  if (modal) {
+    modal.classList.remove("hidden")
+    // Pré-preenche e-mail se o payload do JWT contiver um e‑mail
+    const payload = jwtPayload() || {}
+    const emailInput = document.getElementById("card-email")
+    if (emailInput && !emailInput.value) {
+      emailInput.value = payload.email || payload.sub || ""
+    }
+    const nameInput = document.getElementById("card-name")
+    if (nameInput && !nameInput.value) {
+      // tenta extrair nome do payload (por exemplo, da conta)
+      nameInput.value = payload.name || ""
+    }
+    // Limpa mensagens de erro anteriores
+    const err = document.getElementById("card-error")
+    if (err) err.textContent = ""
+  }
+}
+
+// Fecha o modal de pagamento
+function hideCardModal() {
+  const modal = document.getElementById("card-modal")
+  if (modal) modal.classList.add("hidden")
+}
+
+// Handler para submissão do formulário de pagamento
+async function submitCardPayment(event) {
+  event.preventDefault()
+  const submitBtn = document.getElementById("btn-card-submit")
+  const errorEl = document.getElementById("card-error")
+  if (errorEl) errorEl.textContent = ""
+  if (submitBtn) {
+    submitBtn.disabled = true
+    submitBtn.textContent = "Processando..."
+  }
+  try {
+    // Coleta dados do formulário
+    const name = document.getElementById("card-name").value.trim()
+    const email = document.getElementById("card-email").value.trim()
+    const documentNumber = document.getElementById("card-document").value.trim() || undefined
+    const phoneNumber = document.getElementById("card-phone").value.trim() || undefined
+    const cardholderName = document.getElementById("cardholder-name").value.trim()
+    const cardNumber = document.getElementById("card-number").value.replace(/\s+/g, "")
+    const expMonth = document.getElementById("card-exp-month").value.trim()
+    const expYear = document.getElementById("card-exp-year").value.trim()
+    const securityCode = document.getElementById("card-cvv").value.trim()
+    const brand = document.getElementById("card-brand").value
+    const installments = parseInt(document.getElementById("card-installments").value, 10) || 1
+
+    // Valida campos obrigatórios
+    if (!name || !email || !cardholderName || !cardNumber || !expMonth || !expYear || !securityCode || !brand) {
+      throw new Error("Preencha todos os campos obrigatórios.")
+    }
+    // Monta payload para a API
+    const body = {
+      email,
+      name,
+      plan: "luna_base",
+      amount_cents: 34990,
+      document_number: documentNumber || undefined,
+      document_type: documentNumber && documentNumber.length > 11 ? "CNPJ" : "CPF",
+      phone_number: phoneNumber || undefined,
+      card_number: cardNumber,
+      cardholder_name: cardholderName,
+      brand: brand,
+      expiration_month: expMonth,
+      expiration_year: expYear,
+      security_code: securityCode,
+      installments: installments,
+    }
+    // Chama a rota do backend usando token da instância (Authorization via api())
+    const resp = await api("/api/pay/getnet/card", {
+      method: "POST",
+      body: JSON.stringify(body),
+    })
+    console.log("[v2] Card payment response:", resp)
+    // Se pago, atualiza status e fecha modal
+    if (resp?.status === "paid") {
+      hideCardModal()
+      await checkBillingStatus()
+      alert("Pagamento aprovado! Sua conta foi ativada.")
+      showBillingView()
+    } else if (resp?.status === "pending") {
+      hideCardModal()
+      await checkBillingStatus()
+      alert("Pagamento em processamento. Aguarde a confirmação.")
+      showBillingView()
+    } else {
+      throw new Error("Não foi possível concluir o pagamento. Tente novamente.")
+    }
+  } catch (err) {
+    console.error("[v2] Falha ao processar pagamento:", err)
+    if (errorEl) errorEl.textContent = err?.message || "Erro desconhecido"
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false
+      submitBtn.textContent = "Pagar"
+    }
+  }
+}
+
 function showConversasView() {
   hide("#billing-view")
   show(".chatbar")
@@ -2245,7 +2351,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Billing system event listeners
   $("#btn-conversas") && ($("#btn-conversas").onclick = showConversasView)
   $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView)
-  $("#btn-pay-getnet") && ($("#btn-pay-getnet").onclick = createCheckoutLink)
+  // Ao clicar em "Assinar agora", abre o modal de pagamento em vez de gerar link externo
+  $("#btn-pay-getnet") && ($("#btn-pay-getnet").onclick = showCardModal)
 
   // Billing modal event listeners
   $("#btn-go-to-payments") &&
@@ -2259,6 +2366,16 @@ document.addEventListener("DOMContentLoaded", () => {
       localStorage.clear()
       location.reload()
     })
+
+  // Card payment modal event listeners
+  $("#btn-card-cancel") && ($("#btn-card-cancel").onclick = hideCardModal)
+  const cardModal = document.getElementById("card-modal")
+  if (cardModal) {
+    const overlay = cardModal.querySelector(".modal-overlay")
+    if (overlay) overlay.onclick = hideCardModal
+  }
+  const cardForm = document.getElementById("card-form")
+  if (cardForm) cardForm.addEventListener("submit", submitCardPayment)
 
   // Voltar para etapa de conta
   $("#btn-voltar-account") && ($("#btn-voltar-account").onclick = showStepAccount)
