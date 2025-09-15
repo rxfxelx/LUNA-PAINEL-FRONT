@@ -16,6 +16,8 @@
   <!-- Seus scripts -->
   <script defer src="config.js"></script>
   <script defer src="app.js"></script>
+  <!-- Integração GetNet: script dedicado que abre o modal e chama a API -->
+  <script defer src="getnet-payment.js"></script>
 </head>
 <body class="mode-chat">
 
@@ -309,9 +311,7 @@
     tela de Pagamentos.  Ele coleta os dados do cartão de crédito e
     informações básicas do cliente (nome, e‑mail, CPF/CNPJ, telefone) e
     permite escolher a bandeira e o número de parcelas.  Após o envio,
-    uma requisição é feita para o backend para processar o pagamento
-    via API da GetNet.  O modal é semelhante ao modal de trial expirado,
-    reaproveitando a camada de overlay e estilização de cartão.
+    a integração chama diretamente a API da GetNet.
   -->
   <div id="card-modal" class="payment-modal hidden">
     <div class="modal-overlay"></div>
@@ -397,7 +397,6 @@
     const railToggle = document.getElementById('btn-rail-toggle');
     const btnConversas = document.getElementById('btn-conversas');
     const btnPagamentos = document.getElementById('btn-pagamentos');
-    const btnPayGetnet = document.getElementById('btn-pay-getnet');
     const billingView = document.getElementById('billing-view');
 
     function setMode(mode) {
@@ -408,21 +407,12 @@
       if (mode === 'billing') billingView?.focus();
     }
 
-    function openGetNetIfConfigured() {
-      if (window.GETNET_CHECKOUT_URL) {
-        window.open(window.GETNET_CHECKOUT_URL, '_blank', 'noopener,noreferrer');
-      }
-    }
-
     function handleRoute(pathname) {
       const path = pathname || location.pathname;
       if (path === '/' || path === '') {
         setMode('chat');
       } else if (path === '/pagamentos') {
         setMode('billing');
-      } else if (path === '/pagamentos/getnet') {
-        setMode('billing');
-        openGetNetIfConfigured();
       } else {
         setMode('chat');
       }
@@ -438,7 +428,8 @@
 
     btnConversas?.addEventListener('click', (e) => navTo('/', e));
     btnPagamentos?.addEventListener('click', (e) => navTo('/pagamentos', e));
-    btnPayGetnet?.addEventListener('click', (e) => navTo('/pagamentos/getnet', e));
+
+    // O clique em #btn-pay-getnet é tratado em getnet-payment.js (abre modal e chama GetNet)
 
     document.getElementById('btn-go-to-payments')?.addEventListener('click', () => {
       document.getElementById('billing-modal')?.classList.add('hidden');
