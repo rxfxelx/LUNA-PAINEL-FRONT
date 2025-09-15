@@ -225,6 +225,52 @@ body.mode-billing #billing-view{display:block}
 .status-label{color:var(--text-subtle);font-weight:600}
 .status-value{color:var(--text);font-weight:700}
 
+/* ===== PAGAMENTOS: Lista de benefícios ===== */
+/*
+ * A seção de benefícios torna o plano mais atrativo, mostrando
+ * claramente o que o usuário receberá.  Utilizamos um cartão
+ * dedicado com título e uma lista de itens marcados com check
+ * icons, alinhando os estilos com o restante do painel.
+ */
+.billing-features{
+  margin:24px 0;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius-lg);
+  box-shadow:var(--shadow);
+  padding:20px 24px;
+}
+.billing-features h4{
+  margin:0 0 16px 0;
+  font-family:var(--font-primary);
+  font-size:18px;
+  font-weight:700;
+  color:var(--text);
+  border-bottom:1px solid var(--border);
+  padding-bottom:12px;
+}
+.billing-features ul{
+  list-style:none;
+  padding:0;
+  margin:0;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.billing-features li{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  color:var(--text);
+  font-size:14px;
+}
+.billing-features li svg{
+  flex-shrink:0;
+  width:20px;
+  height:20px;
+  stroke:var(--primary);
+}
+
 .billing-actions{display:flex;gap:12px;padding:16px 20px;border-top:1px solid var(--border)}
 #btn-pay-getnet{min-width:220px;background:linear-gradient(135deg,var(--primary) 0%,var(--primary-light) 100%);border-color:var(--primary);color:#fff;box-shadow:0 2px 6px rgba(21,128,61,.25)}
 #btn-pay-getnet:hover{transform:translateY(-1px);background:linear-gradient(135deg,var(--primary-light) 0%,var(--accent) 100%)}
