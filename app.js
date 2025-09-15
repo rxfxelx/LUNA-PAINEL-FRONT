@@ -372,50 +372,29 @@ async function submitCardPayment(event) {
     const expYear = document.getElementById("card-exp-year").value.trim()
     const securityCode = document.getElementById("card-cvv").value.trim()
     const brand = document.getElementById("card-brand").value
-    const installments = parseInt(document.getElementById("card-installments").value, 10) || 1
-
-    // Define valor fixo em centavos para o plano Luna AI Professional
-    const amountCents = 1
+    const cardType = document.getElementById("card-type").value || "credit"
 
     // Valida campos obrigatórios
-    if (!name || !email || !cardholderName || !cardNumber || !expMonth || !expYear || !securityCode || !brand) {
+    if (!name || !email || !cardholderName || !cardNumber || !expMonth || !expYear || !securityCode || !brand || !cardType) {
       throw new Error("Preencha todos os campos obrigatórios.")
     }
-    // Monta payload para a API
-    const body = {
-      email,
-      name,
-      plan: "luna_base",
-      amount_cents: 34990,
-      document_number: documentNumber || undefined,
-      document_type: documentNumber && documentNumber.length > 11 ? "CNPJ" : "CPF",
-      phone_number: phoneNumber || undefined,
-      card_number: cardNumber,
-      cardholder_name: cardholderName,
-      brand: brand,
-      expiration_month: expMonth,
-      expiration_year: expYear,
-      security_code: securityCode,
-      installments: installments,
-    }
-    // Integração direta com a API da GetNet conforme documentação
-    // Passo 1: obtém token OAuth usando client_id/client_secret
-    const getnetBase =
-      (window.__GETNET_ENV__ === "production"
-        ? "https://api.getnet.com.br"
-        : "https://api-homologacao.getnet.com.br") ||
-      "https://api-homologacao.getnet.com.br"
+
+    // === Integração direta com a API da GetNet ===
+    // Determina ambiente (sandbox ou production) com base no config
+    const baseURL = window.__GETNET_ENV__ === "production" ? "https://api.getnet.com.br" : "https://api-homologacao.getnet.com.br"
     const clientId = window.__GETNET_CLIENT_ID__
     const clientSecret = window.__GETNET_CLIENT_SECRET__
     const sellerId = window.__GETNET_SELLER_ID__
     if (!clientId || !clientSecret || !sellerId) {
       throw new Error("Credenciais da GetNet não configuradas.")
     }
-    const tokenResp = await fetch(`${getnetBase}/auth/oauth/v2/token`, {
+
+    // 1) Obtém access token via OAuth2
+    const tokenResp = await fetch(`${baseURL}/auth/oauth/v2/token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
-        Authorization: "Basic " + btoa(clientId + ":" + clientSecret),
+        Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
       },
       body: new URLSearchParams({ grant_type: "client_credentials", scope: "oob" }).toString(),
     })
@@ -427,8 +406,9 @@ async function submitCardPayment(event) {
     if (!accessToken) {
       throw new Error("Token de acesso não recebido")
     }
-    // Passo 2: tokeniza o cartão
-    const cardTokenResp = await fetch(`${getnetBase}/v1/tokens/card`, {
+
+    // 2) Tokeniza o cartão
+    const tokenizeResp = await fetch(`${baseURL}/v1/tokens/card`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -436,18 +416,39 @@ async function submitCardPayment(event) {
       },
       body: JSON.stringify({ card_number: cardNumber, customer_id: email }),
     })
-    if (!cardTokenResp.ok) {
-      const err = await cardTokenResp.text()
-      throw new Error(`Erro ao tokenizar cartão: ${err || cardTokenResp.status}`)
+    if (!tokenizeResp.ok) {
+      const errTxt = await tokenizeResp.text()
+      throw new Error(`Erro ao tokenizar cartão: ${errTxt || tokenizeResp.status}`)
     }
-    const cardTokenData = await cardTokenResp.json()
-    const numberToken = cardTokenData.number_token || cardTokenData.numberToken
+    const tokenDataJson = await tokenizeResp.json()
+    const numberToken = tokenDataJson.number_token || tokenDataJson.numberToken
     if (!numberToken) {
-      throw new Error("Token do cartão não recebido")
+      throw new Error("Número token do cartão não retornado")
     }
-    // Passo 3: executa a transação de crédito
+
+    // 3) Monta payload de pagamento dependendo do tipo de cartão (crédito ou débito)
+    // Valor fixo do plano (centavos) - sempre integral
+    const amountCents = 34990
     const orderId = `order_${Date.now()}`
-    const paymentPayload = {
+    // Common customer object
+    const customerData = {
+      customer_id: email,
+      name: name,
+      email: email,
+      document_type: documentNumber && documentNumber.length > 11 ? "CNPJ" : "CPF",
+      document_number: documentNumber || undefined,
+      phone_number: phoneNumber || undefined,
+    }
+    // Common card object
+    const cardData = {
+      number_token: numberToken,
+      cardholder_name: cardholderName,
+      expiration_month: expMonth,
+      expiration_year: expYear,
+      brand: brand,
+      security_code: securityCode,
+    }
+    let payload = {
       seller_id: sellerId,
       amount: amountCents,
       currency: "BRL",
@@ -456,53 +457,54 @@ async function submitCardPayment(event) {
         sales_tax: 0,
         product_type: "digital_content",
       },
-      customer: {
-        customer_id: email,
-        name: name,
-        email: email,
-        document_type: body.document_type,
-        document_number: documentNumber || undefined,
-        phone_number: phoneNumber || undefined,
-      },
-      credit: {
+      customer: customerData,
+    }
+    let endpoint = ""
+    if (cardType === "debit") {
+      // Pagamento via débito
+      endpoint = "/v1/payments/debit"
+      payload.debit = {
+        cardholder_mobile: phoneNumber || undefined,
+        soft_descriptor: "LunaAI",
+        dynamic_mcc: 52106184,
+        authenticated: false,
+        card: cardData,
+      }
+    } else {
+      // Pagamento via crédito (padrão)
+      endpoint = "/v1/payments/credit"
+      payload.credit = {
         delayed: false,
         authenticated: false,
         pre_authorization: false,
         save_card_data: false,
         transaction_type: "FULL",
-        number_installments: installments,
+        number_installments: 1,
         soft_descriptor: "LunaAI",
         dynamic_mcc: 52106184,
-        card: {
-          number_token: numberToken,
-          cardholder_name: cardholderName,
-          expiration_month: expMonth,
-          expiration_year: expYear,
-          brand: brand,
-          security_code: securityCode,
-        },
-      },
+        card: cardData,
+      }
     }
-    const payResp = await fetch(`${getnetBase}/v1/payments/credit`, {
+
+    const paymentResp = await fetch(`${baseURL}${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify(paymentPayload),
+      body: JSON.stringify(payload),
     })
-    if (!payResp.ok) {
-      const txt = await payResp.text()
-      throw new Error(`Erro no pagamento: ${txt || payResp.status}`)
+    if (!paymentResp.ok) {
+      const errTxt = await paymentResp.text()
+      throw new Error(`Erro no pagamento: ${errTxt || paymentResp.status}`)
     }
-    const payData = await payResp.json()
-    // Analisa status retornado: approved, authorized, confirmed
-    const statusRaw = payData.status || (payData.payment || {}).status || payData.transaction_status
-    const statusStr = String(statusRaw || "").toLowerCase()
-    const isPaid = ["approved", "authorized", "confirmed"].some((s) => statusStr.includes(s))
+    const paymentData = await paymentResp.json()
+    const statusRaw = paymentData.status || (paymentData.payment || {}).status || paymentData.transaction_status
+    const status = String(statusRaw || "").toLowerCase()
+    const isPaid = ["approved", "authorized", "confirmed"].some((s) => status.includes(s))
     hideCardModal()
     if (isPaid) {
-      alert("Pagamento aprovado! Sua assinatura foi registrada com a GetNet.")
+      alert("Pagamento aprovado!")
     } else {
       alert("Pagamento em processamento. Aguarde a confirmação.")
     }
