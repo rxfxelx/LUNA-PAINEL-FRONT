@@ -303,6 +303,91 @@
     </div>
   </div>
 
+  <!-- MODAL DE PAGAMENTO COM CARTÃO -->
+  <!--
+    Este modal é exibido quando o usuário clica em "Assinar agora" na
+    tela de Pagamentos.  Ele coleta os dados do cartão de crédito e
+    informações básicas do cliente (nome, e‑mail, CPF/CNPJ, telefone) e
+    permite escolher a bandeira e o número de parcelas.  Após o envio,
+    uma requisição é feita para o backend para processar o pagamento
+    via API da GetNet.  O modal é semelhante ao modal de trial expirado,
+    reaproveitando a camada de overlay e estilização de cartão.
+  -->
+  <div id="card-modal" class="payment-modal hidden">
+    <div class="modal-overlay"></div>
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Dados do pagamento</h3>
+      </div>
+      <form id="card-form" class="modal-body">
+        <div class="form-group">
+          <label for="card-name">Nome completo</label>
+          <input id="card-name" type="text" class="inp" placeholder="Nome do cliente" required />
+        </div>
+        <div class="form-group">
+          <label for="card-email">E‑mail</label>
+          <input id="card-email" type="email" class="inp" placeholder="email@exemplo.com" required />
+        </div>
+        <div class="form-group">
+          <label for="card-document">CPF/CNPJ</label>
+          <input id="card-document" type="text" class="inp" placeholder="Documento" />
+        </div>
+        <div class="form-group">
+          <label for="card-phone">Telefone</label>
+          <input id="card-phone" type="text" class="inp" placeholder="DDD + número" />
+        </div>
+        <div class="form-group">
+          <label for="cardholder-name">Nome no cartão</label>
+          <input id="cardholder-name" type="text" class="inp" placeholder="Como impresso no cartão" required />
+        </div>
+        <div class="form-group">
+          <label for="card-number">Número do cartão</label>
+          <input id="card-number" type="text" class="inp" inputmode="numeric" maxlength="19" placeholder="0000 0000 0000 0000" required />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="card-exp-month">Mês</label>
+            <input id="card-exp-month" type="text" class="inp" inputmode="numeric" maxlength="2" placeholder="MM" required />
+          </div>
+          <div class="form-group">
+            <label for="card-exp-year">Ano</label>
+            <input id="card-exp-year" type="text" class="inp" inputmode="numeric" maxlength="2" placeholder="AA" required />
+          </div>
+          <div class="form-group">
+            <label for="card-cvv">CVV</label>
+            <input id="card-cvv" type="text" class="inp" inputmode="numeric" maxlength="4" placeholder="Cód." required />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="card-brand">Bandeira</label>
+          <select id="card-brand" class="inp" required>
+            <option value="">Selecione</option>
+            <option value="Mastercard">Mastercard</option>
+            <option value="Visa">Visa</option>
+            <option value="Amex">American Express</option>
+            <option value="Elo">Elo</option>
+            <option value="Hipercard">Hipercard</option>
+            <option value="Diners">Diners</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="card-installments">Parcelas</label>
+          <select id="card-installments" class="inp" required>
+            <option value="1">1x de R$ 349,90</option>
+            <option value="3">3x de R$ 116,63</option>
+            <option value="6">6x de R$ 58,32</option>
+            <option value="12">12x de R$ 29,16</option>
+          </select>
+        </div>
+        <div id="card-error" class="msg-err"></div>
+        <div class="modal-actions">
+          <button type="button" id="btn-card-cancel" class="btn btn-secondary">Cancelar</button>
+          <button type="submit" id="btn-card-submit" class="btn btn-primary">Pagar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <noscript><div style="padding:16px;background:#111;color:#fff">Ative o JavaScript para usar a Luna.</div></noscript>
 
   <!-- JS de UI: alterna modos, routing SPA e recolhe menu -->
