@@ -375,7 +375,7 @@ async function submitCardPayment(event) {
     const installments = parseInt(document.getElementById("card-installments").value, 10) || 1
 
     // Define valor fixo em centavos para o plano Luna AI Professional
-    const amountCents = 34990
+    const amountCents = 1
 
     // Valida campos obrigatórios
     if (!name || !email || !cardholderName || !cardNumber || !expMonth || !expYear || !securityCode || !brand) {
