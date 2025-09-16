@@ -375,10 +375,19 @@ function showCardModal() {
     if (emailInput && !emailInput.value) {
       emailInput.value = payload.email || payload.sub || ""
     }
-    const nameInput = document.getElementById("card-name")
-    if (nameInput && !nameInput.value) {
-      // tenta extrair nome do payload (por exemplo, da conta)
-      nameInput.value = payload.name || ""
+    // Preenche primeiro nome e sobrenome separadamente se o payload contiver um nome
+    const firstInput = document.getElementById("card-first-name")
+    const lastInput = document.getElementById("card-last-name")
+    if ((firstInput && !firstInput.value) || (lastInput && !lastInput.value)) {
+      const fullName = payload.name || ""
+      // Se houver nome completo, separa pelo primeiro espaço
+      const parts = String(fullName).trim().split(/\s+/).filter(Boolean)
+      if (parts.length) {
+        const f = parts.shift()
+        const l = parts.length ? parts.join(" ") : ""
+        if (firstInput && !firstInput.value) firstInput.value = f
+        if (lastInput && !lastInput.value) lastInput.value = l
+      }
     }
     // Limpa mensagens de erro anteriores
     const err = document.getElementById("card-error")
@@ -404,7 +413,9 @@ async function submitCardPayment(event) {
   }
   try {
     // Coleta dados do formulário
-    const name = document.getElementById("card-name").value.trim()
+    const firstName = document.getElementById("card-first-name").value.trim()
+    const lastName = document.getElementById("card-last-name").value.trim()
+    const name = `${firstName} ${lastName}`.trim()
     const email = document.getElementById("card-email").value.trim()
     const documentNumberRaw = document.getElementById("card-document").value.trim()
     const phoneRaw = document.getElementById("card-phone").value.trim()
@@ -417,7 +428,7 @@ async function submitCardPayment(event) {
     const cardType = (document.getElementById("card-type")?.value || "credit").toLowerCase()
 
     // ===== Validações obrigatórias =====
-    if (!name || !email || !cardholderName || !cardNumberRaw || !expMonthRaw || !expYearRaw || !securityCodeRaw || !selectedBrand || !cardType) {
+    if (!firstName || !lastName || !email || !cardholderName || !cardNumberRaw || !expMonthRaw || !expYearRaw || !securityCodeRaw || !selectedBrand || !cardType) {
       throw new Error("Preencha todos os campos obrigatórios.")
     }
 
@@ -495,7 +506,9 @@ async function submitCardPayment(event) {
     // Valor fixo do plano (centavos) - sempre integral
     const amountCents = 34990
     const orderId = `order_${Date.now()}`
-    const { first_name, last_name } = splitName(name)
+    // Utiliza os campos de primeiro nome e sobrenome fornecidos pelo usuário
+    const first_name = firstName
+    const last_name = lastName
 
     // Common customer object (campos obrigatórios incluídos)
     const customerData = {
