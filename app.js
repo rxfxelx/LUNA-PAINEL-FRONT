@@ -497,7 +497,7 @@ async function submitCardPayment(event) {
     const orderId = `order_${Date.now()}`
     const { first_name, last_name } = splitName(name)
 
-    // Common customer object
+    // Common customer object (campos obrigatórios incluídos)
     const customerData = {
       customer_id: email,
       first_name,
@@ -530,17 +530,17 @@ async function submitCardPayment(event) {
     }
     let endpoint = ""
     if (cardType === "debit") {
-      // Pagamento via débito
+      // Pagamento via débito (campos obrigatórios)
       endpoint = "/v1/payments/debit"
       payload.debit = {
-        cardholder_mobile: cardholderMobile,
+        cardholder_mobile: cardholderMobile, // obrigatório no débito
         soft_descriptor: "LunaAI",
         dynamic_mcc: 52106184,
         authenticated: false,
         card: cardData,
       }
     } else {
-      // Pagamento via crédito (padrão)
+      // Pagamento via crédito (campos obrigatórios)
       endpoint = "/v1/payments/credit"
       payload.credit = {
         delayed: false,
@@ -548,7 +548,7 @@ async function submitCardPayment(event) {
         pre_authorization: false,
         save_card_data: false,
         transaction_type: "FULL",
-        number_installments: 1,
+        number_installments: 1, // obrigatório mesmo que 1
         soft_descriptor: "LunaAI",
         dynamic_mcc: 52106184,
         card: cardData,
@@ -1448,7 +1448,8 @@ async function loadChats() {
             card.title = "Sem mensagens"
           }
           const base = state.chats.find((c) => (c.wa_chatid || c.chatid || c.wa_fastid || c.wa_id || "") === id) || {}
-          updateLastActivity(el.dataset.chatid, base.wa_lastMsgTimestamp || base.messageTimestamp || base.updatedAt || 0)
+          // BUGFIX: 'el' não existe neste escopo. Use o id correto.
+          updateLastActivity(id, base.wa_lastMsgTimestamp || base.messageTimestamp || base.updatedAt || 0)
         }
       })
     }
