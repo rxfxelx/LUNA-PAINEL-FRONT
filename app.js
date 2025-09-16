@@ -122,7 +122,6 @@ function detectBrand(cardNumber) {
   if (/^(5[1-5]\d{14}|2(2[2-9]\d{12}|[3-6]\d{13}|7[01]\d{12}|720\d{12}))$/.test(n)) return "Mastercard"
   if (/^(34|37)\d{13}$/.test(n)) return "American Express"
   if (/^(3(0[0-5]|[68]\d)\d{11})$/.test(n)) return "Diners"
-  // Elo/Hipercard: manter conforme seleção do usuário quando não detectável por regex simples
   return null
 }
 function normalizeBrand(selected, cardNumber) {
@@ -234,7 +233,6 @@ let billingStatus = null
 // existir registro, simplesmente retorna sucesso.
 async function registerTrialUser() {
   try {
-    // Dispara o trial no backend usando o JWT do usuário (conta).
     await acctApi("/api/billing/register-trial", { method: "POST" })
     console.log("[v1] Trial user registered successfully")
   } catch (e) {
@@ -244,9 +242,6 @@ async function registerTrialUser() {
 
 async function registerTrial() {
   try {
-    // Determine se há um JWT de conta (usuário) para registrar o trial.  Se
-    // existir, usamos o fluxo de conta; caso contrário, recorremos ao JWT da
-    // instância (comportamento legado).
     if (acctJwt()) {
       await acctApi("/api/billing/register-trial", { method: "POST" })
       console.log("[v1] Trial registered successfully (user)")
@@ -261,9 +256,6 @@ async function registerTrial() {
 
 async function checkBillingStatus() {
   try {
-    // Busca o status de billing.  Se existir um JWT de conta (e‑mail/senha),
-    // priorizamos esse fluxo, pois o billing passa a ser por usuário.  Caso
-    // contrário, utilizamos o token da instância (legado).
     let res
     if (acctJwt()) {
       res = await acctApi("/api/billing/status")
@@ -271,8 +263,6 @@ async function checkBillingStatus() {
       res = await api("/api/billing/status")
     }
     console.log("[v1] Billing status response:", res)
-    // A API retorna o objeto completo {ok, billing_key, status}.  Extraímos a
-    // propriedade 'status', mas se não existir assumimos o próprio objeto.
     const st = res?.status ?? res
     billingStatus = st
 
@@ -377,10 +367,8 @@ function showCardModal() {
     }
     const nameInput = document.getElementById("card-name")
     if (nameInput && !nameInput.value) {
-      // tenta extrair nome do payload (por exemplo, da conta)
       nameInput.value = payload.name || ""
     }
-    // Limpa mensagens de erro anteriores
     const err = document.getElementById("card-error")
     if (err) err.textContent = ""
   }
@@ -421,14 +409,14 @@ async function submitCardPayment(event) {
       throw new Error("Preencha todos os campos obrigatórios.")
     }
 
-    // CPF/CNPJ obrigatório (GetNet)
+    // CPF/CNPJ obrigatório
     const documentNumber = digitsOnly(documentNumberRaw)
     if (!documentNumber) throw new Error("Informe CPF/CNPJ.")
 
     // Telefone obrigatório no DÉBITO (formato E.164)
     const cardholderMobile = formatPhoneE164BR(phoneRaw)
     if (cardType === "debit" && !cardholderMobile) {
-      throw new Error("Informe o telefone (com DDD) para pagamentos no débito.")
+      throw new Error("Informe o telefone (com DDD) no formato +55 para pagamentos no débito.")
     }
 
     // Sanitização de cartão e validade
@@ -445,7 +433,6 @@ async function submitCardPayment(event) {
     }
 
     // === Integração direta com a API da GetNet ===
-    // Determina ambiente
     const baseURL = window.__GETNET_ENV__ === "production" ? "https://api.getnet.com.br" : "https://api-homologacao.getnet.com.br"
     const clientId = window.__GETNET_CLIENT_ID__
     const clientSecret = window.__GETNET_CLIENT_SECRET__
@@ -454,50 +441,49 @@ async function submitCardPayment(event) {
       throw new Error("Credenciais da GetNet não configuradas.")
     }
 
-    // 1) Obtém access token via OAuth2
+    // 1) Access token
     const tokenResp = await fetch(`${baseURL}/auth/oauth/v2/token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
         Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
       },
       body: new URLSearchParams({ grant_type: "client_credentials", scope: "oob" }).toString(),
     })
     if (!tokenResp.ok) {
-      throw new Error(`Erro ao obter token: ${tokenResp.status}`)
+      const errTxt = await tokenResp.text().catch(()=> "")
+      throw new Error(`Erro ao obter token: ${tokenResp.status} ${errTxt}`)
     }
     const tokenData = await tokenResp.json()
     const accessToken = tokenData.access_token
-    if (!accessToken) {
-      throw new Error("Token de acesso não recebido")
-    }
+    if (!accessToken) throw new Error("Token de acesso não recebido")
 
-    // 2) Tokeniza o cartão (somente dígitos)
+    // 2) Tokenização do cartão
     const tokenizeResp = await fetch(`${baseURL}/v1/tokens/card`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept": "application/json",
+        "seller_id": sellerId,
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({ card_number: cardNumber, customer_id: email }),
     })
     if (!tokenizeResp.ok) {
-      const errTxt = await tokenizeResp.text()
+      const errTxt = await tokenizeResp.text().catch(()=> "")
       throw new Error(`Erro ao tokenizar cartão: ${errTxt || tokenizeResp.status}`)
     }
     const tokenDataJson = await tokenizeResp.json()
     const numberToken = tokenDataJson.number_token || tokenDataJson.numberToken
-    if (!numberToken) {
-      throw new Error("Número token do cartão não retornado")
-    }
+    if (!numberToken) throw new Error("Número token do cartão não retornado")
 
-    // 3) Monta payload de pagamento dependendo do tipo de cartão (crédito ou débito)
-    // Valor fixo do plano (centavos) - sempre integral
-    const amountCents = 34990
+    // 3) Pagamento
+    const amountCents = 34990 // inteiro em centavos
     const orderId = `order_${Date.now()}`
     const { first_name, last_name } = splitName(name)
 
-    // Common customer object (campos obrigatórios incluídos)
+    // Customer
     const customerData = {
       customer_id: email,
       first_name,
@@ -508,7 +494,8 @@ async function submitCardPayment(event) {
       document_number: documentNumber,
       phone_number: cardholderMobile || undefined,
     }
-    // Common card object
+
+    // Card
     const cardData = {
       number_token: numberToken,
       cardholder_name: cardholderName,
@@ -517,6 +504,8 @@ async function submitCardPayment(event) {
       brand: brand,
       security_code: securityCode,
     }
+
+    // Base payload
     let payload = {
       seller_id: sellerId,
       amount: amountCents,
@@ -528,19 +517,19 @@ async function submitCardPayment(event) {
       },
       customer: customerData,
     }
+
+    // Endpoint/objeto específico
     let endpoint = ""
     if (cardType === "debit") {
-      // Pagamento via débito (campos obrigatórios)
       endpoint = "/v1/payments/debit"
       payload.debit = {
-        cardholder_mobile: cardholderMobile, // obrigatório no débito
+        cardholder_mobile: cardholderMobile,
         soft_descriptor: "LunaAI",
         dynamic_mcc: 52106184,
         authenticated: false,
         card: cardData,
       }
     } else {
-      // Pagamento via crédito (campos obrigatórios)
       endpoint = "/v1/payments/credit"
       payload.credit = {
         delayed: false,
@@ -548,24 +537,37 @@ async function submitCardPayment(event) {
         pre_authorization: false,
         save_card_data: false,
         transaction_type: "FULL",
-        number_installments: 1, // obrigatório mesmo que 1
+        number_installments: 1, // obrigatório
         soft_descriptor: "LunaAI",
         dynamic_mcc: 52106184,
         card: cardData,
       }
     }
 
+    // Envia pagamento
     const paymentResp = await fetch(`${baseURL}${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Accept": "application/json",
+        "seller_id": sellerId,
+        "x-idempotency-key": orderId, // evita duplicidade
         Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify(payload),
     })
     if (!paymentResp.ok) {
-      const errTxt = await paymentResp.text()
-      throw new Error(`Erro no pagamento: ${errTxt || paymentResp.status}`)
+      // tenta decodificar erro da GetNet (PAYMENTS-xxx)
+      let errTxt = await paymentResp.text().catch(()=> "")
+      try {
+        const j = JSON.parse(errTxt)
+        const d = j?.details && Array.isArray(j.details) ? j.details[0] : null
+        const detail = d?.description_detail || d?.description || j?.message || ""
+        const code = d?.error_code || j?.name || ""
+        throw new Error(`Erro no pagamento (${code}): ${detail || errTxt || paymentResp.status}`)
+      } catch {
+        throw new Error(`Erro no pagamento: ${errTxt || paymentResp.status}`)
+      }
     }
     const paymentData = await paymentResp.json()
     const statusRaw = paymentData.status || (paymentData.payment || {}).status || paymentData.transaction_status
@@ -889,7 +891,7 @@ function showStepInstance() {
   show("#step-instance")
 }
 
-// Mostra a etapa de registro de conta e esconde as demais (conta/instância).
+// Mostra a etapa de registro de conta
 function showStepRegister() {
   hide("#step-account")
   hide("#step-instance")
@@ -915,7 +917,6 @@ async function acctLogin() {
     }
     if (msgEl) msgEl.textContent = ""
 
-    // Backend novo: /api/users/login
     const r = await fetch(BACKEND() + "/api/users/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -928,10 +929,6 @@ async function acctLogin() {
 
     localStorage.setItem(ACCT_JWT_KEY, data.jwt)
 
-    // Registra o trial para o usuário logado (caso ainda não exista) e
-    // obtém o status de billing.  Isso é feito antes de avançar para a
-    // instância para que o modal de cobrança possa aparecer imediatamente
-    // se o trial já estiver expirado.
     try {
       await registerTrialUser()
       await checkBillingStatus()
@@ -939,7 +936,6 @@ async function acctLogin() {
       console.error(e)
     }
 
-    // Avança para o passo do token da instância
     showStepInstance()
     $("#token")?.focus()
   } catch (e) {
@@ -952,11 +948,7 @@ async function acctLogin() {
   }
 }
 
-// Registro de conta (e‑mail/senha).  Esta função envia os dados para o
-// endpoint /api/users/register.  Ao registrar a conta, um token JWT de
-// usuário é retornado.  Em seguida, iniciamos o trial para esse usuário
-// (caso ainda não exista) e verificamos o status de billing.  Por fim,
-// avançamos para a etapa de instância.
+// Registro de conta
 async function acctRegister() {
   const email = $("#reg-email")?.value?.trim()
   const pass = $("#reg-pass")?.value?.trim()
@@ -983,16 +975,15 @@ async function acctRegister() {
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json()
     if (!data?.jwt) throw new Error("Resposta inválida do servidor.")
-    // Armazena o JWT da conta
     localStorage.setItem(ACCT_JWT_KEY, data.jwt)
-    // Inicia trial e lê status
+
     try {
       await registerTrialUser()
       await checkBillingStatus()
     } catch (e) {
       console.error(e)
     }
-    // Avança para token de instância
+
     showStepInstance()
     $("#token")?.focus()
   } catch (e) {
@@ -1080,7 +1071,6 @@ function hideSplash() {
 }
 
 async function doLogin() {
-  // Precisa estar logado na conta:
   if (!acctJwt()) {
     showStepAccount()
     return
@@ -1108,7 +1098,6 @@ async function doLogin() {
     const data = await r.json()
     localStorage.setItem("luna_jwt", data.jwt)
 
-    // Garante trial com JWT da instância
     try { await registerTrial() } catch {}
 
     const canAccess = await checkBillingStatus()
@@ -1448,7 +1437,7 @@ async function loadChats() {
             card.title = "Sem mensagens"
           }
           const base = state.chats.find((c) => (c.wa_chatid || c.chatid || c.wa_fastid || c.wa_id || "") === id) || {}
-          // BUGFIX: 'el' não existe neste escopo. Use o id correto.
+          // BUGFIX: antes usava el.dataset.chatid (fora de escopo). Corrigido para usar id.
           updateLastActivity(id, base.wa_lastMsgTimestamp || base.messageTimestamp || base.updatedAt || 0)
         }
       })
@@ -2515,7 +2504,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Billing system event listeners
   $("#btn-conversas") && ($("#btn-conversas").onclick = showConversasView)
   $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView)
-  // Ao clicar em "Assinar agora", abre o modal de pagamento em vez de gerar link externo
+  // Ao clicar em "Assinar agora", abre o modal de pagamento
   $("#btn-pay-getnet") && ($("#btn-pay-getnet").onclick = showCardModal)
 
   // Billing modal event listeners
@@ -2572,7 +2561,6 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#link-cadastrar") &&
     ($("#link-cadastrar").onclick = (e) => {
       e.preventDefault()
-      // mantém URL bonita; página faz o redirect para a GetNet
       window.location.href = "/pagamentos/getnet"
     })
 
