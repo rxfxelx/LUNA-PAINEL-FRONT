@@ -96,6 +96,48 @@ function truncatePreview(s, max = 90) {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t
 }
 
+/* ===== Helpers de pagamento (sanitização e normalização) ===== */
+function digitsOnly(s) { return String(s || "").replace(/\D+/g, "") }
+function pad2(v) { return String(v || "").padStart(2, "0").slice(-2) }
+function toYY(v) { const d = digitsOnly(v); return pad2(d.length === 4 ? d.slice(2) : d) }
+function splitName(full) {
+  const parts = String(full || "").trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return { first_name: "", last_name: "" }
+  const first_name = parts.shift()
+  const last_name = parts.length ? parts.join(" ") : first_name
+  return { first_name, last_name }
+}
+function formatPhoneE164BR(phone) {
+  if (!phone) return ""
+  let p = String(phone).trim()
+  if (p.startsWith("+")) return p.replace(/[^\d+]/g, "")
+  p = digitsOnly(p)
+  if (!p) return ""
+  if (p.startsWith("55")) return "+" + p
+  return "+55" + p
+}
+function detectBrand(cardNumber) {
+  const n = digitsOnly(cardNumber)
+  if (/^4\d{12,18}$/.test(n)) return "Visa"
+  if (/^(5[1-5]\d{14}|2(2[2-9]\d{12}|[3-6]\d{13}|7[01]\d{12}|720\d{12}))$/.test(n)) return "Mastercard"
+  if (/^(34|37)\d{13}$/.test(n)) return "American Express"
+  if (/^(3(0[0-5]|[68]\d)\d{11})$/.test(n)) return "Diners"
+  // Elo/Hipercard: manter conforme seleção do usuário quando não detectável por regex simples
+  return null
+}
+function normalizeBrand(selected, cardNumber) {
+  const det = detectBrand(cardNumber)
+  if (det) return det
+  const m = String(selected || "").trim().toLowerCase()
+  if (m.includes("visa")) return "Visa"
+  if (m.includes("master")) return "Mastercard"
+  if (m.includes("amex") || m.includes("american")) return "American Express"
+  if (m.includes("diners")) return "Diners"
+  if (m.includes("hiper")) return "Hipercard"
+  if (m.includes("elo")) return "Elo"
+  return "Visa"
+}
+
 /* ----- CACHE LOCAL (TTL) + DE-DUPE ----- */
 const TTL = {
   NAME_IMAGE_HIT: 24 * 60 * 60 * 1000,
@@ -364,23 +406,46 @@ async function submitCardPayment(event) {
     // Coleta dados do formulário
     const name = document.getElementById("card-name").value.trim()
     const email = document.getElementById("card-email").value.trim()
-    const documentNumber = document.getElementById("card-document").value.trim() || undefined
-    const phoneNumber = document.getElementById("card-phone").value.trim() || undefined
+    const documentNumberRaw = document.getElementById("card-document").value.trim()
+    const phoneRaw = document.getElementById("card-phone").value.trim()
     const cardholderName = document.getElementById("cardholder-name").value.trim()
-    const cardNumber = document.getElementById("card-number").value.replace(/\s+/g, "")
-    const expMonth = document.getElementById("card-exp-month").value.trim()
-    const expYear = document.getElementById("card-exp-year").value.trim()
-    const securityCode = document.getElementById("card-cvv").value.trim()
-    const brand = document.getElementById("card-brand").value
-    const cardType = document.getElementById("card-type").value || "credit"
+    const cardNumberRaw = document.getElementById("card-number").value
+    const expMonthRaw = document.getElementById("card-exp-month").value.trim()
+    const expYearRaw = document.getElementById("card-exp-year").value.trim()
+    const securityCodeRaw = document.getElementById("card-cvv").value.trim()
+    const selectedBrand = document.getElementById("card-brand").value
+    const cardType = (document.getElementById("card-type")?.value || "credit").toLowerCase()
 
-    // Valida campos obrigatórios
-    if (!name || !email || !cardholderName || !cardNumber || !expMonth || !expYear || !securityCode || !brand || !cardType) {
+    // ===== Validações obrigatórias =====
+    if (!name || !email || !cardholderName || !cardNumberRaw || !expMonthRaw || !expYearRaw || !securityCodeRaw || !selectedBrand || !cardType) {
       throw new Error("Preencha todos os campos obrigatórios.")
     }
 
+    // CPF/CNPJ obrigatório (GetNet)
+    const documentNumber = digitsOnly(documentNumberRaw)
+    if (!documentNumber) throw new Error("Informe CPF/CNPJ.")
+
+    // Telefone obrigatório no DÉBITO (formato E.164)
+    const cardholderMobile = formatPhoneE164BR(phoneRaw)
+    if (cardType === "debit" && !cardholderMobile) {
+      throw new Error("Informe o telefone (com DDD) para pagamentos no débito.")
+    }
+
+    // Sanitização de cartão e validade
+    const cardNumber = digitsOnly(cardNumberRaw)
+    const expMonth = pad2(expMonthRaw)
+    const expYear = toYY(expYearRaw) // YY
+    const securityCode = digitsOnly(securityCodeRaw)
+
+    // Normalização/validação de bandeira + CVV
+    const brand = normalizeBrand(selectedBrand, cardNumber)
+    const isAmex = brand === "American Express"
+    if ((isAmex && securityCode.length !== 4) || (!isAmex && securityCode.length !== 3)) {
+      throw new Error(isAmex ? "CVV inválido (Amex exige 4 dígitos)." : "CVV inválido (3 dígitos).")
+    }
+
     // === Integração direta com a API da GetNet ===
-    // Determina ambiente (sandbox ou production) com base no config
+    // Determina ambiente
     const baseURL = window.__GETNET_ENV__ === "production" ? "https://api.getnet.com.br" : "https://api-homologacao.getnet.com.br"
     const clientId = window.__GETNET_CLIENT_ID__
     const clientSecret = window.__GETNET_CLIENT_SECRET__
@@ -407,7 +472,7 @@ async function submitCardPayment(event) {
       throw new Error("Token de acesso não recebido")
     }
 
-    // 2) Tokeniza o cartão
+    // 2) Tokeniza o cartão (somente dígitos)
     const tokenizeResp = await fetch(`${baseURL}/v1/tokens/card`, {
       method: "POST",
       headers: {
@@ -430,21 +495,25 @@ async function submitCardPayment(event) {
     // Valor fixo do plano (centavos) - sempre integral
     const amountCents = 34990
     const orderId = `order_${Date.now()}`
+    const { first_name, last_name } = splitName(name)
+
     // Common customer object
     const customerData = {
       customer_id: email,
+      first_name,
+      last_name,
       name: name,
       email: email,
-      document_type: documentNumber && documentNumber.length > 11 ? "CNPJ" : "CPF",
-      document_number: documentNumber || undefined,
-      phone_number: phoneNumber || undefined,
+      document_type: documentNumber.length > 11 ? "CNPJ" : "CPF",
+      document_number: documentNumber,
+      phone_number: cardholderMobile || undefined,
     }
     // Common card object
     const cardData = {
       number_token: numberToken,
       cardholder_name: cardholderName,
       expiration_month: expMonth,
-      expiration_year: expYear,
+      expiration_year: expYear, // YY
       brand: brand,
       security_code: securityCode,
     }
@@ -464,7 +533,7 @@ async function submitCardPayment(event) {
       // Pagamento via débito
       endpoint = "/v1/payments/debit"
       payload.debit = {
-        cardholder_mobile: phoneNumber || undefined,
+        cardholder_mobile: cardholderMobile,
         soft_descriptor: "LunaAI",
         dynamic_mcc: 52106184,
         authenticated: false,
@@ -1379,7 +1448,7 @@ async function loadChats() {
             card.title = "Sem mensagens"
           }
           const base = state.chats.find((c) => (c.wa_chatid || c.chatid || c.wa_fastid || c.wa_id || "") === id) || {}
-          updateLastActivity(id, base.wa_lastMsgTimestamp || base.messageTimestamp || base.updatedAt || 0)
+          updateLastActivity(el.dataset.chatid, base.wa_lastMsgTimestamp || base.messageTimestamp || base.updatedAt || 0)
         }
       })
     }
@@ -1394,8 +1463,9 @@ async function loadChats() {
     } catch {}
   } catch (e) {
     console.error(e)
-    if (list && reqId === state.listReqId)
-      list.innerHTML = `<div class='error'>${escapeHtml(e.message || "Falha ao carregar conversas")}</div>`
+    const list2 = $("#chat-list")
+    if (list2 && reqId === state.listReqId)
+      list2.innerHTML = `<div class='error'>${escapeHtml(e.message || "Falha ao carregar conversas")}</div>`
   } finally {
     if (reqId === state.listReqId) state.loadingChats = false
   }
