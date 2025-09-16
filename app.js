@@ -555,6 +555,15 @@ async function submitCardPayment(event) {
       }
     }
 
+    // Log the final payload for debugging purposes. This helps verify that all
+    // mandatory fields (order.sales_tax, order.product_type, customer.first_name,
+    // customer.last_name, credit.number_installments, debit.cardholder_mobile, etc.)
+    // are present in the request before sending it to the GetNet API.
+    try {
+      console.debug("Enviando pagamento para GetNet:", JSON.stringify(payload, null, 2))
+    } catch (_) {
+      // Se o navegador não suportar JSON.stringify de tipos complexos, ignora.
+    }
     const paymentResp = await fetch(`${baseURL}${endpoint}`, {
       method: "POST",
       headers: {
