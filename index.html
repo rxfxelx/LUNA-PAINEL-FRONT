@@ -320,9 +320,14 @@
         <h3>Dados do pagamento</h3>
       </div>
       <form id="card-form" class="modal-body">
+        <!-- Captura de primeiro nome e sobrenome separadamente para atender aos campos first_name e last_name exigidos pela GetNet -->
         <div class="form-group">
-          <label for="card-name">Nome completo</label>
-          <input id="card-name" type="text" class="inp" placeholder="Nome do cliente" required />
+          <label for="card-first-name">Nome</label>
+          <input id="card-first-name" type="text" class="inp" placeholder="Primeiro nome" required />
+        </div>
+        <div class="form-group">
+          <label for="card-last-name">Sobrenome</label>
+          <input id="card-last-name" type="text" class="inp" placeholder="Sobrenome" required />
         </div>
         <div class="form-group">
           <label for="card-email">E‑mail</label>
