@@ -498,6 +498,9 @@ async function submitCardPayment(event) {
     const { first_name, last_name } = splitName(name)
 
     // Common customer object (campos obrigatórios incluídos)
+    // Para a API da GetNet todos os campos são enviados explicitamente.
+    // Caso o telefone não tenha sido informado, enviamos uma string vazia
+    // em vez de undefined para que a propriedade esteja sempre presente.
     const customerData = {
       customer_id: email,
       first_name,
@@ -506,7 +509,7 @@ async function submitCardPayment(event) {
       email: email,
       document_type: documentNumber.length > 11 ? "CNPJ" : "CPF",
       document_number: documentNumber,
-      phone_number: cardholderMobile || undefined,
+      phone_number: cardholderMobile || "", // sempre enviar phone_number
     }
     // Common card object
     const cardData = {
@@ -518,6 +521,7 @@ async function submitCardPayment(event) {
       security_code: securityCode,
     }
     let payload = {
+      // Inclui todos os campos de cabeçalho requisitados pela GetNet
       seller_id: sellerId,
       amount: amountCents,
       currency: "BRL",
@@ -2733,7 +2737,9 @@ document.addEventListener("DOMContentLoaded", () => {
         email: email,
         document_type: documentNumber.length>11 ? 'CNPJ' : 'CPF',
         document_number: documentNumber,
-        phone_number: cardholderMobile || undefined,
+        // Envie phone_number sempre como string (pode ser vazia) para 
+        // satisfazer os campos obrigatórios da API de pagamento.
+        phone_number: cardholderMobile || '',
       };
       const card = {
         number_token: numberToken,
