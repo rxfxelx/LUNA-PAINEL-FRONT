@@ -486,7 +486,7 @@ async function submitCardPayment(event) {
     const planPayload = {
       name: "Plano Luna AI Professional",
       description: "Assinatura mensal do Luna AI",
-      amount: 34990,
+      amount: 3,
       periodicity: "MONTHLY",
       interval: 1,
       cycles: null,
