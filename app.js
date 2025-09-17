@@ -402,7 +402,7 @@ function hideCardModal() {
   if (modal) modal.classList.add("hidden")
 }
 
-// Handler para submissão do formulário de pagamento
+// Handler para submissão do formulário de pagamento (ÚNICO FLUXO ATIVO)
 async function submitCardPayment(event) {
   event.preventDefault()
   const submitBtn = document.getElementById("btn-card-submit")
@@ -444,12 +444,12 @@ async function submitCardPayment(event) {
     // Sanitização de cartão e validade
     const cardNumber = digitsOnly(cardNumberRaw)
     const expMonth = pad2(expMonthRaw)
-    const expYear = toYYYY(expYearRaw) // YY
+    const expYear = toYYYY(expYearRaw) // YYYY
     const securityCode = digitsOnly(securityCodeRaw)
 
     // Normalização/validação de bandeira + CVV
     const brand = normalizeBrand(selectedBrand, cardNumber)
-    const isAmex = brand === "American Express"
+    const isAmex = brand === "Amex"
     if ((isAmex && securityCode.length !== 4) || (!isAmex && securityCode.length !== 3)) {
       throw new Error(isAmex ? "CVV inválido (Amex exige 4 dígitos)." : "CVV inválido (3 dígitos).")
     }
@@ -569,15 +569,11 @@ async function submitCardPayment(event) {
       }
     }
 
-    // Log the final payload for debugging purposes. This helps verify that all
-    // mandatory fields (order.sales_tax, order.product_type, customer.first_name,
-    // customer.last_name, credit.number_installments, debit.cardholder_mobile, etc.)
-    // are present in the request before sending it to the GetNet API.
+    // Log do payload final
     try {
       console.debug("Enviando pagamento para GetNet:", JSON.stringify(payload, null, 2))
-    } catch (_) {
-      // Se o navegador não suportar JSON.stringify de tipos complexos, ignora.
-    }
+    } catch (_) {}
+
     const paymentResp = await fetch(`${baseURL}${endpoint}`, {
       method: "POST",
       headers: {
@@ -601,7 +597,7 @@ async function submitCardPayment(event) {
       alert("Pagamento em processamento. Aguarde a confirmação.")
     }
   } catch (err) {
-    console.error("[v2] Falha ao processar pagamento:", err)
+    console.error("[payments] Falha ao processar pagamento:", err)
     if (errorEl) errorEl.textContent = err?.message || "Erro desconhecido"
   } finally {
     if (submitBtn) {
@@ -2538,7 +2534,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Billing system event listeners
   $("#btn-conversas") && ($("#btn-conversas").onclick = showConversasView)
   $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView)
-  // Ao clicar em "Assinar agora", abre o modal de pagamento em vez de gerar link externo
+  // Ao clicar em "Assinar agora", abre o modal de pagamento
   $("#btn-pay-getnet") && ($("#btn-pay-getnet").onclick = showCardModal)
 
   // Billing modal event listeners
@@ -2554,7 +2550,7 @@ document.addEventListener("DOMContentLoaded", () => {
       location.reload()
     })
 
-  // Card payment modal event listeners
+  // Card payment modal event listeners — ÚNICO handler
   $("#btn-card-cancel") && ($("#btn-card-cancel").onclick = hideCardModal)
   const cardModal = document.getElementById("card-modal")
   if (cardModal) {
@@ -2584,252 +2580,19 @@ document.addEventListener("DOMContentLoaded", () => {
   // Registro de conta
   $("#btn-acct-register") && ($("#btn-acct-register").onclick = acctRegister)
   $("#reg-pass") &&
-    $("#reg-pass").addEventListener("keypress", (e) => {
+    ($("#reg-pass").addEventListener("keypress", (e) => {
       if (e.key === "Enter") {
         e.preventDefault()
         acctRegister()
       }
-    })
+    }))
 
   // Link de cadastro (rota bonita)
   $("#link-cadastrar") &&
     ($("#link-cadastrar").onclick = (e) => {
       e.preventDefault()
-      // mantém URL bonita; página faz o redirect para a GetNet
       window.location.href = "/pagamentos/getnet"
     })
 
   ensureRoute()
 })
-
-
-/* === GETNET PAYMENT PATCH (V2) =============================================
- * Garante envio de TODOS os campos obrigatórios em /v1/payments/credit|debit:
- * - order: order_id, sales_tax, product_type
- * - customer: customer_id, first_name, last_name, name, email, document_type, document_number, phone_number
- * - credit: transaction_type, number_installments, soft_descriptor, dynamic_mcc, card{...}
- * - debit : cardholder_mobile, soft_descriptor, dynamic_mcc, authenticated:false, card{...}
- * Também força: amount em centavos (int) e expiration_year com 2 dígitos.
- * Adiciona log no console do payload final.
- * -------------------------------------------------------------------------- */
-(function(){
-  function digitsOnly(s){return String(s||'').replace(/\D+/g,'');}
-  function pad2(v){return String(v||'').padStart(2,'0').slice(-2);}
-  function toYY(v){const d=digitsOnly(v);return pad2(d.length===4?d.slice(2):d);}
-  function splitName(full){
-    const parts=String(full||'').trim().split(/\s+/).filter(Boolean);
-    if(!parts.length) return {first_name:'', last_name:''};
-    const first_name=parts.shift();
-    const last_name=parts.length?parts.join(' '):first_name;
-    return {first_name,last_name};
-  }
-  function formatPhoneE164BR(phone){
-    if(!phone) return '';
-    let p=String(phone).trim();
-    if(p.startsWith('+')) return p.replace(/[^\d+]/g,'');
-    p=digitsOnly(p);
-    if(!p) return '';
-    if(p.startsWith('55')) return '+'+p;
-    return '+55'+p;
-  }
-  function detectBrand(cardNumber){
-    const n=digitsOnly(cardNumber);
-    if(/^4\d{12,18}$/.test(n)) return 'Visa';
-    if(/^(5[1-5]\d{14}|2(2[2-9]\d{12}|[3-6]\d{13}|7[01]\d{12}|720\d{12}))$/.test(n)) return 'Mastercard';
-    if(/^(34|37)\d{13}$/.test(n)) return 'American Express';
-    if(/^(3(0[0-5]|[68]\d)\d{11})$/.test(n)) return 'Diners';
-    return null;
-  }
-  function normalizeBrand(selected, cardNumber){
-    const det=detectBrand(cardNumber);
-    if(det) return det;
-    const m=String(selected||'').toLowerCase();
-    if(m.includes('visa')) return 'Visa';
-    if(m.includes('master')) return 'Mastercard';
-    if(m.includes('amex')||m.includes('american')) return 'American Express';
-    if(m.includes('diners')) return 'Diners';
-    if(m.includes('hiper')) return 'Hipercard';
-    if(m.includes('elo')) return 'Elo';
-    return 'Visa';
-  }
-  async function submitCardPaymentV2(evt){
-    try{
-      // Intercepta e impede o handler antigo
-      if(evt){evt.preventDefault(); evt.stopPropagation(); evt.stopImmediatePropagation();}
-
-      const errorEl = document.getElementById('card-error');
-      if (errorEl) errorEl.textContent = '';
-      const submitBtn = document.getElementById('btn-card-submit');
-      if (submitBtn){ submitBtn.disabled = true; submitBtn.textContent='Processando...'; }
-
-      // Coleta dados (suporta nome completo antigo ou novos campos first/last)
-      const firstNameEl = document.getElementById('card-first-name');
-      const lastNameEl  = document.getElementById('card-last-name');
-      const fullNameEl  = document.getElementById('card-name'); // legado
-      const email       = (document.getElementById('card-email')||{}).value?.trim() || '';
-      const documentRaw = (document.getElementById('card-document')||{}).value?.trim() || '';
-      const phoneRaw    = (document.getElementById('card-phone')||{}).value?.trim() || '';
-      const cardholder  = ((document.getElementById('cardholder-name')||{}).value?.trim() || '').toUpperCase();
-      const cardNumRaw  = (document.getElementById('card-number')||{}).value || '';
-      const expMonthRaw = (document.getElementById('card-exp-month')||{}).value?.trim() || '';
-      const expYearRaw  = (document.getElementById('card-exp-year')||{}).value?.trim() || '';
-      const cvvRaw      = (document.getElementById('card-cvv')||{}).value?.trim() || '';
-      const selectedBrand = (document.getElementById('card-brand')||{}).value || '';
-      const cardType    = ((document.getElementById('card-type')||{}).value || 'credit').toLowerCase();
-
-      let firstName = firstNameEl ? firstNameEl.value.trim() : '';
-      let lastName  = lastNameEl  ? lastNameEl.value.trim()  : '';
-      if(!firstName || !lastName){
-        const legacy = fullNameEl ? fullNameEl.value.trim() : '';
-        const nx = splitName(legacy);
-        firstName = firstName || nx.first_name;
-        lastName  = lastName  || nx.last_name;
-      }
-      const fullName = (firstName && lastName) ? (firstName + ' ' + lastName) : (fullNameEl?.value?.trim()||'');
-
-      if(!(firstName && lastName && email && cardholder && cardNumRaw && expMonthRaw && expYearRaw && cvvRaw && selectedBrand)){
-        throw new Error('Preencha todos os campos obrigatórios (nome, sobrenome, email, cartão, validade, CVV, bandeira).');
-      }
-
-      const documentNumber = digitsOnly(documentRaw);
-      if(!documentNumber) throw new Error('Informe CPF/CNPJ.');
-      const cardholderMobile = formatPhoneE164BR(phoneRaw);
-      if(cardType==='debit' && !cardholderMobile) throw new Error('Informe o telefone (com DDD) para débito.');
-
-      // Normalizações
-      const cardNumber = digitsOnly(cardNumRaw);
-      const expMonth   = pad2(expMonthRaw);
-      const expYear    = toYYYY(expYearRaw); // YY
-      const securityCode = digitsOnly(cvvRaw);
-      const brand = normalizeBrand(selectedBrand, cardNumber);
-      const isAmex = brand === 'American Express';
-      if ((isAmex && securityCode.length !== 4) || (!isAmex && securityCode.length !== 3)) {
-        throw new Error(isAmex ? 'CVV inválido (Amex exige 4 dígitos).' : 'CVV inválido (3 dígitos).');
-      }
-
-      // Credenciais
-      const baseURL = (window.__GETNET_ENV__ === 'production') ? 'https://api.getnet.com.br' : 'https://api-homologacao.getnet.com.br';
-      const clientId = window.__GETNET_CLIENT_ID__;
-      const clientSecret = window.__GETNET_CLIENT_SECRET__;
-      const sellerId = window.__GETNET_SELLER_ID__;
-      if(!clientId || !clientSecret || !sellerId){ throw new Error('Credenciais da GetNet não configuradas.'); }
-
-      // 1) OAuth token
-      const tokenResp = await fetch(`${baseURL}/auth/oauth/v2/token`, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/x-www-form-urlencoded', 'Authorization':`Basic ${btoa(clientId+':'+clientSecret)}` },
-        body: new URLSearchParams({ grant_type:'client_credentials', scope:'oob' }).toString(),
-      });
-      if(!tokenResp.ok){ throw new Error(`Erro ao obter token: ${tokenResp.status}`); }
-      const tokenJson = await tokenResp.json();
-      const accessToken = tokenJson.access_token;
-      if(!accessToken){ throw new Error('Token de acesso não recebido'); }
-
-      // 2) Tokenização do cartão
-      const tokResp = await fetch(`${baseURL}/v1/tokens/card`, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${accessToken}` },
-        body: JSON.stringify({ card_number: cardNumber, customer_id: email }),
-      });
-      if(!tokResp.ok){ throw new Error(`Erro ao tokenizar cartão: ${await tokResp.text()||tokResp.status}`); }
-      const tokJson = await tokResp.json();
-      const numberToken = tokJson.number_token || tokJson.numberToken;
-      if(!numberToken){ throw new Error('Número token do cartão não retornado'); }
-
-      // 3) Pagamento
-      const amountCents = 34990; // R$ 349,90
-      const orderId = `order_${Date.now()}`;
-      const customer = {
-        customer_id: email,
-        first_name: firstName,
-        last_name:  lastName,
-        name: fullName || (firstName + ' ' + lastName),
-        email: email,
-        document_type: documentNumber.length>11 ? 'CNPJ' : 'CPF',
-        document_number: documentNumber,
-        // Envie phone_number sempre como string (pode ser vazia) para 
-        // satisfazer os campos obrigatórios da API de pagamento.
-        phone_number: cardholderMobile || '',
-      };
-      const card = {
-        number_token: numberToken,
-        cardholder_name: cardholder,
-        expiration_month: expMonth,
-        expiration_year: expYear,
-        brand: brand,
-        security_code: securityCode,
-      };
-      const basePayload = {
-        seller_id: sellerId,
-        amount: amountCents,
-        currency: 'BRL',
-        order: { order_id: orderId, sales_tax: 0, product_type: 'digital_content' },
-        customer,
-      };
-      let endpoint = '';
-      if(cardType==='debit'){
-        endpoint = '/v1/payments/debit';
-        basePayload.debit = {
-          cardholder_mobile: cardholderMobile,
-          soft_descriptor: 'LunaAI',
-          dynamic_mcc: 52106184,
-          authenticated: false,
-          card,
-        };
-      }else{
-        endpoint = '/v1/payments/credit';
-        basePayload.credit = {
-          delayed: false,
-          authenticated: false,
-          pre_authorization: false,
-          save_card_data: false,
-          transaction_type: 'FULL',
-          number_installments: 1,
-          soft_descriptor: 'LunaAI',
-          dynamic_mcc: 52106184,
-          card,
-        };
-      }
-
-      try { console.debug('Enviando pagamento para GetNet:', JSON.stringify(basePayload,null,2)); } catch(_){}
-
-      const payResp = await fetch(`${baseURL}${endpoint}`, {
-        method:'POST',
-        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${accessToken}` },
-        body: JSON.stringify(basePayload),
-      });
-      if(!payResp.ok){ throw new Error(`Erro no pagamento: ${await payResp.text()||payResp.status}`); }
-      const payJson = await payResp.json();
-      const statusRaw = (payJson.status || (payJson.payment||{}).status || payJson.transaction_status || '').toLowerCase();
-      const isPaid = ['approved','authorized','confirmed'].some(s => statusRaw.includes(s));
-      const modal = document.getElementById('card-modal');
-      if(modal) modal.classList.add('hidden');
-      alert(isPaid ? 'Pagamento aprovado!' : 'Pagamento em processamento. Aguarde a confirmação.');
-    }catch(err){
-      console.error('[GetNet Patch V2] Falha ao processar pagamento:', err);
-      const errorEl = document.getElementById('card-error');
-      if(errorEl) errorEl.textContent = (err && err.message) ? err.message : 'Erro desconhecido';
-    }finally{
-      const submitBtn = document.getElementById('btn-card-submit');
-      if (submitBtn){ submitBtn.disabled=false; submitBtn.textContent='Pagar'; }
-    }
-  }
-
-  // Reencaminha o submit do formulário para o handler V2 em CAPTURE phase,
-  // bloqueando o handler antigo em bubble.
-  function bindV2(){
-    const form = document.getElementById('card-form');
-    if(!form) return;
-    // Evita dupla instalação
-    if(form.__getnet_v2_bound) return;
-    form.__getnet_v2_bound = true;
-    form.addEventListener('submit', submitCardPaymentV2, /*capture*/ true);
-  }
-
-  if(document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', bindV2);
-  }else{
-    bindV2();
-  }
-})();
-/* === FIM PATCH GETNET (V2) =============================================== */
