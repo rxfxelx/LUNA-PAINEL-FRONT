@@ -305,15 +305,15 @@ async function submitCardPayment(event) {
     const documentNumberRaw = document.getElementById("card-document").value.trim()
     const phoneRaw = document.getElementById("card-phone").value.trim()
 
-    // Endereço de cobrança (antifraude)
-    const addrStreet = document.getElementById("card-addr-street")?.value.trim() || ""
-    const addrNumber = document.getElementById("card-addr-number")?.value.trim() || ""
-    const addrComplement = document.getElementById("card-addr-complement")?.value.trim() || ""
-    const addrDistrict = document.getElementById("card-addr-district")?.value.trim() || ""
-    const addrCity = document.getElementById("card-addr-city")?.value.trim() || ""
-    const addrState = (document.getElementById("card-addr-state")?.value.trim() || "").toUpperCase()
-    const addrCountry = (document.getElementById("card-addr-country")?.value.trim() || "BRA").toUpperCase()
-    const addrPostalRaw = document.getElementById("card-addr-postal")?.value.trim() || ""
+    // Endereço de cobrança (antifraude) — IDs REAIS DO HTML (bill-*)
+    const addrStreet = document.getElementById("bill-street")?.value.trim() || ""
+    const addrNumber = document.getElementById("bill-number")?.value.trim() || ""
+    const addrComplement = document.getElementById("bill-complement")?.value.trim() || ""
+    const addrDistrict = document.getElementById("bill-district")?.value.trim() || ""
+    const addrCity = document.getElementById("bill-city")?.value.trim() || ""
+    const addrState = (document.getElementById("bill-state")?.value.trim() || "").toUpperCase()
+    const addrCountry = (document.getElementById("bill-country")?.value.trim() || "BR").toUpperCase()
+    const addrPostalRaw = document.getElementById("bill-postal")?.value.trim() || ""
 
     const cardholderName = document.getElementById("cardholder-name").value.trim().toUpperCase()
     const cardNumberRaw = document.getElementById("card-number").value
@@ -358,7 +358,6 @@ async function submitCardPayment(event) {
     }
 
     // === Integração de assinatura recorrente com a API da GetNet ===
-    // Recupera a base da API (homologação ou produção) a partir da configuração
     const baseURL = window.__GETNET_ENV__ === "production"
       ? "https://api.getnet.com.br"
       : "https://api-homologacao.getnet.com.br"
@@ -426,27 +425,17 @@ async function submitCardPayment(event) {
       document_type: documentNumber.length > 11 ? "CNPJ" : "CPF",
       document_number: documentNumber,
       phone_number: phoneDigits || "",
-    }
-    // Adiciona endereço de cobrança se fornecido
-    const billStreet = document.getElementById("bill-street")?.value.trim() || ""
-    const billNumber = document.getElementById("bill-number")?.value.trim() || ""
-    const billComplement = document.getElementById("bill-complement")?.value.trim() || ""
-    const billDistrict = document.getElementById("bill-district")?.value.trim() || ""
-    const billCity = document.getElementById("bill-city")?.value.trim() || ""
-    const billState = (document.getElementById("bill-state")?.value.trim() || "").toUpperCase()
-    const billCountry = (document.getElementById("bill-country")?.value.trim() || "Brasil")
-    const billPostal = digitsOnly(document.getElementById("bill-postal")?.value.trim() || "")
-    if (billStreet && billNumber && billDistrict && billCity && billState && billPostal) {
-      customerPayload.billing_address = {
-        street: billStreet,
-        number: billNumber,
-        complement: billComplement,
-        district: billDistrict,
-        city: billCity,
-        state: billState,
-        country: billCountry,
-        postal_code: billPostal,
-      }
+      // reutiliza o MESMO endereço já validado acima
+      billing_address: {
+        street: addrStreet,
+        number: addrNumber,
+        complement: addrComplement,
+        district: addrDistrict,
+        city: addrCity,
+        state: addrState,
+        country: addrCountry,     // ex.: "BR" (padrão) ou valor informado
+        postal_code: postal,      // 8 dígitos
+      },
     }
 
     const customerResp = await fetch(`${baseURL}/v1/customers`, {
@@ -1315,7 +1304,7 @@ function renderInteractive(container, m) {
     ;(listMsg.sections || []).forEach((sec) => {
       if (sec.title) { const st = document.createElement("div"); st.style.margin = "6px 0 4px"; st.style.fontSize = "12px"; st.style.opacity = ".8"; st.textContent = sec.title; card.appendChild(st) }
       ;(sec.rows || []).forEach((row) => {
-        const opt = document.createElement("div"); opt.style.padding = "6px 8px"; opt.style.border = "1px solid var(--muted,#eee)"; opt.style.borderRadius = "6px"; opt.style.marginBottom = "6px"; opt.textContent = row.title || row.id || "(opção)"; card.appendChild(opt)
+        const opt = document.createElement("div"); opt.style.padding = "6px 8px"; opt.style.border = "1px solid var(--muted,#eee)"; opt.style.borderRadius = "6px"; opt.style.marginBottom = "6px"; textContent = row.title || row.id || "(opção)"; card.appendChild(opt)
       })
     })
     container.appendChild(card); return true
