@@ -1,3 +1,4 @@
+
 /* =========================================
  * 1) CONFIG / HELPERS BÁSICOS
  * ======================================= */
@@ -291,6 +292,7 @@ window.showCardModal = showCardModal
 function hideCardModal() { document.getElementById("card-modal")?.classList.add("hidden") }
 
 // Handler para submissão do formulário de pagamento (ÚNICO FLUXO ATIVO)
+// Handler para submissão do formulário de pagamento (ÚNICO FLUXO ATIVO)
 async function submitCardPayment(event) {
   event.preventDefault()
   const submitBtn = document.getElementById("btn-card-submit")
@@ -328,11 +330,11 @@ async function submitCardPayment(event) {
       throw new Error("Preencha todos os campos obrigatórios.")
     }
 
-    // CPF/CNPJ obrigatório (GetNet)
+    // CPF/CNPJ obrigatório (Getnet)
     const documentNumber = digitsOnly(documentNumberRaw)
     if (!documentNumber) throw new Error("Informe CPF/CNPJ.")
 
-    // Telefone em dígitos (10–11). Obrigatório no débito.
+    // Telefone (10–11 dígitos). No débito é obrigatório, em crédito mantemos a validação e só alertamos se vier inválido
     const phoneDigits = phoneDigitsBR(phoneRaw)
     if (cardType === "debit" && (phoneDigits.length < 10 || phoneDigits.length > 11)) {
       throw new Error("Telefone inválido. Informe DDD+telefone (10 a 11 dígitos).")
@@ -357,28 +359,30 @@ async function submitCardPayment(event) {
       throw new Error(isAmex ? "CVV inválido (Amex exige 4 dígitos)." : "CVV inválido (3 dígitos).")
     }
 
-    // === Integração de assinatura recorrente com a API da GetNet ===
+    // === Integração de assinatura recorrente com a API da Getnet ===
     const baseURL = window.__GETNET_ENV__ === "production"
       ? "https://api.getnet.com.br"
       : "https://api-homologacao.getnet.com.br"
+
     const clientId = window.__GETNET_CLIENT_ID__
     const clientSecret = window.__GETNET_CLIENT_SECRET__
     const sellerId = window.__GETNET_SELLER_ID__
     if (!clientId || !clientSecret || !sellerId) {
-      throw new Error("Credenciais da GetNet não configuradas.")
+      throw new Error("Credenciais da Getnet não configuradas.")
     }
 
-    // Para assinaturas, somente o cartão de crédito é permitido
+    // Para assinaturas, somente cartão de CRÉDITO
     if (cardType === "debit") {
       throw new Error("Assinaturas recorrentes só são suportadas com cartão de crédito.")
     }
 
-    // 1) Obtenção de token OAuth2
+    // 1) OAuth2 Client Credentials
     const authResp = await fetch(`${baseURL}/auth/oauth/v2/token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
         Authorization: `Basic ${btoa(`${clientId}:${clientSecret}`)}`,
+        Accept: "application/json",
       },
       body: new URLSearchParams({ grant_type: "client_credentials", scope: "oob" }).toString(),
     })
@@ -388,20 +392,19 @@ async function submitCardPayment(event) {
     }
     const authJson = await authResp.json()
     const accessToken = authJson.access_token
-    if (!accessToken) {
-      throw new Error("Token de acesso não recebido.")
-    }
+    if (!accessToken) throw new Error("Token de acesso não recebido.")
 
-    // 2) Tokenização do cartão (PAN -> token)
+    // 2) Tokenização do cartão (PAN -> number_token)
     const tokenizationResp = await fetch(`${baseURL}/v1/tokens/card`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
       },
       body: JSON.stringify({
         card_number: cardNumber,
-        customer_id: email,
+        customer_id: email, // ID lógico do cliente (pode ser o e-mail)
       }),
     })
     if (!tokenizationResp.ok) {
@@ -410,11 +413,9 @@ async function submitCardPayment(event) {
     }
     const tokenizationJson = await tokenizationResp.json()
     const numberToken = tokenizationJson.number_token || tokenizationJson.numberToken
-    if (!numberToken) {
-      throw new Error("Número token do cartão não retornado.")
-    }
+    if (!numberToken) throw new Error("Número token do cartão não retornado.")
 
-    // 3) Cria ou atualiza cliente (assinante)
+    // 3) Cria/atualiza cliente (assinante)
     const { first_name, last_name } = splitName(name)
     const customerPayload = {
       customer_id: email,
@@ -425,16 +426,15 @@ async function submitCardPayment(event) {
       document_type: documentNumber.length > 11 ? "CNPJ" : "CPF",
       document_number: documentNumber,
       phone_number: phoneDigits || "",
-      // reutiliza o MESMO endereço já validado acima
       billing_address: {
         street: addrStreet,
         number: addrNumber,
         complement: addrComplement,
         district: addrDistrict,
         city: addrCity,
-        state: addrState,
-        country: addrCountry,     // ex.: "BR" (padrão) ou valor informado
-        postal_code: postal,      // 8 dígitos
+        state: addrState,     // UF
+        country: addrCountry, // "BR"
+        postal_code: postal,  // 8 dígitos
       },
     }
 
@@ -444,6 +444,7 @@ async function submitCardPayment(event) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
         seller_id: sellerId,
+        Accept: "application/json",
       },
       body: JSON.stringify(customerPayload),
     })
@@ -454,7 +455,7 @@ async function submitCardPayment(event) {
     const customerJson = await customerResp.json().catch(() => ({}))
     const customerId = customerJson.customer_id || email
 
-    // 4) Armazena cartão tokenizado no cofre
+    // 4) Salva cartão tokenizado no cofre
     const cardPayload = {
       number_token: numberToken,
       expiration_month: expMonth,
@@ -472,6 +473,7 @@ async function submitCardPayment(event) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
         seller_id: sellerId,
+        Accept: "application/json",
       },
       body: JSON.stringify(cardPayload),
     })
@@ -482,14 +484,14 @@ async function submitCardPayment(event) {
     const cardJson = await cardResp.json().catch(() => ({}))
     const cardId = cardJson.card_id || cardJson.number_token || numberToken
 
-    // 5) Cria plano de assinatura (mensal, indefinido)
+    // 5) Cria plano de assinatura (mensal, sem ciclos definidos)
     const planPayload = {
       name: "Plano Luna AI Professional",
       description: "Assinatura mensal do Luna AI",
-      amount: 34990,
+      amount: 34990,            // em centavos (R$ 349,90)
       periodicity: "MONTHLY",
       interval: 1,
-      cycles: null,
+      cycles: null,             // recorrência até cancelamento
     }
     const planResp = await fetch(`${baseURL}/v1/plans`, {
       method: "POST",
@@ -497,6 +499,7 @@ async function submitCardPayment(event) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
         seller_id: sellerId,
+        Accept: "application/json",
       },
       body: JSON.stringify(planPayload),
     })
@@ -506,12 +509,11 @@ async function submitCardPayment(event) {
     }
     const planJson = await planResp.json().catch(() => ({}))
     const planId = planJson.plan_id
-    if (!planId) {
-      throw new Error("Plano de assinatura não retornou plan_id.")
-    }
+    if (!planId) throw new Error("Plano de assinatura não retornou plan_id.")
 
     // 6) Cria assinatura vinculando cliente, plano e cartão
     const subscriptionPayload = {
+      seller_id: sellerId,                 // <-- IMPORTANTE: incluir no payload
       subscription_code: `sub_${Date.now()}`,
       plan_id: planId,
       customer_id: customerId,
@@ -520,20 +522,31 @@ async function submitCardPayment(event) {
           card_id: cardId,
         },
       },
+      // Opcional: callback de notificação
+      // "callback_url": "https://seu-dominio.com/getnet/webhook"
     }
+
     const subscriptionResp = await fetch(`${baseURL}/v1/subscriptions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
-        seller_id: sellerId,
+        seller_id: sellerId,              // <-- também no header
+        Accept: "application/json",
       },
       body: JSON.stringify(subscriptionPayload),
     })
     if (!subscriptionResp.ok) {
-      const errMsg = await subscriptionResp.text().catch(() => subscriptionResp.status)
-      throw new Error(`Erro ao criar assinatura: ${errMsg}`)
+      const errTxt = await subscriptionResp.text().catch(() => subscriptionResp.status)
+      // Muitas vezes a Getnet retorna JSON com {status_code, name, message}
+      try {
+        const j = JSON.parse(errTxt)
+        throw new Error(j?.message || errTxt || "Erro ao criar assinatura")
+      } catch {
+        throw new Error(errTxt || "Erro ao criar assinatura")
+      }
     }
+
     const subscriptionJson = await subscriptionResp.json().catch(() => ({}))
     const subStatus = String(subscriptionJson.status || "").toLowerCase()
 
@@ -550,6 +563,7 @@ async function submitCardPayment(event) {
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Pagar" }
   }
 }
+
 
 function showConversasView() {
   hide("#billing-view"); show(".chatbar"); show("#messages")
