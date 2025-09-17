@@ -100,6 +100,16 @@ function truncatePreview(s, max = 90) {
 function digitsOnly(s) { return String(s || "").replace(/\D+/g, "") }
 function pad2(v) { return String(v || "").padStart(2, "0").slice(-2) }
 function toYY(v) { const d = digitsOnly(v); return pad2(d.length === 4 ? d.slice(2) : d) }
+// Preferir ano com 4 dígitos para a API de pagamentos
+function toYYYY(v) {
+  const d = digitsOnly(v);
+  if (d.length === 4) return d;
+  if (d.length === 2) return '20' + pad2(d);
+  if (d.length === 3) return '20' + d.slice(-2);
+  if (d.length === 0) return '';
+  return (d.length > 4) ? d.slice(0,4) : ('20' + pad2(d.slice(-2)));
+}
+
 function splitName(full) {
   const parts = String(full || "").trim().split(/\s+/).filter(Boolean)
   if (!parts.length) return { first_name: "", last_name: "" }
@@ -120,7 +130,7 @@ function detectBrand(cardNumber) {
   const n = digitsOnly(cardNumber)
   if (/^4\d{12,18}$/.test(n)) return "Visa"
   if (/^(5[1-5]\d{14}|2(2[2-9]\d{12}|[3-6]\d{13}|7[01]\d{12}|720\d{12}))$/.test(n)) return "Mastercard"
-  if (/^(34|37)\d{13}$/.test(n)) return "American Express"
+  if (/^(34|37)\d{13}$/.test(n)) return "Amex"
   if (/^(3(0[0-5]|[68]\d)\d{11})$/.test(n)) return "Diners"
   // Elo/Hipercard: manter conforme seleção do usuário quando não detectável por regex simples
   return null
@@ -131,7 +141,7 @@ function normalizeBrand(selected, cardNumber) {
   const m = String(selected || "").trim().toLowerCase()
   if (m.includes("visa")) return "Visa"
   if (m.includes("master")) return "Mastercard"
-  if (m.includes("amex") || m.includes("american")) return "American Express"
+  if (m.includes("amex") || m.includes("american")) return "Amex"
   if (m.includes("diners")) return "Diners"
   if (m.includes("hiper")) return "Hipercard"
   if (m.includes("elo")) return "Elo"
@@ -408,7 +418,7 @@ async function submitCardPayment(event) {
     const email = document.getElementById("card-email").value.trim()
     const documentNumberRaw = document.getElementById("card-document").value.trim()
     const phoneRaw = document.getElementById("card-phone").value.trim()
-    const cardholderName = document.getElementById("cardholder-name").value.trim()
+    const cardholderName = document.getElementById("cardholder-name").value.trim().toUpperCase()
     const cardNumberRaw = document.getElementById("card-number").value
     const expMonthRaw = document.getElementById("card-exp-month").value.trim()
     const expYearRaw = document.getElementById("card-exp-year").value.trim()
@@ -434,7 +444,7 @@ async function submitCardPayment(event) {
     // Sanitização de cartão e validade
     const cardNumber = digitsOnly(cardNumberRaw)
     const expMonth = pad2(expMonthRaw)
-    const expYear = toYY(expYearRaw) // YY
+    const expYear = toYYYY(expYearRaw) // YY
     const securityCode = digitsOnly(securityCodeRaw)
 
     // Normalização/validação de bandeira + CVV
@@ -516,7 +526,7 @@ async function submitCardPayment(event) {
       number_token: numberToken,
       cardholder_name: cardholderName,
       expiration_month: expMonth,
-      expiration_year: expYear, // YY
+      expiration_year: expYear, // YYYY
       brand: brand,
       security_code: securityCode,
     }
@@ -2659,7 +2669,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const email       = (document.getElementById('card-email')||{}).value?.trim() || '';
       const documentRaw = (document.getElementById('card-document')||{}).value?.trim() || '';
       const phoneRaw    = (document.getElementById('card-phone')||{}).value?.trim() || '';
-      const cardholder  = (document.getElementById('cardholder-name')||{}).value?.trim() || '';
+      const cardholder  = ((document.getElementById('cardholder-name')||{}).value?.trim() || '').toUpperCase();
       const cardNumRaw  = (document.getElementById('card-number')||{}).value || '';
       const expMonthRaw = (document.getElementById('card-exp-month')||{}).value?.trim() || '';
       const expYearRaw  = (document.getElementById('card-exp-year')||{}).value?.trim() || '';
@@ -2689,7 +2699,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // Normalizações
       const cardNumber = digitsOnly(cardNumRaw);
       const expMonth   = pad2(expMonthRaw);
-      const expYear    = toYY(expYearRaw); // YY
+      const expYear    = toYYYY(expYearRaw); // YY
       const securityCode = digitsOnly(cvvRaw);
       const brand = normalizeBrand(selectedBrand, cardNumber);
       const isAmex = brand === 'American Express';
