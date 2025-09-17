@@ -13,20 +13,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@400;600;700&family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 
-  <!-- Seus scripts -->
+  <!-- Scripts -->
   <script defer src="config.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body class="mode-chat">
 
   <!-- LOGIN -->
-  <!-- A tela de login original foi acidentalmente substituída por um comentário,
-       o que fazia o front‑end quebrar e exibir apenas uma tela em branco. Abaixo
-       reconstruímos a estrutura necessária com os mesmos IDs e classes
-       esperados pelo script app.js para que o fluxo de autenticação funcione
-       novamente.  -->
   <main id="login-view" class="login hidden">
-    <!-- Etapa 1: Login da conta (e‑mail e senha) -->
+    <!-- Etapa 1: Login da conta -->
     <div id="step-account" class="login-step">
       <div class="login-card">
         <div class="login-header">
@@ -43,12 +38,8 @@
             <label for="acct-pass">Senha</label>
             <input id="acct-pass" type="password" class="inp" placeholder="Sua senha" autocomplete="current-password" />
           </div>
-          <!-- Mensagens de erro do login de conta -->
           <div id="acct-msg" class="msg-err"></div>
-          <button id="btn-acct-login" class="btn btn-primary">
-            Entrar
-          </button>
-          <!-- Link para criar conta -->
+          <button id="btn-acct-login" class="btn btn-primary">Entrar</button>
           <div class="login-register-container">
             <span>Não tem conta?</span>
             <a href="#" id="link-acct-register">Criar conta</a>
@@ -57,7 +48,7 @@
       </div>
     </div>
 
-    <!-- Etapa de registro: criação de conta -->
+    <!-- Etapa 1b: Registro -->
     <div id="step-register" class="login-step hidden">
       <div class="login-card">
         <div class="login-header">
@@ -74,7 +65,6 @@
             <label for="reg-pass">Senha</label>
             <input id="reg-pass" type="password" class="inp" placeholder="Crie uma senha" autocomplete="new-password" />
           </div>
-          <!-- Mensagens de erro do registro -->
           <div id="reg-msg" class="msg-err"></div>
           <button id="btn-acct-register" class="btn btn-primary">Criar Conta</button>
           <button id="btn-back-to-login" class="btn btn-secondary">Voltar</button>
@@ -82,7 +72,7 @@
       </div>
     </div>
 
-    <!-- Etapa 2: Conexão da instância (token da instância) -->
+    <!-- Etapa 2: Conexão da instância -->
     <div id="step-instance" class="login-step hidden">
       <div class="login-card">
         <div class="login-header">
@@ -95,7 +85,6 @@
             <label for="token">Token da instância</label>
             <input id="token" type="text" class="inp" placeholder="Cole o token aqui" />
           </div>
-          <!-- Mensagens de erro do token -->
           <div id="msg" class="msg-err"></div>
           <button id="btn-login" class="btn btn-primary">
             <span>Conectar instância</span>
@@ -145,7 +134,7 @@
     </header>
 
     <div class="shell">
-      <!-- MENU LATERAL (recolhível) -->
+      <!-- MENU LATERAL -->
       <nav class="nav-rail" aria-label="Menu principal">
         <button id="btn-rail-toggle" class="rail-toggle" aria-label="Recolher/Expandir menu">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -190,9 +179,7 @@
           </div>
           <div class="sidebar-stats"><span class="stats-badge">Ativo</span></div>
         </div>
-        <div id="chat-list" class="chat-list">
-          <!-- itens de conversa renderizados pelo app.js -->
-        </div>
+        <div id="chat-list" class="chat-list"></div>
       </aside>
 
       <!-- CONTEÚDO PRINCIPAL -->
@@ -224,34 +211,13 @@
               </div>
             </div>
 
-            <!-- Lista de benefícios do plano para tornar a tela de pagamentos mais atrativa -->
             <div class="billing-features">
               <h4>Benefícios Inclusos</h4>
               <ul>
-                <li>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M5 13l4 4L19 7"/>
-                  </svg>
-                  Acesso ilimitado às conversas do WhatsApp com IA
-                </li>
-                <li>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M5 13l4 4L19 7"/>
-                  </svg>
-                  Prospecção segmentada por nicho
-                </li>
-                <li>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M5 13l4 4L19 7"/>
-                  </svg>
-                  Suporte prioritário via chat
-                </li>
-                <li>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M5 13l4 4L19 7"/>
-                  </svg>
-                  Acesso a novos recursos em primeira mão
-                </li>
+                <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>Acesso ilimitado às conversas do WhatsApp com IA</li>
+                <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>Prospecção segmentada por nicho</li>
+                <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>Suporte prioritário via chat</li>
+                <li><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg>Acesso a novos recursos em primeira mão</li>
               </ul>
             </div>
 
@@ -290,7 +256,7 @@
     </div>
   </section>
 
-  <!-- MODAL PAGAMENTO (opcional) -->
+  <!-- MODAL TRIAL -->
   <div id="billing-modal" class="billing-modal hidden">
     <div class="modal-overlay"></div>
     <div class="modal-content">
@@ -304,21 +270,10 @@
   </div>
 
   <!-- MODAL DE PAGAMENTO COM CARTÃO -->
-  <!--
-    Este modal é exibido quando o usuário clica em "Assinar agora" na
-    tela de Pagamentos.  Ele coleta os dados do cartão de crédito e
-    informações básicas do cliente (nome, e‑mail, CPF/CNPJ, telefone) e
-    permite escolher a bandeira e o número de parcelas.  Após o envio,
-    uma requisição é feita para o backend para processar o pagamento
-    via API da GetNet.  O modal é semelhante ao modal de trial expirado,
-    reaproveitando a camada de overlay e estilização de cartão.
-  -->
   <div id="card-modal" class="payment-modal hidden">
     <div class="modal-overlay"></div>
     <div class="modal-content">
-      <div class="modal-header">
-        <h3>Dados do pagamento</h3>
-      </div>
+      <div class="modal-header"><h3>Dados do pagamento</h3></div>
       <form id="card-form" class="modal-body">
         <div class="form-group">
           <label for="card-name">Nome completo</label>
@@ -336,6 +291,10 @@
           <label for="card-phone">Telefone</label>
           <input id="card-phone" type="text" class="inp" placeholder="DDD + número" />
         </div>
+
+        <div class="form-spacer"></div>
+        <h4>Dados do cartão</h4>
+
         <div class="form-group">
           <label for="cardholder-name">Nome no cartão</label>
           <input id="cardholder-name" type="text" class="inp" placeholder="Como impresso no cartão" required />
@@ -351,7 +310,6 @@
           </div>
           <div class="form-group">
             <label for="card-exp-year">Ano</label>
-            <!-- Getnet exige o ano com 4 dígitos (AAAA). Permitimos até 4 caracteres. -->
             <input id="card-exp-year" type="text" class="inp" inputmode="numeric" maxlength="4" placeholder="AAAA" required />
           </div>
           <div class="form-group">
@@ -365,13 +323,12 @@
             <option value="">Selecione</option>
             <option value="Mastercard">Mastercard</option>
             <option value="Visa">Visa</option>
-            <option value="Amex">American Express</option>
+            <option value="American Express">American Express</option>
             <option value="Elo">Elo</option>
             <option value="Hipercard">Hipercard</option>
             <option value="Diners">Diners</option>
           </select>
         </div>
-        <!-- Seleção do tipo de cartão (crédito ou débito). Para pagamentos integrais não haverá parcelamento -->
         <div class="form-group">
           <label for="card-type">Tipo</label>
           <select id="card-type" class="inp" required>
@@ -379,6 +336,51 @@
             <option value="debit">Débito</option>
           </select>
         </div>
+
+        <details class="billing-address">
+          <summary>Endereço de cobrança (opcional)</summary>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="bill-street">Rua</label>
+              <input id="bill-street" type="text" class="inp" placeholder="Rua/Avenida" />
+            </div>
+            <div class="form-group">
+              <label for="bill-number">Número</label>
+              <input id="bill-number" type="text" class="inp" placeholder="Nº" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="bill-complement">Complemento</label>
+              <input id="bill-complement" type="text" class="inp" placeholder="Apto, sala..." />
+            </div>
+            <div class="form-group">
+              <label for="bill-district">Bairro</label>
+              <input id="bill-district" type="text" class="inp" placeholder="Bairro" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="bill-city">Cidade</label>
+              <input id="bill-city" type="text" class="inp" placeholder="Cidade" />
+            </div>
+            <div class="form-group">
+              <label for="bill-state">Estado</label>
+              <input id="bill-state" type="text" class="inp" placeholder="UF" maxlength="2" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="bill-country">País</label>
+              <input id="bill-country" type="text" class="inp" placeholder="Brasil" value="Brasil" />
+            </div>
+            <div class="form-group">
+              <label for="bill-postal">CEP</label>
+              <input id="bill-postal" type="text" class="inp" placeholder="CEP" />
+            </div>
+          </div>
+        </details>
+
         <div id="card-error" class="msg-err"></div>
         <div class="modal-actions">
           <button type="button" id="btn-card-cancel" class="btn btn-secondary">Cancelar</button>
@@ -390,7 +392,7 @@
 
   <noscript><div style="padding:16px;background:#111;color:#fff">Ative o JavaScript para usar a Luna.</div></noscript>
 
-  <!-- JS de UI: alterna modos, routing SPA e recolhe menu -->
+  <!-- JS de UI (rotas e layout) -->
   <script>
   (function () {
     const body = document.body;
@@ -408,24 +410,11 @@
       if (mode === 'billing') billingView?.focus();
     }
 
-    function openGetNetIfConfigured() {
-      if (window.GETNET_CHECKOUT_URL) {
-        window.open(window.GETNET_CHECKOUT_URL, '_blank', 'noopener,noreferrer');
-      }
-    }
-
     function handleRoute(pathname) {
       const path = pathname || location.pathname;
       if (path === '/' || path === '') {
         setMode('chat');
-      } else if (path === '/pagamentos') {
-        setMode('billing');
-      // Antiga rota '/pagamentos/getnet' não é mais utilizada. O fluxo de pagamento
-      // foi integrado diretamente no modal "Assinar agora". Qualquer tentativa
-      // de acessar esta rota simplesmente exibe a tela de pagamentos (billing)
-      // sem redirecionar para um checkout externo.
-      } else if (path === '/pagamentos/getnet') {
-        // Tratamos como a rota /pagamentos padrão
+      } else if (path === '/pagamentos' || path === '/pagamentos/getnet') {
         setMode('billing');
       } else {
         setMode('chat');
@@ -434,25 +423,15 @@
 
     function navTo(path, evt) {
       if (evt) evt.preventDefault();
-      if (location.pathname !== path) {
-        history.pushState({}, '', path);
-      }
+      if (location.pathname !== path) history.pushState({}, '', path);
       handleRoute(path);
     }
 
     btnConversas?.addEventListener('click', (e) => navTo('/', e));
     btnPagamentos?.addEventListener('click', (e) => navTo('/pagamentos', e));
-    // O botão "Assinar agora" agora abre o modal de pagamento diretamente em vez de
-    // redirecionar para uma rota que não existe.  Usamos a função global
-    // `showCardModal()` definida em app.js para exibir o modal e evitar
-    // redirecionamentos indesejados.
     btnPayGetnet?.addEventListener('click', (e) => {
       e.preventDefault();
-      try {
-        if (typeof window.showCardModal === 'function') {
-          window.showCardModal();
-        }
-      } catch {}
+      try { if (typeof window.showCardModal === 'function') window.showCardModal(); } catch {}
     });
 
     document.getElementById('btn-go-to-payments')?.addEventListener('click', () => {
@@ -473,6 +452,156 @@
 
     window.addEventListener('popstate', () => handleRoute());
     handleRoute();
+  })();
+  </script>
+
+  <!-- PATCH: intercepta o submit do cartão e envia para /api/pay/getnet/pay-direct -->
+  <script>
+  (function () {
+    // Helpers locais (não dependem do app.js)
+    function BACKEND(){ return (window.__BACKEND_URL__ || '').replace(/\/+$/,''); }
+    function authHeaders(){
+      try {
+        const t = localStorage.getItem('luna_jwt') || '';
+        return t ? { Authorization: 'Bearer ' + t } : {};
+      } catch { return {}; }
+    }
+    function digitsOnly(s){ return String(s||'').replace(/\D+/g,''); }
+    function pad2(v){ v=String(v||'').trim(); return (('0'+v).slice(-2)).slice(0,2) || '00'; }
+    function toYYYY(v){
+      const d = digitsOnly(v);
+      if (d.length >= 4) return d.slice(0,4);
+      if (d.length === 2) return '20'+d;
+      if (d.length === 3) return '20'+d.slice(-2);
+      return d || '';
+    }
+    function splitName(full){
+      const parts = String(full||'').trim().split(/\s+/).filter(Boolean);
+      if (!parts.length) return {first_name:'', last_name:''};
+      const first = parts.shift(); const last = parts.length ? parts.join(' ') : first;
+      return {first_name:first, last_name:last};
+    }
+    function normalizeBrand(sel, cardNumber){
+      const m = String(sel||'').toLowerCase();
+      if (m.includes('master')) return 'Mastercard';
+      if (m.includes('american') || m.includes('amex')) return 'American Express';
+      if (m.includes('elo')) return 'Elo';
+      if (m.includes('hiper')) return 'Hipercard';
+      if (m.includes('diners')) return 'Diners';
+      return /^4\d{12,18}$/.test(digitsOnly(cardNumber)) ? 'Visa' : 'Visa';
+    }
+    function formatPhoneE164BR(p){
+      if (!p) return '';
+      let s = String(p).trim();
+      if (s.startsWith('+')) return s.replace(/[^\d+]/g,'');
+      s = digitsOnly(s);
+      if (!s) return '';
+      return s.startsWith('55') ? ('+'+s) : ('+55'+s);
+    }
+    async function postJSON(path, data){
+      const res = await fetch(BACKEND()+path, {
+        method:'POST',
+        headers: { 'Content-Type':'application/json', ...authHeaders() },
+        body: JSON.stringify(data)
+      });
+      if (!res.ok) throw new Error(await res.text().catch(()=>`HTTP ${res.status}`));
+      return res.json().catch(()=> ({}));
+    }
+
+    async function onSubmitCapture(e){
+      if (!e) return;
+      // Intercepta antes do handler antigo (captura)
+      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+
+      const err = document.getElementById('card-error');
+      const btn = document.getElementById('btn-card-submit');
+      if (err) err.textContent = '';
+      if (btn){ btn.disabled = true; btn.textContent = 'Processando...'; }
+
+      try{
+        const fullName = document.getElementById('card-name').value.trim();
+        const email = document.getElementById('card-email').value.trim();
+        const documentRaw = document.getElementById('card-document').value.trim();
+        const phoneRaw = document.getElementById('card-phone').value.trim();
+
+        const cardholderName = document.getElementById('cardholder-name').value.trim().toUpperCase();
+        const cardNumber = document.getElementById('card-number').value;
+        const expMonth = document.getElementById('card-exp-month').value;
+        const expYear = document.getElementById('card-exp-year').value;
+        const cvv = document.getElementById('card-cvv').value;
+        const brandSel = document.getElementById('card-brand').value;
+        const type = (document.getElementById('card-type').value || 'credit').toLowerCase();
+
+        // Endereço (opcional)
+        const street = document.getElementById('bill-street')?.value || '';
+        const number = document.getElementById('bill-number')?.value || '';
+        const complement = document.getElementById('bill-complement')?.value || '';
+        const district = document.getElementById('bill-district')?.value || '';
+        const city = document.getElementById('bill-city')?.value || '';
+        const state = document.getElementById('bill-state')?.value || '';
+        const country = document.getElementById('bill-country')?.value || 'Brasil';
+        const postal = document.getElementById('bill-postal')?.value || '';
+
+        if(!fullName || !email || !cardholderName || !cardNumber || !expMonth || !expYear || !cvv || !brandSel){
+          throw new Error('Preencha todos os campos obrigatórios.');
+        }
+        const {first_name, last_name} = splitName(fullName);
+        const brand = normalizeBrand(brandSel, cardNumber);
+
+        const payload = {
+          type,
+          amount_cents: 34990,
+          currency: 'BRL',
+          number_installments: 1,
+          cardholder_mobile: type === 'debit' ? formatPhoneE164BR(phoneRaw) : undefined,
+          customer: {
+            email,
+            name: fullName,
+            first_name, last_name,
+            document_number: digitsOnly(documentRaw),
+            phone_number: formatPhoneE164BR(phoneRaw),
+            billing_address: {
+              street, number, complement, district, city, state, country, postal_code: digitsOnly(postal)
+            }
+          },
+          card: {
+            card_number: digitsOnly(cardNumber),
+            cardholder_name: cardholderName,
+            expiration_month: pad2(expMonth),
+            expiration_year: toYYYY(expYear),
+            security_code: digitsOnly(cvv),
+            brand
+          },
+          order_id: undefined,
+          product_type: 'digital_content',
+          sales_tax: 0
+        };
+
+        const res = await postJSON('/api/pay/getnet/pay-direct', payload);
+        const status = String(res?.status||'').toLowerCase();
+        const ok = ['approved','authorized','confirmed','paid','success'].some(s => status.includes(s));
+        document.getElementById('card-modal')?.classList.add('hidden');
+        alert(ok ? 'Pagamento aprovado!' : 'Pagamento em processamento. Aguarde a confirmação.');
+      } catch (ex){
+        if (err) err.textContent = (ex && ex.message) ? ex.message : 'Erro ao processar pagamento.';
+      } finally {
+        if (btn){ btn.disabled = false; btn.textContent = 'Pagar'; }
+      }
+    }
+
+    function bind(){
+      const form = document.getElementById('card-form');
+      if (!form || form.__pay_direct_bound) return;
+      form.__pay_direct_bound = true;
+      // CAPTURE = true para rodar antes do handler antigo e evitar "duplo envio"
+      form.addEventListener('submit', onSubmitCapture, true);
+    }
+
+    if (document.readyState === 'loading'){
+      document.addEventListener('DOMContentLoaded', bind);
+    } else {
+      bind();
+    }
   })();
   </script>
 </body>
