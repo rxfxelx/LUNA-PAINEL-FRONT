@@ -416,7 +416,17 @@ async function submitCardPayment(event) {
 
     // 3) Cria ou atualiza cliente (assinante)
     const { first_name, last_name } = splitName(name)
+    //
+    // The Getnet API expects the seller identifier as part of the request body
+    // when creating or updating a customer. Previously we passed the
+    // seller_id only via HTTP header, which caused the server to reject
+    // the request because the body lacked this property.  To comply with
+    // the API specification and fix the integration, include the
+    // seller_id at the top of the customer payload.  We retain the
+    // existing fields while adding seller_id as the first property so
+    // that the serialized JSON begins with the seller identifier.
     const customerPayload = {
+      seller_id: sellerId,
       customer_id: email,
       first_name,
       last_name,
