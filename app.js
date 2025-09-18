@@ -79,51 +79,51 @@ function truncatePreview(s, max = 90) {
 /* ===== Helpers de pagamento (sanitização e normalização) ===== */
 function digitsOnly(s) { return String(s || "").replace(/\D+/g, "") }
 
-//
-// Utilitários de validação de documentos brasileiros (CPF/CNPJ).
-// A GetNet exige que o campo cardholder_identification contenha um CPF/CNPJ
-// válido, ou seja, apenas dígitos com dígitos verificadores consistentes.
-// As funções abaixo implementam as rotinas de verificação utilizadas
-// amplamente em aplicações de pagamento. Caso o valor não atenda aos
-// critérios, a validação retornará false.
-
-// Valida CPF (Cadastro de Pessoa Física). Aceita 11 dígitos sem máscara.
 function validCPF(cpf) {
-  cpf = String(cpf || "").replace(/\D+/g, "")
-  if (!/^\d{11}$/.test(cpf)) return false
-  // rejeita CPFs com todos os dígitos iguais (ex.: 11111111111)
-  if (/^(.)\1+$/.test(cpf)) return false
-  let sum = 0
-  for (let i = 0; i < 9; i++) sum += parseInt(cpf.charAt(i)) * (10 - i)
-  let rev = 11 - (sum % 11)
-  let check1 = rev >= 10 ? 0 : rev
-  if (check1 !== parseInt(cpf.charAt(9))) return false
-  sum = 0
-  for (let i = 0; i < 10; i++) sum += parseInt(cpf.charAt(i)) * (11 - i)
-  rev = 11 - (sum % 11)
-  let check2 = rev >= 10 ? 0 : rev
-  return check2 === parseInt(cpf.charAt(10))
+  const s = String(cpf || "").replace(/\D+/g, "");
+  if (s.length !== 11) return false;
+  if (/^(\d)\1+$/.test(s)) return false;
+  let sum = 0;
+  for (let i = 0; i < 9; i++) sum += parseInt(s[i], 10) * (10 - i);
+  let d1 = 11 - (sum % 11); if (d1 >= 10) d1 = 0;
+  if (d1 !== parseInt(s[9], 10)) return false;
+  sum = 0;
+  for (let i = 0; i < 10; i++) sum += parseInt(s[i], 10) * (11 - i);
+  let d2 = 11 - (sum % 11); if (d2 >= 10) d2 = 0;
+  return d2 === parseInt(s[10], 10);
+}
+function validCNPJ(cnpj) {
+  const s = String(cnpj || "").replace(/\D+/g, "");
+  if (s.length !== 14) return false;
+  if (/^(\d)\1+$/.test(s)) return false;
+  const calc = (base) => {
+    let len = base.length;
+    let pos = len - 7, sum = 0;
+    for (let i = len; i >= 1; i--) {
+      sum += base[len - i] * pos--;
+      if (pos < 2) pos = 9;
+    }
+    const r = sum % 11;
+    return (r < 2) ? 0 : 11 - r;
+  };
+  const base = s.substring(0, 12).split("").map(Number);
+  const d1 = calc(base);
+  const d2 = calc(base.concat([d1]));
+  return (String(d1) === s[12] && String(d2) === s[13]);
 }
 
-// Valida CNPJ (Cadastro Nacional da Pessoa Jurídica). Aceita 14 dígitos.
-function validCNPJ(cnpj) {
-  cnpj = String(cnpj || "").replace(/\D+/g, "")
-  if (!/^\d{14}$/.test(cnpj)) return false
-  // rejeita CNPJs com todos os dígitos iguais
-  if (/^(.)\1+$/.test(cnpj)) return false
-  const weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-  const weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-  let sum = 0
-  for (let i = 0; i < 12; i++) sum += parseInt(cnpj.charAt(i)) * weights1[i]
-  let mod = sum % 11
-  let check1 = mod < 2 ? 0 : 11 - mod
-  if (check1 !== parseInt(cnpj.charAt(12))) return false
-  sum = 0
-  for (let i = 0; i < 13; i++) sum += parseInt(cnpj.charAt(i)) * weights2[i]
-  mod = sum % 11
-  let check2 = mod < 2 ? 0 : 11 - mod
-  return check2 === parseInt(cnpj.charAt(13))
+
+// Remove acentos e normaliza para A-Z e espaço
+function stripDiacritics(str) {
+  try { return String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
+  catch(e) { return String(str || ""); }
 }
+// Mantém apenas A-Z e espaço; colapsa múltiplos espaços
+function sanitizeCardholderName(name) {
+  const s = stripDiacritics(String(name || "")).toUpperCase().replace(/[^A-Z\s]/g, " ").replace(/\s+/g, " ").trim();
+  return s;
+}
+
 function pad2(v) { return String(v || "").padStart(2, "0").slice(-2) }
 function toYYYY(v) {
   const d = digitsOnly(v)
@@ -378,15 +378,6 @@ async function submitCardPayment(event) {
     const documentNumber = digitsOnly(documentNumberRaw)
     if (!documentNumber) throw new Error("Informe CPF/CNPJ.")
 
-    // Validação de CPF/CNPJ: impede envio de identificações inválidas.
-    // A GetNet rejeita o cardholder_identification inválido com erro 400,
-    // portanto validamos previamente o CPF (11 dígitos) ou CNPJ (14 dígitos).
-    if (documentNumber.length <= 11) {
-      if (!validCPF(documentNumber)) throw new Error("CPF inválido.")
-    } else {
-      if (!validCNPJ(documentNumber)) throw new Error("CNPJ inválido.")
-    }
-
     // Telefone em dígitos (10–11). Obrigatório no débito.
     const phoneDigits = phoneDigitsBR(phoneRaw)
     if (cardType === "debit" && (phoneDigits.length < 10 || phoneDigits.length > 11)) {
@@ -525,7 +516,7 @@ async function submitCardPayment(event) {
       expiration_month: expMonth,
       expiration_year: expYear,
       customer_id: customerId,
-      cardholder_name: cardholderName,
+      cardholder_name: chName,
       brand,
       cardholder_identification: documentNumber,
       security_code: securityCode,
@@ -612,7 +603,17 @@ async function submitCardPayment(event) {
     console.error("[payments] Falha ao processar pagamento:", err)
     if (errorEl) errorEl.textContent = err?.message || "Erro desconhecido"
   } finally {
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Pagar" }
+    if (submitBtn) { submitBtn.disabled = false;
+// Sanitiza e valida o nome do titular do cartão (A-Z e espaço, sem acentos)
+const chName = sanitizeCardholderName(cardholderName);
+if (!chName || chName.split(" ").length < 2) {
+  throw new Error("Nome do titular inválido. Digite como impresso no cartão (apenas letras e espaços).");
+}
+// Limite prático de mercado (faixa 26–28). Usamos 26 para máxima compatibilidade.
+if (chName.length > 26) {
+  throw new Error("Nome do titular muito longo (máx. 26 caracteres). Use como impresso no cartão.");
+}
+ submitBtn.textContent = "Pagar" }
   }
 }
 
