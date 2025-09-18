@@ -112,6 +112,7 @@ function validCNPJ(cnpj) {
   return (String(d1) === s[12] && String(d2) === s[13]);
 }
 
+
 // Remove acentos e normaliza para A-Z e espaço
 function stripDiacritics(str) {
   try { return String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
@@ -373,27 +374,9 @@ async function submitCardPayment(event) {
       throw new Error("Preencha todos os campos obrigatórios.")
     }
 
-    // Sanitiza e valida o NOME IMPRESSO NO CARTÃO
-    const chName = sanitizeCardholderName(cardholderName)
-    if (!chName || chName.split(" ").length < 2) {
-      throw new Error("Nome do titular inválido. Digite como impresso no cartão (apenas letras e espaços).")
-    }
-    if (chName.length > 26) {
-      throw new Error("Nome do titular muito longo (máx. 26 caracteres). Use como impresso no cartão.")
-    }
-
     // CPF/CNPJ obrigatório (GetNet)
     const documentNumber = digitsOnly(documentNumberRaw)
     if (!documentNumber) throw new Error("Informe CPF/CNPJ.")
-    if (documentNumber.length === 11 && !validCPF(documentNumber)) {
-      throw new Error("CPF inválido. Verifique os dígitos.")
-    }
-    if (documentNumber.length === 14 && !validCNPJ(documentNumber)) {
-      throw new Error("CNPJ inválido. Verifique os dígitos.")
-    }
-    if (documentNumber.length !== 11 && documentNumber.length !== 14) {
-      throw new Error("Documento deve ter 11 (CPF) ou 14 (CNPJ) dígitos.")
-    }
 
     // Telefone em dígitos (10–11). Obrigatório no débito.
     const phoneDigits = phoneDigitsBR(phoneRaw)
@@ -533,7 +516,7 @@ async function submitCardPayment(event) {
       expiration_month: expMonth,
       expiration_year: expYear,
       customer_id: customerId,
-      cardholder_name: chName, // <-- usa nome sanitizado/validado
+      cardholder_name: chName,
       brand,
       cardholder_identification: documentNumber,
       security_code: securityCode,
@@ -620,7 +603,17 @@ async function submitCardPayment(event) {
     console.error("[payments] Falha ao processar pagamento:", err)
     if (errorEl) errorEl.textContent = err?.message || "Erro desconhecido"
   } finally {
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Pagar" }
+    if (submitBtn) { submitBtn.disabled = false;
+// Sanitiza e valida o nome do titular do cartão (A-Z e espaço, sem acentos)
+const chName = sanitizeCardholderName(cardholderName);
+if (!chName || chName.split(" ").length < 2) {
+  throw new Error("Nome do titular inválido. Digite como impresso no cartão (apenas letras e espaços).");
+}
+// Limite prático de mercado (faixa 26–28). Usamos 26 para máxima compatibilidade.
+if (chName.length > 26) {
+  throw new Error("Nome do titular muito longo (máx. 26 caracteres). Use como impresso no cartão.");
+}
+ submitBtn.textContent = "Pagar" }
   }
 }
 
