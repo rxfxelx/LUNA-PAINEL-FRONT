@@ -396,6 +396,18 @@ async function submitCardPayment(event) {
     const expYear = toYYYY(expYearRaw) // AAAA
     const securityCode = digitsOnly(securityCodeRaw)
 
+    // >>>>> [ALTERAÇÃO 1/2] Nome do titular: sanitiza e valida (máx. 26) <<<<<
+    const chName = sanitizeCardholderName(cardholderName)
+    if (!chName || chName.split(" ").length < 2) {
+      throw new Error("Nome do titular inválido. Digite como impresso no cartão (apenas letras e espaços).")
+    }
+    if (chName.length > 26) {
+      throw new Error("Nome do titular muito longo (máx. 26 caracteres). Use como impresso no cartão.")
+    }
+
+    // >>>>> [ALTERAÇÃO 2/2] Ano de expiração em 2 dígitos (YY) para /v1/cards <<<<<
+    const expYear2 = String(expYear).slice(-2)
+
     // Normalização/validação de bandeira + CVV
     const brand = normalizeBrand(selectedBrand, cardNumber)
     const isAmex = brand === "Amex"
@@ -514,9 +526,9 @@ async function submitCardPayment(event) {
     const cardPayload = {
       number_token: numberToken,
       expiration_month: expMonth,
-      expiration_year: expYear,
+      expiration_year: expYear2,             // << usa YY
       customer_id: customerId,
-      cardholder_name: cardholderName, // <-- única alteração
+      cardholder_name: chName,               // << usa nome sanitizado
       brand,
       cardholder_identification: documentNumber,
       security_code: securityCode,
@@ -603,17 +615,10 @@ async function submitCardPayment(event) {
     console.error("[payments] Falha ao processar pagamento:", err)
     if (errorEl) errorEl.textContent = err?.message || "Erro desconhecido"
   } finally {
-    if (submitBtn) { submitBtn.disabled = false;
-// Sanitiza e valida o nome do titular do cartão (A-Z e espaço, sem acentos)
-const chName = sanitizeCardholderName(cardholderName);
-if (!chName || chName.split(" ").length < 2) {
-  throw new Error("Nome do titular inválido. Digite como impresso no cartão (apenas letras e espaços).");
-}
-// Limite prático de mercado (faixa 26–28). Usamos 26 para máxima compatibilidade.
-if (chName.length > 26) {
-  throw new Error("Nome do titular muito longo (máx. 26 caracteres). Use como impresso no cartão.");
-}
- submitBtn.textContent = "Pagar" }
+    if (submitBtn) {
+      submitBtn.disabled = false
+      submitBtn.textContent = "Pagar"
+    }
   }
 }
 
