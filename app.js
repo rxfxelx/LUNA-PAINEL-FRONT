@@ -78,6 +78,52 @@ function truncatePreview(s, max = 90) {
 
 /* ===== Helpers de pagamento (sanitização e normalização) ===== */
 function digitsOnly(s) { return String(s || "").replace(/\D+/g, "") }
+
+//
+// Utilitários de validação de documentos brasileiros (CPF/CNPJ).
+// A GetNet exige que o campo cardholder_identification contenha um CPF/CNPJ
+// válido, ou seja, apenas dígitos com dígitos verificadores consistentes.
+// As funções abaixo implementam as rotinas de verificação utilizadas
+// amplamente em aplicações de pagamento. Caso o valor não atenda aos
+// critérios, a validação retornará false.
+
+// Valida CPF (Cadastro de Pessoa Física). Aceita 11 dígitos sem máscara.
+function validCPF(cpf) {
+  cpf = String(cpf || "").replace(/\D+/g, "")
+  if (!/^\d{11}$/.test(cpf)) return false
+  // rejeita CPFs com todos os dígitos iguais (ex.: 11111111111)
+  if (/^(.)\1+$/.test(cpf)) return false
+  let sum = 0
+  for (let i = 0; i < 9; i++) sum += parseInt(cpf.charAt(i)) * (10 - i)
+  let rev = 11 - (sum % 11)
+  let check1 = rev >= 10 ? 0 : rev
+  if (check1 !== parseInt(cpf.charAt(9))) return false
+  sum = 0
+  for (let i = 0; i < 10; i++) sum += parseInt(cpf.charAt(i)) * (11 - i)
+  rev = 11 - (sum % 11)
+  let check2 = rev >= 10 ? 0 : rev
+  return check2 === parseInt(cpf.charAt(10))
+}
+
+// Valida CNPJ (Cadastro Nacional da Pessoa Jurídica). Aceita 14 dígitos.
+function validCNPJ(cnpj) {
+  cnpj = String(cnpj || "").replace(/\D+/g, "")
+  if (!/^\d{14}$/.test(cnpj)) return false
+  // rejeita CNPJs com todos os dígitos iguais
+  if (/^(.)\1+$/.test(cnpj)) return false
+  const weights1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+  const weights2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+  let sum = 0
+  for (let i = 0; i < 12; i++) sum += parseInt(cnpj.charAt(i)) * weights1[i]
+  let mod = sum % 11
+  let check1 = mod < 2 ? 0 : 11 - mod
+  if (check1 !== parseInt(cnpj.charAt(12))) return false
+  sum = 0
+  for (let i = 0; i < 13; i++) sum += parseInt(cnpj.charAt(i)) * weights2[i]
+  mod = sum % 11
+  let check2 = mod < 2 ? 0 : 11 - mod
+  return check2 === parseInt(cnpj.charAt(13))
+}
 function pad2(v) { return String(v || "").padStart(2, "0").slice(-2) }
 function toYYYY(v) {
   const d = digitsOnly(v)
@@ -331,6 +377,15 @@ async function submitCardPayment(event) {
     // CPF/CNPJ obrigatório (GetNet)
     const documentNumber = digitsOnly(documentNumberRaw)
     if (!documentNumber) throw new Error("Informe CPF/CNPJ.")
+
+    // Validação de CPF/CNPJ: impede envio de identificações inválidas.
+    // A GetNet rejeita o cardholder_identification inválido com erro 400,
+    // portanto validamos previamente o CPF (11 dígitos) ou CNPJ (14 dígitos).
+    if (documentNumber.length <= 11) {
+      if (!validCPF(documentNumber)) throw new Error("CPF inválido.")
+    } else {
+      if (!validCNPJ(documentNumber)) throw new Error("CNPJ inválido.")
+    }
 
     // Telefone em dígitos (10–11). Obrigatório no débito.
     const phoneDigits = phoneDigitsBR(phoneRaw)
