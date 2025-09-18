@@ -516,7 +516,7 @@ async function submitCardPayment(event) {
       expiration_month: expMonth,
       expiration_year: expYear,
       customer_id: customerId,
-      cardholder_name: chName,
+      cardholder_name: cardholderName, // <-- única alteração
       brand,
       cardholder_identification: documentNumber,
       security_code: securityCode,
