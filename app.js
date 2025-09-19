@@ -416,7 +416,9 @@ async function submitCardPayment(event) {
     }
 
     // === Integração de assinatura recorrente com a API da GetNet ===
-    const baseURL = "https://api.getnet.com.br"
+    const baseURL = window.__GETNET_ENV__ === "production"
+      ? "https://api.getnet.com.br"
+      : "https://api-homologacao.getnet.com.br"
     const clientId = window.__GETNET_CLIENT_ID__
     const clientSecret = window.__GETNET_CLIENT_SECRET__
     const sellerId = window.__GETNET_SELLER_ID__
