@@ -874,14 +874,17 @@ function hideSplash() {
 }
 
 async function doLogin() {
-  if (!acctJwt()) { showStepAccount(); return }
   const token = $("#token")?.value?.trim()
   const msgEl = $("#msg"); const btnEl = $("#btn-login")
   if (!token) { if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"; return }
   if (msgEl) msgEl.textContent = ""
   if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = "<span>Conectando...</span>" }
   try {
-    const r = await fetch(BACKEND() + "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) })
+    const body = { token }
+    // Se o backend não tiver UAZAPI_HOST definido, o front pode opcionalmente
+    // enviar window.__UAZAPI_HOST__ (quando existir) sem quebrar compatibilidade.
+    if (typeof window !== "undefined" && window.__UAZAPI_HOST__) body.host = window.__UAZAPI_HOST__
+    const r = await fetch(BACKEND() + "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json(); localStorage.setItem("luna_jwt", data.jwt)
     try { await registerTrial() } catch {}
@@ -907,11 +910,14 @@ function switchToApp() {
   showConversasView(); loadChats().finally(() => {})
 }
 function ensureRoute() {
-  const hasAcct = !!acctJwt(); const hasInst = !!jwt()
-  if (!hasAcct) { show("#login-view"); hide("#app-view"); showStepAccount(); return }
-  if (!hasInst) { show("#login-view"); hide("#app-view"); showStepInstance(); return }
-  switchToApp()
-  try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
+  const hasInst = !!jwt(); const hasAcct = !!acctJwt()
+  if (hasInst) {
+    switchToApp()
+    try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
+    return
+  }
+  // Sem instância -> prioriza etapa de token (instância). A conta é opcional para billing.
+  show("#login-view"); hide("#app-view"); showStepInstance(); return
 }
 
 /* =========================================
@@ -1423,7 +1429,7 @@ function appendMessageBubble(pane, m) {
   const top = document.createElement("div"); renderReplyPreview(top, m)
   const hadInteractive = renderInteractive(top, m)
   const { mime, url, dataUrl, caption } = pickMediaInfo(m)
-  const plainText = m.text || m.message?.text || m?.message?.extendedTextMessage?.text || m?.message?.conversation || m.caption || m.body || ""
+  const plainText = m.text || m.message?.text || m?.message?.extendedTextMessage?.text || m?.message?.conversation || m?.caption || m?.body || ""
   const who = m.senderName || m.pushName || ""; const ts = m.messageTimestamp || m.timestamp || m.t || ""
 
   // Sticker
