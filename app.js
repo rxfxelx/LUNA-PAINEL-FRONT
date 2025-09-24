@@ -798,53 +798,75 @@ function showStepAccount() { hide("#step-instance"); hide("#step-register"); sho
 function showStepInstance() { hide("#step-account"); hide("#step-register"); show("#step-instance") }
 function showStepRegister() { hide("#step-account"); hide("#step-instance"); show("#step-register") }
 
-// Login por e-mail/senha
-async function acctLogin() {
-  const email = $("#acct-email")?.value?.trim()
-  const pass = $("#acct-pass")?.value?.trim()
-  const msgEl = $("#acct-msg"); const btnEl = $("#btn-acct-login")
-  if (!email || !pass) { if (msgEl) msgEl.textContent = "Informe e-mail e senha."; return }
-  try {
-    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Entrando..." }
-    if (msgEl) msgEl.textContent = ""
-    const r = await fetch(BACKEND() + "/api/users/login", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: pass })
-    })
-    if (!r.ok) throw new Error(await r.text())
-    const data = await r.json(); if (!data?.jwt) throw new Error("Resposta inválida do servidor.")
-    localStorage.setItem(ACCT_JWT_KEY, data.jwt)
-    try { await registerTrialUser(); await checkBillingStatus() } catch (e) { console.error(e) }
-    showStepInstance(); $("#token")?.focus()
-  } catch (e) { if (msgEl) msgEl.textContent = e?.message || "Falha no login." }
-  finally { if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Entrar" } }
-}
-
-// Registro
-async function acctRegister() {
-  const email = $("#reg-email")?.value?.trim()
-  const pass = $("#reg-pass")?.value?.trim()
-  const msgEl = $("#reg-msg"); const btnEl = $("#btn-acct-register")
-  if (!email || !pass) { if (msgEl) msgEl.textContent = "Informe e-mail e senha."; return }
-  try {
-    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Criando..." }
-    if (msgEl) msgEl.textContent = ""
-    const r = await fetch(BACKEND() + "/api/users/register", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password: pass })
-    })
-    if (!r.ok) throw new Error(await r.text())
-    const data = await r.json(); if (!data?.jwt) throw new Error("Resposta inválida do servidor.")
-    localStorage.setItem(ACCT_JWT_KEY, data.jwt)
-    try { await registerTrialUser(); await checkBillingStatus() } catch (e) { console.error(e) }
-    showStepInstance(); $("#token")?.focus()
-  } catch (e) { if (msgEl) msgEl.textContent = e?.message || "Falha no registro." }
-  finally { if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Criar Conta" } }
-}
-
 /* =========================================
  * 6) SPLASH / LOGIN / ROUTER
  * ======================================= */
+
+// --- trava reentrância do login de instância
+let __loginBusy = false
+
+async function doLogin() {
+  if (__loginBusy) return
+  __loginBusy = true
+  const token = $("#token")?.value?.trim()
+  const msgEl = $("#msg"); const btnEl = $("#btn-login")
+  if (!token) { if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"; __loginBusy = false; return }
+  if (msgEl) msgEl.textContent = ""
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = "<span>Conectando...</span>" }
+  try {
+    const body = { token }
+    // opcionalmente enviar o host da UAZAPI, se estiver definido no front
+    if (typeof window !== "undefined" && window.__UAZAPI_HOST__) body.host = window.__UAZAPI_HOST__
+    const r = await fetch(BACKEND() + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body),
+      credentials: "omit",
+      cache: "no-store",
+      redirect: "manual", // NÃO segue redirect para /login
+    })
+    // Se algum proxy tentar redirecionar para /login, não seguimos silenciosamente.
+    if (r.type === "opaqueredirect" || (r.status >= 300 && r.status < 400)) {
+      const loc = r.headers?.get?.("Location") || "/login"
+      throw new Error(`Redirecionado para ${loc}. Verifique rewrite/proxy do servidor.`)
+    }
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json(); localStorage.setItem("luna_jwt", data.jwt)
+    try { await registerTrial() } catch {}
+    const canAccess = await checkBillingStatus(); if (canAccess) switchToApp()
+  } catch (e) {
+    console.error(e); if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
+  } finally {
+    __loginBusy = false
+    if (btnEl) {
+      btnEl.disabled = false
+      btnEl.innerHTML = '<span>Conectar instância</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'
+    }
+  }
+}
+
+function ensureTopbar() {
+  if (!$(".topbar")) {
+    const tb = document.createElement("div"); tb.className = "topbar"
+    tb.style.display = "flex"; tb.style.alignItems = "center"; tb.style.gap = "8px"; tb.style.padding = "8px 12px"
+    const host = $("#app-view") || document.body; host.prepend(tb)
+  }
+}
+function switchToApp() {
+  hide("#login-view"); show("#app-view"); setMobileMode("list"); ensureTopbar(); ensureCRMBar(); ensureStageTabs(); createSplash()
+  showConversasView(); loadChats().finally(() => {})
+}
+function ensureRoute() {
+  const hasInst = !!jwt(); const hasAcct = !!acctJwt() // (hasAcct é irrelevante para instância)
+  if (hasInst) {
+    switchToApp()
+    try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
+    return
+  }
+  // Sem instância -> prioriza etapa de token. Conta é opcional.
+  show("#login-view"); hide("#app-view"); showStepInstance(); return
+}
+
 function createSplash() {
   if (state.splash.shown) return
   const el = document.createElement("div"); el.id = "luna-splash"; el.className = "splash-screen"
@@ -868,108 +890,6 @@ function hideSplash() {
   state.splash.shown = false
   if (state.splash.timer) { clearTimeout(state.splash.timer); state.splash.timer = null }
   if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
-}
-
-// ====== LOGIN DE INSTÂNCIA (TOKEN-ONLY) ======
-async function doLogin() {
-  const token = $("#token")?.value?.trim()
-  const msgEl = $("#msg"); const btnEl = $("#btn-login")
-  if (!token) { if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"; return }
-  if (msgEl) msgEl.textContent = ""
-  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = "<span>Conectando...</span>" }
-  try {
-    const body = { token }
-    // opcionalmente enviar o host da UAZAPI, se estiver definido no front
-    if (typeof window !== "undefined" && window.__UAZAPI_HOST__) body.host = window.__UAZAPI_HOST__
-    const r = await fetch(BACKEND() + "/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify(body)
-    })
-    if (!r.ok) throw new Error(await r.text())
-    const data = await r.json(); localStorage.setItem("luna_jwt", data.jwt)
-    try { await registerTrial() } catch {}
-    const canAccess = await checkBillingStatus(); if (canAccess) switchToApp()
-  } catch (e) {
-    console.error(e); if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
-  } finally {
-    if (btnEl) {
-      btnEl.disabled = false
-      btnEl.innerHTML = '<span>Conectar instância</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'
-    }
-  }
-}
-// Expor para debug manual no console
-window.forceInstanceLogin = doLogin
-
-// Bloqueios “a prova de bala” contra submit nativo indo para /login
-function guardInstanceLoginForm() {
-  const tokenEl = $("#token")
-  if (!tokenEl) return
-  const form = tokenEl.closest("form")
-  const handler = (ev) => { ev.preventDefault(); ev.stopPropagation(); doLogin(); return false }
-  if (form) {
-    form.addEventListener("submit", handler, true)
-    try {
-      form.setAttribute("action", "")
-      form.setAttribute("novalidate", "novalidate")
-      form.noValidate = true
-    } catch {}
-  }
-  const btn = $("#btn-login")
-  if (btn) {
-    try { btn.setAttribute("type", "button") } catch {}
-    btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); doLogin() })
-  }
-  // Enter no campo token
-  tokenEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); doLogin() } }, true)
-}
-function hardBlockNativeLoginFormsEverywhere() {
-  const apply = (f) => {
-    if (!f || f.__lunaPatched) return
-    f.__lunaPatched = true
-    f.addEventListener("submit", (ev) => { ev.preventDefault(); ev.stopPropagation(); return false }, true)
-    try {
-      f.setAttribute("action", "")
-      f.setAttribute("novalidate", "novalidate")
-      f.noValidate = true
-    } catch {}
-  }
-  // Bloqueia formulários comuns de /login no DOM atual
-  document.querySelectorAll('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]').forEach(apply)
-  // Observa mutações para bloquear formulários injetados depois
-  const mo = new MutationObserver((ml) => {
-    ml.forEach((m) => {
-      m.addedNodes && m.addedNodes.forEach((n) => {
-        if (n.nodeType !== 1) return
-        if (n.matches && (n.matches('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]'))) apply(n)
-        n.querySelectorAll && n.querySelectorAll('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]').forEach(apply)
-      })
-    })
-  })
-  mo.observe(document.body, { childList: true, subtree: true })
-}
-
-function ensureTopbar() {
-  if (!$(".topbar")) {
-    const tb = document.createElement("div"); tb.className = "topbar"
-    tb.style.display = "flex"; tb.style.alignItems = "center"; tb.style.gap = "8px"; tb.style.padding = "8px 12px"
-    const host = $("#app-view") || document.body; host.prepend(tb)
-  }
-}
-function switchToApp() {
-  hide("#login-view"); show("#app-view"); setMobileMode("list"); ensureTopbar(); ensureCRMBar(); ensureStageTabs(); createSplash()
-  showConversasView(); loadChats().finally(() => {})
-}
-function ensureRoute() {
-  const hasInst = !!jwt(); const hasAcct = !!acctJwt() // (hasAcct é irrelevante para instância)
-  if (hasInst) {
-    switchToApp()
-    try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
-    return
-  }
-  // Sem instância -> prioriza etapa de token. Conta é opcional.
-  show("#login-view"); hide("#app-view"); showStepInstance(); return
 }
 
 /* =========================================
@@ -1441,9 +1361,7 @@ function renderInteractive(container, m) {
     ;(listMsg.sections || []).forEach((sec) => {
       if (sec.title) { const st = document.createElement("div"); st.style.margin = "6px 0 4px"; st.style.fontSize = "12px"; st.style.opacity = ".8"; st.textContent = sec.title; card.appendChild(st) }
       ;(sec.rows || []).forEach((row) => {
-        const opt = document.createElement("div"); opt.style.padding = "6px 8px"; opt.style.border = "1px solid var(--muted,#eee)"; opt.style.borderRadius = "6px"; opt.style.marginBottom = "6px"; 
-        opt.textContent = row.title || row.id || "(opção)"; 
-        card.appendChild(opt)
+        const opt = document.createElement("div"); opt.style.padding = "6px 8px"; opt.style.border = "1px solid var(--muted,#eee)"; opt.style.borderRadius = "6px"; opt.style.marginBottom = "6px"; textContent = row.title || row.id || "(opção)"; card.appendChild(opt)
       })
     })
     container.appendChild(card); return true
@@ -1655,11 +1573,87 @@ async function sendNow() {
 }
 
 /* =========================================
- * 21) BOOT
+ * 21) GUARDA DE FORMULÁRIOS (anti-/login) + BOOT
  * ======================================= */
+
+// Garante que #btn-login NUNCA submeta form nativo
+function wireBtnLogin() {
+  const btn = document.getElementById("btn-login")
+  if (!btn || btn.__lunaPatched) return
+  btn.__lunaPatched = true
+  try { btn.setAttribute("type", "button") } catch {}
+  btn.addEventListener("click", (e) => {
+    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation()
+    doLogin()
+  }, true) // captura
+}
+
+// Intercepta qualquer submit/click em forms de login e redireciona para doLogin()
+function guardInstanceLoginForm() {
+  const isInstanceStep = () => {
+    const el = document.getElementById("step-instance")
+    return el && !el.classList.contains("hidden")
+  }
+
+  // Intercepta SUBMIT em CAPTURA
+  document.addEventListener("submit", (ev) => {
+    const form = ev.target
+    const action = (form?.getAttribute?.("action") || "").toLowerCase()
+    if (form?.closest?.("#step-instance") || action === "/login" || action === "login" || action.includes("/login")) {
+      ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation()
+      doLogin()
+      return false
+    }
+  }, true)
+
+  // Enter no #token
+  const tokenEl = document.getElementById("token")
+  if (tokenEl) {
+    const onEnter = (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); doLogin() } }
+    tokenEl.addEventListener("keydown", onEnter, true)
+    tokenEl.addEventListener("keypress", onEnter, true)
+  }
+
+  // Intercepta clique em qualquer botão submit dentro do #step-instance
+  document.addEventListener("click", (ev) => {
+    const tgt = ev.target
+    if (!(tgt instanceof Element)) return
+    const btn = tgt.closest('button, input[type="submit"]')
+    if (btn && btn.closest("#step-instance")) {
+      ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation()
+      doLogin()
+    }
+  }, true)
+
+  // Neutraliza forms que apontem para /login
+  const neuter = (f) => {
+    if (!f || f.__lunaPatched) return
+    f.__lunaPatched = true
+    try { f.setAttribute("action", ""); f.setAttribute("novalidate", "novalidate"); f.noValidate = true } catch {}
+  }
+  document.querySelectorAll('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]').forEach(neuter)
+  wireBtnLogin()
+
+  // Vigia inclusão de novos forms/botões (SPAs/SSR)
+  const mo = new MutationObserver((ml) => {
+    ml.forEach((m) => {
+      m.addedNodes && m.addedNodes.forEach((node) => {
+        if (node.nodeType !== 1) return
+        if (node.matches && node.matches('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]')) neuter(node)
+        if (node.querySelectorAll) node.querySelectorAll('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]').forEach(neuter)
+        if (node.id === "btn-login" || (node.querySelector && node.querySelector("#btn-login"))) wireBtnLogin()
+      })
+    })
+  })
+  mo.observe(document.body, { childList: true, subtree: true })
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   // Botões padrão
-  $("#btn-login") && ($("#btn-login").onclick = (e) => { e.preventDefault(); doLogin() })
+  $("#btn-login") && ($("#btn-login").onclick = doLogin)
+  wireBtnLogin()
+  guardInstanceLoginForm()
+
   $("#btn-logout") && ($("#btn-logout").onclick = () => { localStorage.clear(); location.reload() })
   $("#btn-send") && ($("#btn-send").onclick = sendNow)
   $("#btn-refresh") && ($("#btn-refresh").onclick = () => {
@@ -1669,14 +1663,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const backBtn = document.getElementById("btn-back-mobile"); if (backBtn) backBtn.onclick = () => setMobileMode("list")
 
-  // Enter no input do token
+  // Enter no input do token (reforço)
   $("#token") && $("#token").addEventListener("keypress", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin() } })
   $("#token") && $("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin() } })
-
-  // ⚠️ Bloqueios contra submit nativo /login
-  guardInstanceLoginForm()
-  hardBlockNativeLoginFormsEverywhere()
-  window.addEventListener("load", () => { guardInstanceLoginForm() })
 
   // Login por e-mail
   $("#btn-acct-login") && ($("#btn-acct-login").onclick = acctLogin)
