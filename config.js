@@ -2,7 +2,7 @@
 window.__BACKEND_URL__ = "https://web-production-3bc4c.up.railway.app"
 
 // === Configurações da GetNet (homologação) ===
-window.__GETNET_SELLER_ID__ = "17943e93-e7d2-423a-a026-ac3368bad649"
-window.__GETNET_CLIENT_ID__ = "8c4dbf87-fece-4349-8771-8fe6e261b241"
-window.__GETNET_CLIENT_SECRET__ = "f435dd6e-6076-4dd2-a92d-9a13f0d8f527"
-window.__GETNET_ENV__ = "sandbox" // 'sandbox' | 'production'
+window.__GETNET_SELLER_ID__ = "bbb13454-0802-47f2-b96c-383e9512d1cd"
+window.__GETNET_CLIENT_ID__ = "f2bb5b15-54a7-4c98-a16c-0652062770d0"
+window.__GETNET_CLIENT_SECRET__ = "rxJKRCQN1uWdvozEx1OPR08CiyDNHXcG"
+window.__GETNET_ENV__ = "production" // 'sandbox' | 'production'
