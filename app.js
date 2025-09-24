@@ -870,6 +870,7 @@ function hideSplash() {
   if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
 }
 
+// ====== LOGIN DE INSTÂNCIA (TOKEN-ONLY) ======
 async function doLogin() {
   const token = $("#token")?.value?.trim()
   const msgEl = $("#msg"); const btnEl = $("#btn-login")
@@ -882,7 +883,7 @@ async function doLogin() {
     if (typeof window !== "undefined" && window.__UAZAPI_HOST__) body.host = window.__UAZAPI_HOST__
     const r = await fetch(BACKEND() + "/api/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify(body)
     })
     if (!r.ok) throw new Error(await r.text())
@@ -898,6 +899,57 @@ async function doLogin() {
     }
   }
 }
+// Expor para debug manual no console
+window.forceInstanceLogin = doLogin
+
+// Bloqueios “a prova de bala” contra submit nativo indo para /login
+function guardInstanceLoginForm() {
+  const tokenEl = $("#token")
+  if (!tokenEl) return
+  const form = tokenEl.closest("form")
+  const handler = (ev) => { ev.preventDefault(); ev.stopPropagation(); doLogin(); return false }
+  if (form) {
+    form.addEventListener("submit", handler, true)
+    try {
+      form.setAttribute("action", "")
+      form.setAttribute("novalidate", "novalidate")
+      form.noValidate = true
+    } catch {}
+  }
+  const btn = $("#btn-login")
+  if (btn) {
+    try { btn.setAttribute("type", "button") } catch {}
+    btn.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); doLogin() })
+  }
+  // Enter no campo token
+  tokenEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); doLogin() } }, true)
+}
+function hardBlockNativeLoginFormsEverywhere() {
+  const apply = (f) => {
+    if (!f || f.__lunaPatched) return
+    f.__lunaPatched = true
+    f.addEventListener("submit", (ev) => { ev.preventDefault(); ev.stopPropagation(); return false }, true)
+    try {
+      f.setAttribute("action", "")
+      f.setAttribute("novalidate", "novalidate")
+      f.noValidate = true
+    } catch {}
+  }
+  // Bloqueia formulários comuns de /login no DOM atual
+  document.querySelectorAll('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]').forEach(apply)
+  // Observa mutações para bloquear formulários injetados depois
+  const mo = new MutationObserver((ml) => {
+    ml.forEach((m) => {
+      m.addedNodes && m.addedNodes.forEach((n) => {
+        if (n.nodeType !== 1) return
+        if (n.matches && (n.matches('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]'))) apply(n)
+        n.querySelectorAll && n.querySelectorAll('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]').forEach(apply)
+      })
+    })
+  })
+  mo.observe(document.body, { childList: true, subtree: true })
+}
+
 function ensureTopbar() {
   if (!$(".topbar")) {
     const tb = document.createElement("div"); tb.className = "topbar"
@@ -1389,7 +1441,9 @@ function renderInteractive(container, m) {
     ;(listMsg.sections || []).forEach((sec) => {
       if (sec.title) { const st = document.createElement("div"); st.style.margin = "6px 0 4px"; st.style.fontSize = "12px"; st.style.opacity = ".8"; st.textContent = sec.title; card.appendChild(st) }
       ;(sec.rows || []).forEach((row) => {
-        const opt = document.createElement("div"); opt.style.padding = "6px 8px"; opt.style.border = "1px solid var(--muted,#eee)"; opt.style.borderRadius = "6px"; opt.style.marginBottom = "6px"; textContent = row.title || row.id || "(opção)"; card.appendChild(opt)
+        const opt = document.createElement("div"); opt.style.padding = "6px 8px"; opt.style.border = "1px solid var(--muted,#eee)"; opt.style.borderRadius = "6px"; opt.style.marginBottom = "6px"; 
+        opt.textContent = row.title || row.id || "(opção)"; 
+        card.appendChild(opt)
       })
     })
     container.appendChild(card); return true
@@ -1605,7 +1659,7 @@ async function sendNow() {
  * ======================================= */
 document.addEventListener("DOMContentLoaded", () => {
   // Botões padrão
-  $("#btn-login") && ($("#btn-login").onclick = doLogin)
+  $("#btn-login") && ($("#btn-login").onclick = (e) => { e.preventDefault(); doLogin() })
   $("#btn-logout") && ($("#btn-logout").onclick = () => { localStorage.clear(); location.reload() })
   $("#btn-send") && ($("#btn-send").onclick = sendNow)
   $("#btn-refresh") && ($("#btn-refresh").onclick = () => {
@@ -1619,17 +1673,10 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#token") && $("#token").addEventListener("keypress", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin() } })
   $("#token") && $("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin() } })
 
-  // ⚠️ FIX: impedir submit nativo do formulário para /login (que exige e-mail)
-  try {
-    const forms = Array.from(document.querySelectorAll('#step-instance form, #login-view form, form[action="/login"], form[action="login"]'))
-    forms.forEach((f) => {
-      f.addEventListener("submit", (ev) => { ev.preventDefault(); doLogin() })
-      // Remove action para evitar post inesperado
-      try { f.setAttribute("action", ""); f.setAttribute("novalidate", "novalidate") } catch {}
-    })
-    const btn = document.getElementById("btn-login")
-    if (btn && btn.type && btn.type.toLowerCase() === "submit") btn.type = "button"
-  } catch {}
+  // ⚠️ Bloqueios contra submit nativo /login
+  guardInstanceLoginForm()
+  hardBlockNativeLoginFormsEverywhere()
+  window.addEventListener("load", () => { guardInstanceLoginForm() })
 
   // Login por e-mail
   $("#btn-acct-login") && ($("#btn-acct-login").onclick = acctLogin)
