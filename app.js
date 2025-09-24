@@ -112,6 +112,7 @@ function validCNPJ(cnpj) {
   return (String(d1) === s[12] && String(d2) === s[13]);
 }
 
+
 // Remove acentos e normaliza para A-Z e espaço
 function stripDiacritics(str) {
   try { return String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
@@ -335,7 +336,7 @@ window.showCardModal = showCardModal
 // Fecha o modal de pagamento
 function hideCardModal() { document.getElementById("card-modal")?.classList.add("hidden") }
 
-// Handler para submissão do formulário (GetNet)
+// Handler para submissão do formulário de pagamento (ÚNICO FLUXO ATIVO)
 async function submitCardPayment(event) {
   event.preventDefault()
   const submitBtn = document.getElementById("btn-card-submit")
@@ -350,7 +351,7 @@ async function submitCardPayment(event) {
     const documentNumberRaw = document.getElementById("card-document").value.trim()
     const phoneRaw = document.getElementById("card-phone").value.trim()
 
-    // Endereço de cobrança (antifraude)
+    // Endereço de cobrança (antifraude) — IDs REAIS DO HTML (bill-*)
     const addrStreet = document.getElementById("bill-street")?.value.trim() || ""
     const addrNumber = document.getElementById("bill-number")?.value.trim() || ""
     const addrComplement = document.getElementById("bill-complement")?.value.trim() || ""
@@ -395,7 +396,7 @@ async function submitCardPayment(event) {
     const expYear = toYYYY(expYearRaw) // AAAA
     const securityCode = digitsOnly(securityCodeRaw)
 
-    // Nome do titular
+    // >>>>> [ALTERAÇÃO 1/2] Nome do titular: sanitiza e valida (máx. 26) <<<<<
     const chName = sanitizeCardholderName(cardholderName)
     if (!chName || chName.split(" ").length < 2) {
       throw new Error("Nome do titular inválido. Digite como impresso no cartão (apenas letras e espaços).")
@@ -404,17 +405,17 @@ async function submitCardPayment(event) {
       throw new Error("Nome do titular muito longo (máx. 26 caracteres). Use como impresso no cartão.")
     }
 
-    // Ano YY para /v1/cards
+    // >>>>> [ALTERAÇÃO 2/2] Ano de expiração em 2 dígitos (YY) para /v1/cards <<<<<
     const expYear2 = String(expYear).slice(-2)
 
-    // Bandeira + CVV
+    // Normalização/validação de bandeira + CVV
     const brand = normalizeBrand(selectedBrand, cardNumber)
     const isAmex = brand === "Amex"
     if ((isAmex && securityCode.length !== 4) || (!isAmex && securityCode.length !== 3)) {
       throw new Error(isAmex ? "CVV inválido (Amex exige 4 dígitos)." : "CVV inválido (3 dígitos).")
     }
 
-    // === Integração GetNet ===
+    // === Integração de assinatura recorrente com a API da GetNet ===
     const baseURL = window.__GETNET_ENV__ === "production"
       ? "https://api.getnet.com.br"
       : "https://api.getnet.com.br"
@@ -425,11 +426,12 @@ async function submitCardPayment(event) {
       throw new Error("Credenciais da GetNet não configuradas.")
     }
 
+    // Para assinaturas, somente o cartão de crédito é permitido
     if (cardType === "debit") {
       throw new Error("Assinaturas recorrentes só são suportadas com cartão de crédito.")
     }
 
-    // 1) OAuth2
+    // 1) Obtenção de token OAuth2
     const authResp = await fetch(`${baseURL}/auth/oauth/v2/token`, {
       method: "POST",
       headers: {
@@ -444,9 +446,11 @@ async function submitCardPayment(event) {
     }
     const authJson = await authResp.json()
     const accessToken = authJson.access_token
-    if (!accessToken) throw new Error("Token de acesso não recebido.")
+    if (!accessToken) {
+      throw new Error("Token de acesso não recebido.")
+    }
 
-    // 2) Tokenização do cartão
+    // 2) Tokenização do cartão (PAN -> token)
     const tokenizationResp = await fetch(`${baseURL}/v1/tokens/card`, {
       method: "POST",
       headers: {
@@ -464,9 +468,11 @@ async function submitCardPayment(event) {
     }
     const tokenizationJson = await tokenizationResp.json()
     const numberToken = tokenizationJson.number_token || tokenizationJson.numberToken
-    if (!numberToken) throw new Error("Número token do cartão não retornado.")
+    if (!numberToken) {
+      throw new Error("Número token do cartão não retornado.")
+    }
 
-    // 3) Cliente
+    // 3) Cria ou atualiza cliente (assinante)
     const { first_name, last_name } = splitName(name)
     const customerPayload = {
       seller_id: sellerId,
@@ -478,6 +484,7 @@ async function submitCardPayment(event) {
       document_type: documentNumber.length > 11 ? "CNPJ" : "CPF",
       document_number: documentNumber,
       phone_number: phoneDigits || "",
+      // reutiliza o MESMO endereço já validado acima
       billing_address: {
         street: addrStreet,
         number: addrNumber,
@@ -506,13 +513,13 @@ async function submitCardPayment(event) {
     const customerJson = await customerResp.json().catch(() => ({}))
     const customerId = customerJson.customer_id || email
 
-    // 4) Cartão no cofre
+    // 4) Armazena cartão tokenizado no cofre
     const cardPayload = {
       number_token: numberToken,
       expiration_month: expMonth,
-      expiration_year: expYear2,
+      expiration_year: expYear2,             // << usa YY
       customer_id: customerId,
-      cardholder_name: chName,
+      cardholder_name: chName,               // << usa nome sanitizado
       brand,
       cardholder_identification: documentNumber,
       security_code: securityCode,
@@ -534,7 +541,7 @@ async function submitCardPayment(event) {
     const cardJson = await cardResp.json().catch(() => ({}))
     const cardId = cardJson.card_id || cardJson.number_token || numberToken
 
-    // 5) Plano
+    // 5) Cria plano de assinatura (mensal, indefinido)
     const planPayload = {
       name: "Plano Luna AI Professional",
       description: "Assinatura mensal do Luna AI",
@@ -558,15 +565,19 @@ async function submitCardPayment(event) {
     }
     const planJson = await planResp.json().catch(() => ({}))
     const planId = planJson.plan_id
-    if (!planId) throw new Error("Plano de assinatura não retornou plan_id.")
+    if (!planId) {
+      throw new Error("Plano de assinatura não retornou plan_id.")
+    }
 
-    // 6) Assinatura
+    // 6) Cria assinatura vinculando cliente, plano e cartão
     const subscriptionPayload = {
       subscription_code: `sub_${Date.now()}`,
       plan_id: planId,
       customer_id: customerId,
       payment: {
-        credit_card: { card_id: cardId },
+        credit_card: {
+          card_id: cardId,
+        },
       },
     }
     const subscriptionResp = await fetch(`${baseURL}/v1/subscriptions`, {
@@ -586,15 +597,19 @@ async function submitCardPayment(event) {
     const subStatus = String(subscriptionJson.status || "").toLowerCase()
 
     hideCardModal()
-    if (subStatus.includes("active")) alert("Assinatura criada e ativa! Você será cobrado mensalmente.")
-    else alert("Assinatura criada. Aguarde confirmação da Getnet.")
+    if (subStatus.includes("active")) {
+      alert("Assinatura criada e ativa! Você será cobrado mensalmente.")
+    } else {
+      alert("Assinatura criada. Aguarde confirmação da Getnet.")
+    }
   } catch (err) {
     console.error("[payments] Falha ao processar pagamento:", err)
-    const errorEl = document.getElementById("card-error")
     if (errorEl) errorEl.textContent = err?.message || "Erro desconhecido"
   } finally {
-    const submitBtn = document.getElementById("btn-card-submit")
-    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = "Pagar" }
+    if (submitBtn) {
+      submitBtn.disabled = false
+      submitBtn.textContent = "Pagar"
+    }
   }
 }
 
@@ -629,12 +644,7 @@ function updateLastActivity(chatid, ts) {
 let reorderTimer = null
 function scheduleReorder() {
   if (reorderTimer) return
-  reorderTimer = setTimeout(() => {
-    reorderTimer = null
-    if (!state.orderDirty) return
-    state.orderDirty = false
-    reorderChatList()
-  }, 60)
+  reorderTimer = setTimeout(() => { reorderTimer = null; if (!state.orderDirty) return; state.orderDirty = false; reorderChatList() }, 60)
 }
 function reorderChatList() {
   const list = document.getElementById("chat-list"); if (!list) return
@@ -650,11 +660,7 @@ const bgQueue = []; let bgRunning = false
 function pushBg(task) { bgQueue.push(task); if (!bgRunning) runBg() }
 async function runBg() {
   bgRunning = true
-  while (bgQueue.length) {
-    const batch = bgQueue.splice(0, 16)
-    await runLimited(batch, 8)
-    await new Promise((r) => rIC(r))
-  }
+  while (bgQueue.length) { const batch = bgQueue.splice(0, 16); await runLimited(batch, 8); await new Promise((r) => rIC(r)) }
   bgRunning = false
 }
 
@@ -773,10 +779,7 @@ async function refreshCRMCounters() {
     const data = await apiCRMViews()
     const counts = data?.counts || {}
     const el = document.querySelector(".crm-counters")
-    if (el) {
-      const parts = CRM_STAGES.map((s) => `${s.replace("_", " ")}: ${counts[s] || 0}`)
-      el.textContent = parts.join(" • ")
-    }
+    if (el) { const parts = CRM_STAGES.map((s) => `${s.replace("_", " ")}: ${counts[s] || 0}`); el.textContent = parts.join(" • ") }
   } catch {}
 }
 async function loadCRMStage(stage) {
@@ -798,75 +801,47 @@ function showStepAccount() { hide("#step-instance"); hide("#step-register"); sho
 function showStepInstance() { hide("#step-account"); hide("#step-register"); show("#step-instance") }
 function showStepRegister() { hide("#step-account"); hide("#step-instance"); show("#step-register") }
 
+// Login por e-mail/senha
+async function acctLogin() {
+  const email = $("#acct-email")?.value?.trim()
+  const pass = $("#acct-pass")?.value?.trim()
+  const msgEl = $("#acct-msg"); const btnEl = $("#btn-acct-login")
+  if (!email || !pass) { if (msgEl) msgEl.textContent = "Informe e-mail e senha."; return }
+  try {
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Entrando..." }
+    if (msgEl) msgEl.textContent = ""
+    const r = await fetch(BACKEND() + "/api/users/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password: pass }) })
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json(); if (!data?.jwt) throw new Error("Resposta inválida do servidor.")
+    localStorage.setItem(ACCT_JWT_KEY, data.jwt)
+    try { await registerTrialUser(); await checkBillingStatus() } catch (e) { console.error(e) }
+    showStepInstance(); $("#token")?.focus()
+  } catch (e) { if (msgEl) msgEl.textContent = e?.message || "Falha no login." }
+  finally { if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Entrar" } }
+}
+
+// Registro
+async function acctRegister() {
+  const email = $("#reg-email")?.value?.trim()
+  const pass = $("#reg-pass")?.value?.trim()
+  const msgEl = $("#reg-msg"); const btnEl = $("#btn-acct-register")
+  if (!email || !pass) { if (msgEl) msgEl.textContent = "Informe e-mail e senha."; return }
+  try {
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "Criando..." }
+    if (msgEl) msgEl.textContent = ""
+    const r = await fetch(BACKEND() + "/api/users/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password: pass }) })
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json(); if (!data?.jwt) throw new Error("Resposta inválida do servidor.")
+    localStorage.setItem(ACCT_JWT_KEY, data.jwt)
+    try { await registerTrialUser(); await checkBillingStatus() } catch (e) { console.error(e) }
+    showStepInstance(); $("#token")?.focus()
+  } catch (e) { if (msgEl) msgEl.textContent = e?.message || "Falha no registro." }
+  finally { if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Criar Conta" } }
+}
+
 /* =========================================
  * 6) SPLASH / LOGIN / ROUTER
  * ======================================= */
-
-// --- trava reentrância do login de instância
-let __loginBusy = false
-
-async function doLogin() {
-  if (__loginBusy) return
-  __loginBusy = true
-  const token = $("#token")?.value?.trim()
-  const msgEl = $("#msg"); const btnEl = $("#btn-login")
-  if (!token) { if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"; __loginBusy = false; return }
-  if (msgEl) msgEl.textContent = ""
-  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = "<span>Conectando...</span>" }
-  try {
-    const body = { token }
-    // opcionalmente enviar o host da UAZAPI, se estiver definido no front
-    if (typeof window !== "undefined" && window.__UAZAPI_HOST__) body.host = window.__UAZAPI_HOST__
-    const r = await fetch(BACKEND() + "/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
-      body: JSON.stringify(body),
-      credentials: "omit",
-      cache: "no-store",
-      redirect: "manual", // NÃO segue redirect para /login
-    })
-    // Se algum proxy tentar redirecionar para /login, não seguimos silenciosamente.
-    if (r.type === "opaqueredirect" || (r.status >= 300 && r.status < 400)) {
-      const loc = r.headers?.get?.("Location") || "/login"
-      throw new Error(`Redirecionado para ${loc}. Verifique rewrite/proxy do servidor.`)
-    }
-    if (!r.ok) throw new Error(await r.text())
-    const data = await r.json(); localStorage.setItem("luna_jwt", data.jwt)
-    try { await registerTrial() } catch {}
-    const canAccess = await checkBillingStatus(); if (canAccess) switchToApp()
-  } catch (e) {
-    console.error(e); if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
-  } finally {
-    __loginBusy = false
-    if (btnEl) {
-      btnEl.disabled = false
-      btnEl.innerHTML = '<span>Conectar instância</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'
-    }
-  }
-}
-
-function ensureTopbar() {
-  if (!$(".topbar")) {
-    const tb = document.createElement("div"); tb.className = "topbar"
-    tb.style.display = "flex"; tb.style.alignItems = "center"; tb.style.gap = "8px"; tb.style.padding = "8px 12px"
-    const host = $("#app-view") || document.body; host.prepend(tb)
-  }
-}
-function switchToApp() {
-  hide("#login-view"); show("#app-view"); setMobileMode("list"); ensureTopbar(); ensureCRMBar(); ensureStageTabs(); createSplash()
-  showConversasView(); loadChats().finally(() => {})
-}
-function ensureRoute() {
-  const hasInst = !!jwt(); const hasAcct = !!acctJwt() // (hasAcct é irrelevante para instância)
-  if (hasInst) {
-    switchToApp()
-    try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
-    return
-  }
-  // Sem instância -> prioriza etapa de token. Conta é opcional.
-  show("#login-view"); hide("#app-view"); showStepInstance(); return
-}
-
 function createSplash() {
   if (state.splash.shown) return
   const el = document.createElement("div"); el.id = "luna-splash"; el.className = "splash-screen"
@@ -879,10 +854,7 @@ function createSplash() {
   const progressBar = document.createElement("div"); progressBar.className = "splash-progress-bar"; progressContainer.appendChild(progressBar)
   logoContainer.appendChild(lunaLogoDiv); logoContainer.appendChild(helseniaLogoDiv); el.appendChild(logoContainer); el.appendChild(progressContainer); document.body.appendChild(el)
   setTimeout(() => { progressBar.classList.add("animate") }, 100)
-  setTimeout(() => {
-    lunaLogoDiv.classList.remove("active")
-    setTimeout(() => { helseniaLogoDiv.classList.add("active"); progressBar.classList.add("helsenia") }, 500)
-  }, 4000)
+  setTimeout(() => { lunaLogoDiv.classList.remove("active"); setTimeout(() => { helseniaLogoDiv.classList.add("active"); progressBar.classList.add("helsenia") }, 500) }, 4000)
   state.splash.shown = true; state.splash.forceTimer = setTimeout(hideSplash, 8000)
 }
 function hideSplash() {
@@ -891,6 +863,62 @@ function hideSplash() {
   if (state.splash.timer) { clearTimeout(state.splash.timer); state.splash.timer = null }
   if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
 }
+
+// >>>>>>>>>>>>>>> CORRIGIDO: login por token sem depender de conta, e com host opcional
+async function doLogin() {
+  const token = $("#token")?.value?.trim()
+  const msgEl = $("#msg"); const btnEl = $("#btn-login")
+  if (!token) { if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"; return }
+  if (msgEl) msgEl.textContent = ""
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = "<span>Conectando...</span>" }
+  try {
+    const body = { token }
+    if (typeof window !== "undefined" && window.__UAZAPI_HOST__) body.host = window.__UAZAPI_HOST__
+    const r = await fetch(BACKEND() + "/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      body: JSON.stringify(body),
+      redirect: "manual" // evita redirecionamento indevido para /login
+    })
+    if (!r.ok) throw new Error(await r.text())
+    const data = await r.json(); localStorage.setItem("luna_jwt", data.jwt)
+    try { await registerTrial() } catch {}
+    const canAccess = await checkBillingStatus(); if (canAccess) switchToApp()
+  } catch (e) {
+    console.error(e); if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false
+      btnEl.innerHTML = '<span>Conectar instância</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>'
+    }
+  }
+}
+// <<<<<<<<<<<<<<< fim da correção
+
+function ensureTopbar() {
+  if (!$(".topbar")) {
+    const tb = document.createElement("div"); tb.className = "topbar"
+    tb.style.display = "flex"; tb.style.alignItems = "center"; tb.style.gap = "8px"; tb.style.padding = "8px 12px"
+    const host = $("#app-view") || document.body; host.prepend(tb)
+  }
+}
+function switchToApp() {
+  hide("#login-view"); show("#app-view"); setMobileMode("list"); ensureTopbar(); ensureCRMBar(); ensureStageTabs(); createSplash()
+  showConversasView(); loadChats().finally(() => {})
+}
+
+// >>>>>>>>>>>>>>> CORRIGIDO: prioriza token primeiro (conta é opcional)
+function ensureRoute() {
+  const hasInst = !!jwt(); const hasAcct = !!acctJwt()
+  if (hasInst) {
+    switchToApp()
+    try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
+    return
+  }
+  // Sem instância -> etapa de token. Conta permanece acessível via botão.
+  show("#login-view"); hide("#app-view"); showStepInstance(); return
+}
+// <<<<<<<<<<<<<<< fim da correção
 
 /* =========================================
  * 7) AVATAR / NOME
@@ -1038,8 +1066,7 @@ async function loadChats() {
         try {
           if (!state.nameCache.has(id)) {
             const resp = await fetchNameImage(id); state.nameCache.set(id, resp || {})
-            const cardEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"]`)
-            if (cardEl) hydrateChatCard(item)
+            const cardEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"]`); if (cardEl) hydrateChatCard(item)
           }
         } catch {}
         try {
@@ -1062,10 +1089,7 @@ async function loadChats() {
           state.lastMsg.set(id, pv || ""); state.lastMsgFromMe.set(id, fromMe)
           LStore.set(pvKey, { text: pv || "", fromMe }, TTL.PREVIEW)
           const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .preview`)
-          if (card) {
-            const txt = pv ? (fromMe ? "Você: " : "") + truncatePreview(pv, 90) : "Sem mensagens"
-            card.textContent = txt; card.title = pv ? (fromMe ? "Você: " : "") + pv : "Sem mensagens"
-          }
+          if (card) { const txt = pv ? (fromMe ? "Você: " : "") + truncatePreview(pv, 90) : "Sem mensagens"; card.textContent = txt; card.title = pv ? (fromMe ? "Você: " : "") + pv : "Sem mensagens" }
           if (last) {
             updateLastActivity(id, last.messageTimestamp || last.timestamp || last.t || Date.now())
             const tEl = document.querySelector(`.chat-item[data-chatid="${CSS.escape(id)}"] .time`)
@@ -1203,11 +1227,7 @@ async function prefetchCards(items) {
     }
   })
   const CHUNK = 16
-  for (let i = 0; i < tasks.length; i += CHUNK) {
-    const slice = tasks.slice(i, i + CHUNK)
-    await runLimited(slice, 8)
-    await new Promise((r) => rIC(r))
-  }
+  for (let i = 0; i < tasks.length; i += CHUNK) { const slice = tasks.slice(i, i + CHUNK); await runLimited(slice, 8); await new Promise((r) => rIC(r)) }
   await flushStageLookup()
   if (progressEl) setTimeout(() => { progressEl.classList.add("hidden") }, 1000)
 }
@@ -1409,7 +1429,7 @@ function appendMessageBubble(pane, m) {
   const top = document.createElement("div"); renderReplyPreview(top, m)
   const hadInteractive = renderInteractive(top, m)
   const { mime, url, dataUrl, caption } = pickMediaInfo(m)
-  const plainText = m.text || m.message?.text || m?.message?.extendedTextMessage?.text || m?.message?.conversation || m?.caption || m?.body || ""
+  const plainText = m.text || m.message?.text || m?.message?.extendedTextMessage?.text || m?.message?.conversation || m.caption || m.body || ""
   const who = m.senderName || m.pushName || ""; const ts = m.messageTimestamp || m.timestamp || m.t || ""
 
   // Sticker
@@ -1573,99 +1593,33 @@ async function sendNow() {
 }
 
 /* =========================================
- * 21) GUARDA DE FORMULÁRIOS (anti-/login) + BOOT
+ * 21) BOOT
  * ======================================= */
-
-// Garante que #btn-login NUNCA submeta form nativo
-function wireBtnLogin() {
-  const btn = document.getElementById("btn-login")
-  if (!btn || btn.__lunaPatched) return
-  btn.__lunaPatched = true
-  try { btn.setAttribute("type", "button") } catch {}
-  btn.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation()
-    doLogin()
-  }, true) // captura
-}
-
-// Intercepta qualquer submit/click em forms de login e redireciona para doLogin()
-function guardInstanceLoginForm() {
-  const isInstanceStep = () => {
-    const el = document.getElementById("step-instance")
-    return el && !el.classList.contains("hidden")
-  }
-
-  // Intercepta SUBMIT em CAPTURA
-  document.addEventListener("submit", (ev) => {
-    const form = ev.target
-    const action = (form?.getAttribute?.("action") || "").toLowerCase()
-    if (form?.closest?.("#step-instance") || action === "/login" || action === "login" || action.includes("/login")) {
-      ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation()
-      doLogin()
-      return false
-    }
-  }, true)
-
-  // Enter no #token
-  const tokenEl = document.getElementById("token")
-  if (tokenEl) {
-    const onEnter = (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); doLogin() } }
-    tokenEl.addEventListener("keydown", onEnter, true)
-    tokenEl.addEventListener("keypress", onEnter, true)
-  }
-
-  // Intercepta clique em qualquer botão submit dentro do #step-instance
-  document.addEventListener("click", (ev) => {
-    const tgt = ev.target
-    if (!(tgt instanceof Element)) return
-    const btn = tgt.closest('button, input[type="submit"]')
-    if (btn && btn.closest("#step-instance")) {
-      ev.preventDefault(); ev.stopPropagation(); ev.stopImmediatePropagation()
-      doLogin()
-    }
-  }, true)
-
-  // Neutraliza forms que apontem para /login
-  const neuter = (f) => {
-    if (!f || f.__lunaPatched) return
-    f.__lunaPatched = true
-    try { f.setAttribute("action", ""); f.setAttribute("novalidate", "novalidate"); f.noValidate = true } catch {}
-  }
-  document.querySelectorAll('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]').forEach(neuter)
-  wireBtnLogin()
-
-  // Vigia inclusão de novos forms/botões (SPAs/SSR)
-  const mo = new MutationObserver((ml) => {
-    ml.forEach((m) => {
-      m.addedNodes && m.addedNodes.forEach((node) => {
-        if (node.nodeType !== 1) return
-        if (node.matches && node.matches('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]')) neuter(node)
-        if (node.querySelectorAll) node.querySelectorAll('#step-instance form, form[action="/login"], form[action="login"], form[action*="/login"]').forEach(neuter)
-        if (node.id === "btn-login" || (node.querySelector && node.querySelector("#btn-login"))) wireBtnLogin()
-      })
-    })
-  })
-  mo.observe(document.body, { childList: true, subtree: true })
-}
-
 document.addEventListener("DOMContentLoaded", () => {
   // Botões padrão
   $("#btn-login") && ($("#btn-login").onclick = doLogin)
-  wireBtnLogin()
-  guardInstanceLoginForm()
-
   $("#btn-logout") && ($("#btn-logout").onclick = () => { localStorage.clear(); location.reload() })
   $("#btn-send") && ($("#btn-send").onclick = sendNow)
-  $("#btn-refresh") && ($("#btn-refresh").onclick = () => {
-    if (state.current) { const chatid = state.current.wa_chatid || state.current.chatid; loadMessages(chatid) }
-    else { loadChats() }
-  })
+  $("#btn-refresh") && ($("#btn-refresh").onclick = () => { if (state.current) { const chatid = state.current.wa_chatid || state.current.chatid; loadMessages(chatid) } else { loadChats() } })
 
   const backBtn = document.getElementById("btn-back-mobile"); if (backBtn) backBtn.onclick = () => setMobileMode("list")
 
-  // Enter no input do token (reforço)
+  $("#send-text") && $("#send-text").addEventListener("keypress", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendNow() } })
+
+  // Enter no input do token
   $("#token") && $("#token").addEventListener("keypress", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin() } })
   $("#token") && $("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin() } })
+
+  // ⚠️ FIX: impedir submit nativo do formulário para /login (que exige e-mail)
+  try {
+    const forms = Array.from(document.querySelectorAll('#step-instance form, #login-view form, form[action="/login"], form[action="login"]'))
+    forms.forEach((f) => {
+      f.addEventListener("submit", (ev) => { ev.preventDefault(); doLogin() })
+      try { f.setAttribute("action", ""); f.setAttribute("novalidate", "novalidate") } catch {}
+    })
+    const btn = document.getElementById("btn-login")
+    if (btn) { try { if (btn.type && btn.type.toLowerCase() === "submit") btn.type = "button" } catch {}; btn.onclick = (ev) => { ev.preventDefault(); doLogin() } }
+  } catch {}
 
   // Login por e-mail
   $("#btn-acct-login") && ($("#btn-acct-login").onclick = acctLogin)
