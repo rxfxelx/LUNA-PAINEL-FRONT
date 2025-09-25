@@ -564,7 +564,7 @@ async function submitCardPayment(event) {
     const cardId = cardJson.card_id || cardJson.number_token || numberToken
 
     // 5) Cria plano de assinatura (mensal) — contrato oficial
-    const amountCents = 1000  // R$ 3,00
+    const amountCents = 1000  // R$ 10,00 (ajuste conforme sua política)
     const planPayload = {
       seller_id: sellerId,
       name: "Plano Luna AI Professional",
@@ -926,10 +926,18 @@ function hideSplash() {
   if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
 }
 
-// >>>>>>>>>>>>>>> CORRIGIDO: login por token sem depender de conta, e com host opcional
+// >>>>>>>>>>>>>>> AJUSTE: instância só após conta logada
 async function doLogin() {
   const token = $("#token")?.value?.trim()
   const msgEl = $("#msg"); const btnEl = $("#btn-login")
+
+  // Exigir conta logada primeiro
+  if (!acctJwt()) {
+    showStepAccount()
+    if (msgEl) msgEl.textContent = "Faça login na sua conta primeiro."
+    return
+  }
+
   if (!token) { if (msgEl) msgEl.textContent = "Por favor, cole o token da instância"; return }
   if (msgEl) msgEl.textContent = ""
   if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = "<span>Conectando...</span>" }
@@ -946,6 +954,7 @@ async function doLogin() {
     const data = await r.json(); localStorage.setItem("luna_jwt", data.jwt)
     try { await registerTrial() } catch {}
     const canAccess = await checkBillingStatus(); if (canAccess) switchToApp()
+    try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
   } catch (e) {
     console.error(e); if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
   } finally {
@@ -955,7 +964,7 @@ async function doLogin() {
     }
   }
 }
-// <<<<<<<<<<<<<<< fim da correção
+// <<<<<<<<<<<<<<< fim do ajuste
 
 function ensureTopbar() {
   if (!$(".topbar")) {
@@ -969,16 +978,20 @@ function switchToApp() {
   showConversasView(); loadChats().finally(() => {})
 }
 
-// >>>>>>>>>>>>>>> CORRIGIDO: prioriza token primeiro (conta é opcional)
+// >>>>>>>>>>>>>>> NOVO: conta primeiro, instância depois
 function ensureRoute() {
-  const hasInst = !!jwt(); const hasAcct = !!acctJwt()
-  if (hasInst) {
-    switchToApp()
-    try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
-    return
-  }
-  // Sem instância -> etapa de token. Conta permanece acessível via botão.
-  show("#login-view"); hide("#app-view"); showStepInstance(); return
+  const hasAcct = !!acctJwt()
+  const hasInst = !!jwt()
+
+  // Sempre mostrar a view de login enquanto faltarem passos
+  show("#login-view"); hide("#app-view")
+
+  if (!hasAcct) { showStepAccount(); return }
+  if (!hasInst) { showStepInstance(); return }
+
+  // Com conta e instância → app
+  switchToApp()
+  try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
 }
 // <<<<<<<<<<<<<<< fim da correção
 
@@ -1672,9 +1685,9 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#token") && $("#token").addEventListener("keypress", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin() } })
   $("#token") && $("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); doLogin() } })
 
-  // ⚠️ FIX: impedir submit nativo do formulário para /login (que exige e-mail)
+  // ⚠️ FIX: impedir submit nativo do formulário APENAS no passo de instância
   try {
-    const forms = Array.from(document.querySelectorAll('#step-instance form, #login-view form, form[action="/login"], form[action="login"]'))
+    const forms = Array.from(document.querySelectorAll('#step-instance form'))
     forms.forEach((f) => {
       f.addEventListener("submit", (ev) => { ev.preventDefault(); doLogin() })
       try { f.setAttribute("action", ""); f.setAttribute("novalidate", "novalidate") } catch {}
