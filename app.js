@@ -629,7 +629,7 @@ async function submitCardPayment(event) {
               number_token: numberToken,   // algumas integrações exigem
               cardholder_name: chName,
               security_code: securityCode,
-              brand,         
+              brand,
               expiration_month: expMonth,
               expiration_year: expYear2,
               bin: cardNumber.slice(0, 6)
@@ -675,16 +675,93 @@ async function submitCardPayment(event) {
   }
 }
 
+/* ====== Roteador simples + FAB Mobile (NOVO) ====== */
+function getViewFromURL() {
+  const url = new URL(window.location.href)
+  const qp = (url.searchParams.get("view") || "").toLowerCase()
+  const hash = (url.hash || "").replace(/^#/, "").toLowerCase()
+  const hinted = qp || hash
+  if (hinted === "billing" || hinted === "pagamentos") return "billing"
+  if (hinted === "conversas" || hinted === "chat" || hinted === "geral") return "conversas"
+  return ""
+}
+function setViewInURL(view, replace = false) {
+  try {
+    const url = new URL(window.location.href)
+    url.searchParams.set("view", view)
+    url.hash = view === "billing" ? "#billing" : ""
+    if (replace) history.replaceState({ view }, "", url)
+    else history.pushState({ view }, "", url)
+  } catch {}
+}
+
+// FAB Mobile para abrir Pagamentos
+function ensureMobilePayFAB() {
+  if (!isMobile()) return
+  if (document.getElementById("mobile-pay-fab")) return
+
+  const fab = document.createElement("button")
+  fab.id = "mobile-pay-fab"
+  fab.type = "button"
+  fab.textContent = "Pagamentos"
+  fab.style.position = "fixed"
+  fab.style.right = "16px"
+  fab.style.bottom = "16px"
+  fab.style.zIndex = "1000"
+  fab.style.padding = "12px 16px"
+  fab.style.border = "none"
+  fab.style.borderRadius = "999px"
+  fab.style.boxShadow = "0 6px 16px rgba(0,0,0,.2)"
+  fab.style.background = "var(--accent, #6C5CE7)"
+  fab.style.color = "#fff"
+  fab.style.fontWeight = "600"
+  fab.style.cursor = "pointer"
+  fab.onclick = () => { showBillingView() }
+  document.body.appendChild(fab)
+}
+function toggleMobilePayFAB(showFab) {
+  const el = document.getElementById("mobile-pay-fab")
+  if (!el) return
+  el.style.display = showFab ? "inline-flex" : "none"
+}
+
+// Hook de navegação
+function handleRoute() {
+  const want = getViewFromURL()
+  const hasAcct = !!acctJwt()
+  const hasInst = !!jwt()
+
+  if (!hasAcct || !hasInst) {
+    // A tela de login fica com steps; somente sincronizamos o passo.
+    show("#login-view"); hide("#app-view")
+    if (!hasAcct) { showStepAccount(); return }
+    if (!hasInst) { showStepInstance(); return }
+  }
+
+  // Já autenticado → app
+  hide("#login-view"); show("#app-view")
+  if (want === "billing") {
+    showBillingView()
+  } else {
+    showConversasView()
+  }
+}
+
+/* ========= Views (sincronizam URL + FAB) ========= */
 function showConversasView() {
   hide("#billing-view"); show(".chatbar"); show("#messages")
   document.querySelectorAll(".menu-item").forEach((i) => i.classList.remove("active"))
   $("#btn-conversas")?.classList.add("active")
+  setViewInURL("conversas", true)
+  toggleMobilePayFAB(true)
 }
 function showBillingView() {
   hide(".chatbar"); hide("#messages"); show("#billing-view")
   document.querySelectorAll(".menu-item").forEach((i) => i.classList.remove("active"))
   $("#btn-pagamentos")?.classList.add("active")
+  setViewInURL("billing")
   checkBillingStatus()
+  toggleMobilePayFAB(false)
 }
 
 /* =========================================
@@ -975,6 +1052,7 @@ function ensureTopbar() {
 }
 function switchToApp() {
   hide("#login-view"); show("#app-view"); setMobileMode("list"); ensureTopbar(); ensureCRMBar(); ensureStageTabs(); createSplash()
+  ensureMobilePayFAB()  // << FAB mobile
   showConversasView(); loadChats().finally(() => {})
 }
 
@@ -1726,5 +1804,12 @@ document.addEventListener("DOMContentLoaded", () => {
   // Link "cadastrar"
   $("#link-cadastrar") && ($("#link-cadastrar").onclick = (e) => { e.preventDefault(); window.location.href = "/pagamentos/getnet" })
 
+  // Deep-link: abrir direto Pagamentos com ?view=billing ou #billing
+  window.addEventListener("popstate", handleRoute)
+  window.addEventListener("hashchange", handleRoute)
+
   ensureRoute()
+  // Se já estiver tudo ok e vier deep-link, o ensureRoute chama handleRoute;
+  // mas garantimos novamente aqui para primeira carga:
+  setTimeout(() => { try { handleRoute() } catch {} }, 0)
 })
