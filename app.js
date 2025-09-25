@@ -564,7 +564,7 @@ async function submitCardPayment(event) {
     const cardId = cardJson.card_id || cardJson.number_token || numberToken
 
     // 5) Cria plano de assinatura (mensal) — contrato oficial
-    const amountCents = 300  // R$ 3,00
+    const amountCents = 1000  // R$ 3,00
     const planPayload = {
       seller_id: sellerId,
       name: "Plano Luna AI Professional",
