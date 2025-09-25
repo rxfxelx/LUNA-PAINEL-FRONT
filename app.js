@@ -337,6 +337,7 @@ window.showCardModal = showCardModal
 function hideCardModal() { document.getElementById("card-modal")?.classList.add("hidden") }
 
 // Handler para submissão do formulário de pagamento (ÚNICO FLUXO ATIVO)
+// Handler para submissão do formulário de pagamento (ÚNICO FLUXO ATIVO)
 async function submitCardPayment(event) {
   event.preventDefault()
   const submitBtn = document.getElementById("btn-card-submit")
@@ -396,7 +397,7 @@ async function submitCardPayment(event) {
     const expYear = toYYYY(expYearRaw) // AAAA
     const securityCode = digitsOnly(securityCodeRaw)
 
-    // >>>>> [ALTERAÇÃO 1/2] Nome do titular: sanitiza e valida (máx. 26) <<<<<
+    // Nome do titular: sanitiza e valida (máx. 26)
     const chName = sanitizeCardholderName(cardholderName)
     if (!chName || chName.split(" ").length < 2) {
       throw new Error("Nome do titular inválido. Digite como impresso no cartão (apenas letras e espaços).")
@@ -405,7 +406,7 @@ async function submitCardPayment(event) {
       throw new Error("Nome do titular muito longo (máx. 26 caracteres). Use como impresso no cartão.")
     }
 
-    // >>>>> [ALTERAÇÃO 2/2] Ano de expiração em 2 dígitos (YY) para /v1/cards <<<<<
+    // Ano de expiração em 2 dígitos (YY) para /v1/cards e assinaturas
     const expYear2 = String(expYear).slice(-2)
 
     // Normalização/validação de bandeira + CVV
@@ -418,7 +419,8 @@ async function submitCardPayment(event) {
     // === Integração de assinatura recorrente com a API da GetNet ===
     const baseURL = window.__GETNET_ENV__ === "production"
       ? "https://api.getnet.com.br"
-      : "https://api.getnet.com.br"
+      : "https://api-homologacao.getnet.com.br" // << CORREÇÃO: sandbox/homologação
+
     const clientId = window.__GETNET_CLIENT_ID__
     const clientSecret = window.__GETNET_CLIENT_SECRET__
     const sellerId = window.__GETNET_SELLER_ID__
@@ -450,7 +452,7 @@ async function submitCardPayment(event) {
       throw new Error("Token de acesso não recebido.")
     }
 
-    // 2) Tokenização do cartão (PAN -> token)
+    // 2) Tokenização do cartão (PAN -> number_token)
     const tokenizationResp = await fetch(`${baseURL}/v1/tokens/card`, {
       method: "POST",
       headers: {
@@ -472,7 +474,36 @@ async function submitCardPayment(event) {
       throw new Error("Número token do cartão não retornado.")
     }
 
-    // 3) Cria ou atualiza cliente (assinante)
+    // 2.1) (Opcional) Verificação de cartão no endpoint correto (não bloqueante em homologação)
+    try {
+      if (window.__GETNET_VERIFY_CARD__ === true) {
+        const verifyResp = await fetch(`${baseURL}/v1/cards/verification`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            Authorization: `Bearer ${accessToken}`,
+            seller_id: sellerId,
+          },
+          body: JSON.stringify({
+            number_token: numberToken,
+            brand: (brand || "Visa").toLowerCase(),       // ex.: 'visa' | 'mastercard'
+            cardholder_name: chName,
+            expiration_month: expMonth,
+            expiration_year: expYear2,                    // YY
+            security_code: securityCode
+          })
+        })
+        const vj = await verifyResp.json().catch(() => ({}))
+        if (!verifyResp.ok || String(vj.status || "").toUpperCase() !== "VERIFIED") {
+          // Em homologação os cartões de teste podem negar zero‑auth; não bloqueamos
+          console.warn("[getnet] Verificação de cartão não aprovada:", vj)
+        }
+      }
+    } catch (e) {
+      console.warn("[getnet] Falha na verificação de cartão (ignorada em homologação):", e)
+    }
+
+    // 3) Cria/atualiza cliente (assinante)
     const { first_name, last_name } = splitName(name)
     const customerPayload = {
       seller_id: sellerId,
@@ -484,7 +515,6 @@ async function submitCardPayment(event) {
       document_type: documentNumber.length > 11 ? "CNPJ" : "CPF",
       document_number: documentNumber,
       phone_number: phoneDigits || "",
-      // reutiliza o MESMO endereço já validado acima
       billing_address: {
         street: addrStreet,
         number: addrNumber,
@@ -513,17 +543,14 @@ async function submitCardPayment(event) {
     const customerJson = await customerResp.json().catch(() => ({}))
     const customerId = customerJson.customer_id || email
 
-    // 4) Armazena cartão tokenizado no cofre
+    // 4) Salva cartão no cofre (SEM forçar verificação; sem CVV; sem brand)
     const cardPayload = {
       number_token: numberToken,
       expiration_month: expMonth,
-      expiration_year: expYear2,             // << usa YY
+      expiration_year: expYear2,             // YY
       customer_id: customerId,
-      cardholder_name: chName,               // << usa nome sanitizado
-      brand,
-      cardholder_identification: documentNumber,
-      security_code: securityCode,
-      verify_card: true,
+      cardholder_name: chName,
+      cardholder_identification: documentNumber
     }
     const cardResp = await fetch(`${baseURL}/v1/cards`, {
       method: "POST",
@@ -541,14 +568,22 @@ async function submitCardPayment(event) {
     const cardJson = await cardResp.json().catch(() => ({}))
     const cardId = cardJson.card_id || cardJson.number_token || numberToken
 
-    // 5) Cria plano de assinatura (mensal, indefinido)
+    // 5) Cria plano de assinatura (mensal) — contrato oficial
+    const amountCents = Number(window.__PLAN_AMOUNT_CENTS__) || 9900 // R$ 99,00 por padrão
     const planPayload = {
+      seller_id: sellerId,
       name: "Plano Luna AI Professional",
       description: "Assinatura mensal do Luna AI",
-      amount: 3,
-      periodicity: "MONTHLY",
-      interval: 1,
-      cycles: null,
+      amount: amountCents,                 // em centavos
+      currency: "BRL",
+      payment_types: ["credit_card"],
+      sales_tax: 0,
+      product_type: "service",
+      period: {
+        type: "monthly",
+        billing_cycle: 30,
+        specific_cycle_in_days: 0
+      }
     }
     const planResp = await fetch(`${baseURL}/v1/plans`, {
       method: "POST",
@@ -569,16 +604,48 @@ async function submitCardPayment(event) {
       throw new Error("Plano de assinatura não retornou plan_id.")
     }
 
-    // 6) Cria assinatura vinculando cliente, plano e cartão
+    // 6) Cria assinatura vinculando cliente, plano e cartão (contrato oficial)
+    const orderId = `order_${Date.now()}`
+    const deviceId = `web-${(jwtPayload()?.sub || '').toString().slice(0,12) || 'anon'}`
     const subscriptionPayload = {
-      subscription_code: `sub_${Date.now()}`,
-      plan_id: planId,
+      seller_id: sellerId,
       customer_id: customerId,
-      payment: {
-        credit_card: {
-          card_id: cardId,
-        },
+      plan_id: planId,
+      order_id: orderId,
+      subscription: {
+        payment_type: {
+          credit: {
+            transaction_type: "FULL",
+            number_installments: 1,
+            soft_descriptor: "LunaAI",
+            billing_address: {
+              street: addrStreet,
+              number: addrNumber,
+              complement: addrComplement,
+              district: addrDistrict,
+              city: addrCity,
+              state: addrState,
+              country: addrCountry,
+              postal_code: postal
+            },
+            card: {
+              // usar cartão salvo no cofre e CVV informado pelo cliente
+              card_id: cardId,
+              number_token: numberToken,       // algumas integrações exigem
+              cardholder_name: chName,
+              security_code: securityCode,
+              brand,
+              expiration_month: expMonth,
+              expiration_year: expYear2,
+              bin: cardNumber.slice(0, 6)
+            }
+          }
+        }
       },
+      device: {
+        ip_address: "127.0.0.1",
+        device_id: deviceId
+      }
     }
     const subscriptionResp = await fetch(`${baseURL}/v1/subscriptions`, {
       method: "POST",
