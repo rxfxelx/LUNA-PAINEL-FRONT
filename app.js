@@ -337,7 +337,6 @@ window.showCardModal = showCardModal
 function hideCardModal() { document.getElementById("card-modal")?.classList.add("hidden") }
 
 // Handler para submissão do formulário de pagamento (ÚNICO FLUXO ATIVO)
-// Handler para submissão do formulário de pagamento (ÚNICO FLUXO ATIVO)
 async function submitCardPayment(event) {
   event.preventDefault()
   const submitBtn = document.getElementById("btn-card-submit")
@@ -406,7 +405,7 @@ async function submitCardPayment(event) {
       throw new Error("Nome do titular muito longo (máx. 26 caracteres). Use como impresso no cartão.")
     }
 
-    // Ano de expiração em 2 dígitos (YY) para /v1/cards e assinaturas
+    // Ano de expiração em 2 dígitos (YY) para /v1/cards
     const expYear2 = String(expYear).slice(-2)
 
     // Normalização/validação de bandeira + CVV
@@ -417,10 +416,7 @@ async function submitCardPayment(event) {
     }
 
     // === Integração de assinatura recorrente com a API da GetNet ===
-    const baseURL = window.__GETNET_ENV__ === "production"
-      ? "https://api.getnet.com.br"
-      : "https://api-homologacao.getnet.com.br" // << CORREÇÃO: sandbox/homologação
-
+    const baseURL = "https://api.getnet.com.br"
     const clientId = window.__GETNET_CLIENT_ID__
     const clientSecret = window.__GETNET_CLIENT_SECRET__
     const sellerId = window.__GETNET_SELLER_ID__
@@ -486,16 +482,15 @@ async function submitCardPayment(event) {
           },
           body: JSON.stringify({
             number_token: numberToken,
-            brand: (brand || "Visa").toLowerCase(),       // ex.: 'visa' | 'mastercard'
+            brand: (brand || "Visa").toLowerCase(), // 'visa' | 'mastercard' | ...
             cardholder_name: chName,
             expiration_month: expMonth,
-            expiration_year: expYear2,                    // YY
+            expiration_year: expYear2,              // YY
             security_code: securityCode
           })
         })
         const vj = await verifyResp.json().catch(() => ({}))
         if (!verifyResp.ok || String(vj.status || "").toUpperCase() !== "VERIFIED") {
-          // Em homologação os cartões de teste podem negar zero‑auth; não bloqueamos
           console.warn("[getnet] Verificação de cartão não aprovada:", vj)
         }
       }
@@ -543,11 +538,11 @@ async function submitCardPayment(event) {
     const customerJson = await customerResp.json().catch(() => ({}))
     const customerId = customerJson.customer_id || email
 
-    // 4) Salva cartão no cofre (SEM forçar verificação; sem CVV; sem brand)
+    // 4) Salva cartão no cofre (SEM verificar aqui; SEM brand/CVV)
     const cardPayload = {
       number_token: numberToken,
       expiration_month: expMonth,
-      expiration_year: expYear2,             // YY
+      expiration_year: expYear2,  // YY
       customer_id: customerId,
       cardholder_name: chName,
       cardholder_identification: documentNumber
@@ -569,7 +564,7 @@ async function submitCardPayment(event) {
     const cardId = cardJson.card_id || cardJson.number_token || numberToken
 
     // 5) Cria plano de assinatura (mensal) — contrato oficial
-    const amountCents = Number(window.__PLAN_AMOUNT_CENTS__) || 9900 // R$ 99,00 por padrão
+    const amountCents = 300  // R$ 3,00
     const planPayload = {
       seller_id: sellerId,
       name: "Plano Luna AI Professional",
@@ -629,12 +624,11 @@ async function submitCardPayment(event) {
               postal_code: postal
             },
             card: {
-              // usar cartão salvo no cofre e CVV informado pelo cliente
+              // usa cartão salvo no cofre + CVV informado
               card_id: cardId,
-              number_token: numberToken,       // algumas integrações exigem
+              number_token: numberToken,   // algumas integrações exigem
               cardholder_name: chName,
               security_code: securityCode,
-              brand,
               expiration_month: expMonth,
               expiration_year: expYear2,
               bin: cardNumber.slice(0, 6)
@@ -774,7 +768,7 @@ async function callLeadStatusSingle(chatid) {
   ]
   for (const a of attempts) {
     try {
-      const res = await api(a.path, a.method === "GET" ? {} : { method: "POST", body: JSON.stringify(a.body) })
+      const res = await api(a.path, a.method === "GET" ? {} : { method: a.method, body: JSON.stringify(a.body) })
       const st = normalizeStage(res?.stage || res?.status || res?._stage || "")
       if (st) return { chatid, stage: st }
     } catch {}
