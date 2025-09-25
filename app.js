@@ -112,7 +112,6 @@ function validCNPJ(cnpj) {
   return (String(d1) === s[12] && String(d2) === s[13]);
 }
 
-
 // Remove acentos e normaliza para A-Z e espaço
 function stripDiacritics(str) {
   try { return String(str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, ""); }
@@ -268,7 +267,13 @@ async function checkBillingStatus() {
     else res = await api("/api/billing/status")
     const st = res?.status ?? res
     billingStatus = st
-    if (billingStatus?.require_payment === true) { showBillingModal(); return false }
+
+    // Só mostra modal se o APP estiver visível
+    const appVisible = !!document.getElementById("app-view") && !document.getElementById("app-view").classList.contains("hidden")
+    if (billingStatus?.require_payment === true) {
+      if (appVisible) { showBillingModal() }
+      return false
+    }
     updateBillingView()
     return true
   } catch (e) {
@@ -470,7 +475,7 @@ async function submitCardPayment(event) {
       throw new Error("Número token do cartão não retornado.")
     }
 
-    // 2.1) (Opcional) Verificação de cartão no endpoint correto (não bloqueante em homologação)
+    // 2.1) (Opcional) Verificação de cartão
     try {
       if (window.__GETNET_VERIFY_CARD__ === true) {
         const verifyResp = await fetch(`${baseURL}/v1/cards/verification`, {
@@ -482,10 +487,10 @@ async function submitCardPayment(event) {
           },
           body: JSON.stringify({
             number_token: numberToken,
-            brand: (brand || "Visa").toLowerCase(), // 'visa' | 'mastercard' | ...
+            brand: (brand || "Visa").toLowerCase(),
             cardholder_name: chName,
             expiration_month: expMonth,
-            expiration_year: expYear2,              // YY
+            expiration_year: expYear2,
             security_code: securityCode
           })
         })
@@ -563,13 +568,13 @@ async function submitCardPayment(event) {
     const cardJson = await cardResp.json().catch(() => ({}))
     const cardId = cardJson.card_id || cardJson.number_token || numberToken
 
-    // 5) Cria plano de assinatura (mensal) — contrato oficial
-    const amountCents = 1000  // R$ 10,00 (ajuste conforme sua política)
+    // 5) Cria plano de assinatura (mensal)
+    const amountCents = 1000  // R$ 10,00
     const planPayload = {
       seller_id: sellerId,
       name: "Plano Luna AI Professional",
       description: "Assinatura mensal do Luna AI",
-      amount: amountCents,                 // em centavos
+      amount: amountCents,
       currency: "BRL",
       payment_types: ["credit_card"],
       sales_tax: 0,
@@ -599,7 +604,7 @@ async function submitCardPayment(event) {
       throw new Error("Plano de assinatura não retornou plan_id.")
     }
 
-    // 6) Cria assinatura vinculando cliente, plano e cartão (contrato oficial)
+    // 6) Cria assinatura
     const orderId = `order_${Date.now()}`
     const deviceId = `web-${(jwtPayload()?.sub || '').toString().slice(0,12) || 'anon'}`
     const subscriptionPayload = {
@@ -624,9 +629,8 @@ async function submitCardPayment(event) {
               postal_code: postal
             },
             card: {
-              // usa cartão salvo no cofre + CVV informado
               card_id: cardId,
-              number_token: numberToken,   // algumas integrações exigem
+              number_token: numberToken,
               cardholder_name: chName,
               security_code: securityCode,
               brand,
@@ -953,7 +957,7 @@ async function acctLogin() {
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json(); if (!data?.jwt) throw new Error("Resposta inválida do servidor.")
     localStorage.setItem(ACCT_JWT_KEY, data.jwt)
-    try { await registerTrialUser(); await checkBillingStatus() } catch (e) { console.error(e) }
+    try { await registerTrialUser() } catch (e) { console.error(e) } // <-- não verifica billing aqui
     showStepInstance(); $("#token")?.focus()
   } catch (e) { if (msgEl) msgEl.textContent = e?.message || "Falha no login." }
   finally { if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Entrar" } }
@@ -972,7 +976,7 @@ async function acctRegister() {
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json(); if (!data?.jwt) throw new Error("Resposta inválida do servidor.")
     localStorage.setItem(ACCT_JWT_KEY, data.jwt)
-    try { await registerTrialUser(); await checkBillingStatus() } catch (e) { console.error(e) }
+    try { await registerTrialUser() } catch (e) { console.error(e) } // <-- não verifica billing aqui
     showStepInstance(); $("#token")?.focus()
   } catch (e) { if (msgEl) msgEl.textContent = e?.message || "Falha no registro." }
   finally { if (btnEl) { btnEl.disabled = false; btnEl.textContent = "Criar Conta" } }
@@ -993,7 +997,10 @@ function createSplash() {
   const progressBar = document.createElement("div"); progressBar.className = "splash-progress-bar"; progressContainer.appendChild(progressBar)
   logoContainer.appendChild(lunaLogoDiv); logoContainer.appendChild(helseniaLogoDiv); el.appendChild(logoContainer); el.appendChild(progressContainer); document.body.appendChild(el)
   setTimeout(() => { progressBar.classList.add("animate") }, 100)
-  setTimeout(() => { lunaLogoDiv.classList.remove("active"); setTimeout(() => { helseniaLogoDiv.classList.add("active"); progressBar.classList.add("helsenia") }, 500) }, 4000)
+  setTimeout(() => {
+    lunaLogoDiv.classList.remove("active")
+    setTimeout(() => { helseniaLogoDiv.classList.add("active"); progressBar.classList.add("helsenia") }, 500)
+  }, 4000)
   state.splash.shown = true; state.splash.forceTimer = setTimeout(hideSplash, 8000)
 }
 function hideSplash() {
@@ -1003,7 +1010,7 @@ function hideSplash() {
   if (state.splash.forceTimer) { clearTimeout(state.splash.forceTimer); state.splash.forceTimer = null }
 }
 
-// >>>>>>>>>>>>>>> AJUSTE: instância só após conta logada
+// >>> AJUSTE: instância só após conta logada
 async function doLogin() {
   const token = $("#token")?.value?.trim()
   const msgEl = $("#msg"); const btnEl = $("#btn-login")
@@ -1025,12 +1032,14 @@ async function doLogin() {
       method: "POST",
       headers: { "Content-Type": "application/json", "Accept": "application/json" },
       body: JSON.stringify(body),
-      redirect: "manual" // evita redirecionamento indevido para /login
+      redirect: "manual"
     })
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json(); localStorage.setItem("luna_jwt", data.jwt)
     try { await registerTrial() } catch {}
-    const canAccess = await checkBillingStatus(); if (canAccess) switchToApp()
+
+    // -> entra no app primeiro; billing só depois
+    switchToApp()
     try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
   } catch (e) {
     console.error(e); if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
@@ -1041,7 +1050,7 @@ async function doLogin() {
     }
   }
 }
-// <<<<<<<<<<<<<<< fim do ajuste
+// <<< fim do ajuste
 
 function ensureTopbar() {
   if (!$(".topbar")) {
@@ -1052,11 +1061,15 @@ function ensureTopbar() {
 }
 function switchToApp() {
   hide("#login-view"); show("#app-view"); setMobileMode("list"); ensureTopbar(); ensureCRMBar(); ensureStageTabs(); createSplash()
-  ensureMobilePayFAB()  // << FAB mobile
-  showConversasView(); loadChats().finally(() => {})
+  ensureMobilePayFAB()
+  showConversasView()
+  loadChats().finally(() => {})
+
+  // 🔒 Verificação de billing *apenas depois* que o app está visível
+  setTimeout(() => { try { checkBillingStatus() } catch {} }, 0)
 }
 
-// >>>>>>>>>>>>>>> NOVO: conta primeiro, instância depois
+// >>> conta primeiro, instância depois
 function ensureRoute() {
   const hasAcct = !!acctJwt()
   const hasInst = !!jwt()
@@ -1071,7 +1084,7 @@ function ensureRoute() {
   switchToApp()
   try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
 }
-// <<<<<<<<<<<<<<< fim da correção
+// <<< fim da correção
 
 /* =========================================
  * 7) AVATAR / NOME
