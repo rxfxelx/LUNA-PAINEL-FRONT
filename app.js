@@ -629,6 +629,7 @@ async function submitCardPayment(event) {
               number_token: numberToken,   // algumas integrações exigem
               cardholder_name: chName,
               security_code: securityCode,
+              brand,         
               expiration_month: expMonth,
               expiration_year: expYear2,
               bin: cardNumber.slice(0, 6)
