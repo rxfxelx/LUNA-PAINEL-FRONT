@@ -576,7 +576,7 @@ async function submitCardPayment(event) {
     const cardId = cardJson.card_id || cardJson.number_token || numberToken
 
     // 5) Cria plano de assinatura (mensal)
-    const amountCents = 1000  // R$ 10,00
+    const amountCents = 1000  // R$ 10,00 (ajuste conforme desejado)
     const planPayload = {
       seller_id: sellerId,
       name: "Plano Luna AI Professional",
@@ -677,8 +677,10 @@ async function submitCardPayment(event) {
     }
   } catch (err) {
     console.error("[payments] Falha ao processar pagamento:", err)
+    const errorEl = document.getElementById("card-error")
     if (errorEl) errorEl.textContent = err?.message || "Erro desconhecido"
   } finally {
+    const submitBtn = document.getElementById("btn-card-submit")
     if (submitBtn) {
       submitBtn.disabled = false
       submitBtn.textContent = "Pagar"
@@ -699,17 +701,22 @@ function getViewFromURL() {
 function setViewInURL(view, replace = false) {
   try {
     const url = new URL(window.location.href)
-    url.searchParams.set("view", view)
-    url.hash = view === "billing" ? "#billing" : ""
-    if (replace) history.replaceState({ view }, "", url)
-    else history.pushState({ view }, "", url)
+    const target = String(view || "").toLowerCase()
+    const curView = (url.searchParams.get("view") || "").toLowerCase()
+    const same = curView === target
+    url.searchParams.set("view", target)
+    url.hash = target === "billing" ? "#billing" : ""
+    const stateObj = { view: target }
+    if (replace || same) history.replaceState(stateObj, "", url)
+    else history.pushState(stateObj, "", url)
   } catch {}
 }
 
-// FAB Mobile para abrir Pagamentos
+// FAB Mobile para abrir Pagamentos (aparece só se não houver a barra mobile de navegação)
 function ensureMobilePayFAB() {
   if (!isMobile()) return
   if (document.getElementById("mobile-pay-fab")) return
+  if (document.getElementById("btn-mobile-pagamentos")) return // já existe menu mobile
 
   const fab = document.createElement("button")
   fab.id = "mobile-pay-fab"
@@ -759,17 +766,45 @@ function handleRoute() {
 }
 
 /* ========= Views (sincronizam URL + FAB) ========= */
-function showConversasView() {
-  hide("#billing-view"); show(".chatbar"); show("#messages")
+function markActiveMenus(view) {
   document.querySelectorAll(".menu-item").forEach((i) => i.classList.remove("active"))
-  $("#btn-conversas")?.classList.add("active")
+  if (view === "billing") {
+    $("#btn-pagamentos")?.classList.add("active")
+    $("#btn-mobile-pagamentos")?.classList.add("active")
+  } else {
+    $("#btn-conversas")?.classList.add("active")
+    $("#btn-mobile-conversas")?.classList.add("active")
+  }
+}
+
+function showConversasView() {
+  // Classes no body para CSS responsivo
+  document.body.classList.add("mode-chat")
+  document.body.classList.remove("mode-billing")
+
+  // Elementos visuais
+  hide("#billing-view")
+  show(".chatbar")
+  show("#messages")
+  show(".sidebar") // <- garante a sidebar no mobile
+
+  markActiveMenus("chat")
   setViewInURL("conversas", true)
   toggleMobilePayFAB(true)
 }
+
 function showBillingView() {
-  hide(".chatbar"); hide("#messages"); show("#billing-view")
-  document.querySelectorAll(".menu-item").forEach((i) => i.classList.remove("active"))
-  $("#btn-pagamentos")?.classList.add("active")
+  // Classes no body para CSS responsivo
+  document.body.classList.add("mode-billing")
+  document.body.classList.remove("mode-chat")
+
+  // Elementos visuais
+  hide(".chatbar")
+  hide("#messages")
+  show("#billing-view")
+  if (isMobile()) hide(".sidebar"); else show(".sidebar") // <- mobile: sem sidebar
+
+  markActiveMenus("billing")
   setViewInURL("billing")
   // 👇 não reabrir modal enquanto o usuário está na tela de pagamentos
   checkBillingStatus({ allowModal: false })
@@ -1555,7 +1590,13 @@ function renderInteractive(container, m) {
     ;(listMsg.sections || []).forEach((sec) => {
       if (sec.title) { const st = document.createElement("div"); st.style.margin = "6px 0 4px"; st.style.fontSize = "12px"; st.style.opacity = ".8"; st.textContent = sec.title; card.appendChild(st) }
       ;(sec.rows || []).forEach((row) => {
-        const opt = document.createElement("div"); opt.style.padding = "6px 8px"; opt.style.border = "1px solid var(--muted,#eee)"; opt.style.borderRadius = "6px"; opt.style.marginBottom = "6px"; textContent = row.title || row.id || "(opção)"; card.appendChild(opt)
+        const opt = document.createElement("div")
+        opt.style.padding = "6px 8px"
+        opt.style.border = "1px solid var(--muted,#eee)"
+        opt.style.borderRadius = "6px"
+        opt.style.marginBottom = "6px"
+        opt.textContent = row.title || row.id || "(opção)"  // <- FIX: faltava opt.
+        card.appendChild(opt)
       })
     })
     container.appendChild(card); return true
@@ -1804,12 +1845,16 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView)
   $("#btn-pay-getnet") && ($("#btn-pay-getnet").onclick = showCardModal)
 
+  // Navegação mobile (se existir no HTML)
+  $("#btn-mobile-conversas") && ($("#btn-mobile-conversas").onclick = showConversasView)
+  $("#btn-mobile-pagamentos") && ($("#btn-mobile-pagamentos").onclick = showBillingView)
+
   // 👉 handler do botão do modal
   $("#btn-go-to-payments") && ($("#btn-go-to-payments").onclick = (e) => {
     e.preventDefault();
     hideBillingModal();
-    showBillingView();          // abre a tela de pagamentos
-    setViewInURL("billing", true); // garante a URL ?view=billing/#billing
+    showBillingView();              // abre a tela de pagamentos
+    setViewInURL("billing", true);  // garante a URL ?view=billing/#billing sem duplicar histórico
   })
   $("#btn-logout-modal") && ($("#btn-logout-modal").onclick = () => { localStorage.clear(); location.reload() })
 
