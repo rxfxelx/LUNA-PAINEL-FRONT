@@ -260,7 +260,13 @@ async function registerTrial() {
     else { await api("/api/billing/register-trial", { method: "POST" }); console.log("[v0] Trial OK (instance)") }
   } catch (e) { console.error("[v1] Failed to register trial:", e) }
 }
-async function checkBillingStatus() {
+
+/** 
+ * Verifica status de billing. 
+ * @param {{allowModal?: boolean}} opts - quando allowModal=false, nunca abre o modal.
+ */
+async function checkBillingStatus(opts = {}) {
+  const { allowModal = true } = opts
   try {
     let res
     if (acctJwt()) res = await acctApi("/api/billing/status")
@@ -268,10 +274,11 @@ async function checkBillingStatus() {
     const st = res?.status ?? res
     billingStatus = st
 
-    // Só mostra modal se o APP estiver visível
+    // Só mostra modal quando permitido e app visível
     const appVisible = !!document.getElementById("app-view") && !document.getElementById("app-view").classList.contains("hidden")
     if (billingStatus?.require_payment === true) {
-      if (appVisible) { showBillingModal() }
+      if (allowModal && appVisible) { showBillingModal() }
+      updateBillingView()
       return false
     }
     updateBillingView()
@@ -764,7 +771,8 @@ function showBillingView() {
   document.querySelectorAll(".menu-item").forEach((i) => i.classList.remove("active"))
   $("#btn-pagamentos")?.classList.add("active")
   setViewInURL("billing")
-  checkBillingStatus()
+  // 👇 não reabrir modal enquanto o usuário está na tela de pagamentos
+  checkBillingStatus({ allowModal: false })
   toggleMobilePayFAB(false)
 }
 
@@ -1796,7 +1804,13 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView)
   $("#btn-pay-getnet") && ($("#btn-pay-getnet").onclick = showCardModal)
 
-  $("#btn-go-to-payments") && ($("#btn-go-to-payments").onclick = () => { hideBillingModal(); showBillingView() })
+  // 👉 handler do botão do modal
+  $("#btn-go-to-payments") && ($("#btn-go-to-payments").onclick = (e) => {
+    e.preventDefault();
+    hideBillingModal();
+    showBillingView();          // abre a tela de pagamentos
+    setViewInURL("billing", true); // garante a URL ?view=billing/#billing
+  })
   $("#btn-logout-modal") && ($("#btn-logout-modal").onclick = () => { localStorage.clear(); location.reload() })
 
   // Card payment modal
