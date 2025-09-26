@@ -272,7 +272,9 @@ async function checkBillingStatus(opts = {}) {
     if (acctJwt()) res = await acctApi("/api/billing/status")
     else res = await api("/api/billing/status")
     const st = res?.status ?? res
-    billingStatus = st
+    window.__BILLING_KEY__ = (res && (res.billing_key || res.key || res.tenant_key)) || window.__BILLING_KEY__
+    billingStatus = st;
+    window.__BILLING_KEY__ = (st && (st.key || st.billing_key || st.tenant_key)) || window.__BILLING_KEY__;
 
     // Só mostra modal quando permitido e app visível
     const appVisible = !!document.getElementById("app-view") && !document.getElementById("app-view").classList.contains("hidden")
@@ -304,28 +306,16 @@ function updateBillingView() {
 
 async function createCheckoutLink() {
   try {
-    const btnEl = $("#btn-pay-stripe")
-    if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = "<span>Processando...</span>" }
-    const response = await api("/api/billing/checkout-link", { method: "POST" })
-    if (response?.url) window.location.href = response.url
-    else throw new Error("URL de pagamento não recebida")
+    const plan = "luna_base";
+    const tk = (window.__BILLING_KEY__ || "").toString();
+    const qs = new URLSearchParams({ plan, tenant_key: tk }).toString();
+    window.location.href = `/pagamentos/stripe?${qs}`;
   } catch (e) {
-    console.error("[v0] Failed to create checkout link:", e)
-    alert("Erro ao processar pagamento. Tente novamente.")
-  } finally {
-    const btnEl = $("#btn-pay-stripe")
-    if (btnEl) {
-      btnEl.disabled = false
-      btnEl.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
-          <line x1="1" y1="10" x2="23" y2="10"/>
-        </svg>
-        Assinar agora
-      `
-    }
+    console.error("[stripe] Failed to init checkout:", e);
+    alert("Erro ao processar pagamento. Tente novamente.");
   }
 }
+
 
 /* ========= UTIL: IP + ID aleatório ========= */
 function randId(n = 8) {
@@ -1924,7 +1914,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView)
   // Pagamento com Stripe: redireciona diretamente para a página de pagamento.
   $("#btn-pay-stripe") && ($("#btn-pay-stripe").onclick = () => {
-    window.location.href = "/pagamentos/stripe";
+    const plan="luna_base"; const tk=(window.__BILLING_KEY__||"").toString(); const qs=new URLSearchParams({plan,tenant_key:tk}).toString(); window.location.href=`/pagamentos/stripe?${qs}`;
   })
 
   // Navegação mobile (se existir no HTML)
@@ -1962,7 +1952,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // ``/pagamentos/stripe/index.html``.
   $("#link-cadastrar") && ($("#link-cadastrar").onclick = (e) => {
     e.preventDefault();
-    window.location.href = "/pagamentos/stripe";
+    const plan="luna_base"; const tk=(window.__BILLING_KEY__||"").toString(); const qs=new URLSearchParams({plan,tenant_key:tk}).toString(); window.location.href=`/pagamentos/stripe?${qs}`;
   })
 
   // Deep-link: abrir direto Pagamentos com ?view=billing ou #billing
