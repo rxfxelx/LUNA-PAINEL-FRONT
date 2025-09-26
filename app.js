@@ -336,7 +336,10 @@ async function goToStripeCheckout({ plan = "luna_base", tenant_key = "", email =
   if (tenant_key) params.set("tenant_key", tenant_key)
   if (email) params.set("email", email)
 
-  // 1) Tenta criar a sessão diretamente na API e redirecionar para session.url
+  // Este helper invoca o endpoint GET /api/pay/stripe/checkout-url e
+  // redireciona o usuário para a URL retornada pelo Stripe.  Caso ocorra
+  // qualquer falha no fetch ou a resposta não contenha a propriedade `url`,
+  // exibimos um alerta em vez de tentar redirecionar para uma página estática.
   try {
     const r = await fetch(BACKEND() + "/api/pay/stripe/checkout-url?" + params.toString(), {
       method: "GET",
@@ -351,9 +354,8 @@ async function goToStripeCheckout({ plan = "luna_base", tenant_key = "", email =
     }
     throw new Error("Resposta inválida da API de pagamentos.")
   } catch (err) {
-    // 2) Fallback: manda para a página estática que chama a API
-    console.warn("[stripe] fallback para /pagamentos/stripe:", err)
-    window.location.href = "/pagamentos/stripe?" + params.toString()
+    console.error("[stripe] erro ao iniciar pagamento:", err)
+    alert("Erro ao iniciar pagamento. Tente novamente em instantes.")
   }
 }
 
@@ -412,6 +414,12 @@ function showCardModal() {
 }
 // expõe para o HTML (botão da tela de Pagamentos)
 window.showCardModal = showCardModal
+
+// Exponha helpers de checkout para que o HTML (index.html) possa chamá‑los diretamente.
+// Isto permite que os manipuladores de clique definidos em index.html usem a mesma
+// lógica de app.js sem hard‑codar URLs.
+window.goToStripeCheckout = goToStripeCheckout;
+window.createCheckoutLink = createCheckoutLink;
 
 // Fecha o modal de pagamento
 function hideCardModal() { document.getElementById("card-modal")?.classList.add("hidden") }
@@ -893,7 +901,21 @@ function markActiveMenus(view) {
   }
 }
 
-function showConversasView() {
+async function showConversasView() {
+  // Antes de exibir as conversas, checamos o status de billing. Se o usuário
+  // estiver com trial expirado ou assinatura inativa, exibimos a tela de
+  // pagamentos e não permitimos acesso às conversas.
+  try {
+    const ok = await checkBillingStatus()
+    if (!ok) {
+      showBillingView()
+      return
+    }
+  } catch (e) {
+    console.error(e)
+    // Em caso de erro inesperado, não bloqueamos o acesso, apenas logamos
+  }
+
   // **FIX MOBILE:** Conversas devem abrir a LISTA no mobile
   setMobileMode("list")
 
@@ -1230,8 +1252,19 @@ function switchToApp() {
   showConversasView()
   loadChats().finally(() => {})
 
-  // 🔒 Verificação de billing *apenas depois* que o app está visível
-  setTimeout(() => { try { checkBillingStatus() } catch {} }, 0)
+  // 🔒 Verificação de billing *apenas depois* que o app está visível.
+  // Se o trial estiver expirado ou a assinatura inativa, direcionamos o
+  // usuário imediatamente para a tela de pagamentos, bloqueando o acesso às conversas.
+  setTimeout(async () => {
+    try {
+      const ok = await checkBillingStatus()
+      if (!ok) {
+        showBillingView()
+      }
+    } catch (e) {
+      console.error(e)
+    }
+  }, 0)
 }
 
 // >>> conta primeiro, instância depois
