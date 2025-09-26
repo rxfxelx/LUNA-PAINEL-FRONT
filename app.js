@@ -327,7 +327,32 @@ async function createCheckoutLink() {
   }
 }
 
-// ========= PAGAMENTO COM CARTÃO =========
+/* ========= UTIL: IP + ID aleatório ========= */
+function randId(n = 8) {
+  try {
+    const bytes = new Uint8Array(n)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, n)
+  } catch {
+    return Math.random().toString(16).slice(2, 2 + n)
+  }
+}
+async function resolveClientIP() {
+  const candidates = ["/api/client-ip", "/api/utils/client-ip", "/client-ip", "/ip"]
+  for (const p of candidates) {
+    try {
+      const r = await fetch(BACKEND() + p, { headers: { ...authHeaders() } })
+      if (!r.ok) continue
+      const j = await r.json().catch(() => ({}))
+      // aceita {ip:"1.2.3.4"} ou {client_ip:"1.2.3.4"} ou string
+      const ip = j.ip || j.client_ip || (typeof j === "string" ? j : "")
+      if (ip && typeof ip === "string" && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return ip
+    } catch {}
+  }
+  return null
+}
+
+/* ========= PAGAMENTO COM CARTÃO ========= */
 
 // Abre o modal de pagamento para coletar dados do cartão
 function showCardModal() {
@@ -347,6 +372,15 @@ window.showCardModal = showCardModal
 
 // Fecha o modal de pagamento
 function hideCardModal() { document.getElementById("card-modal")?.classList.add("hidden") }
+
+/* ---------- helpers de erro Getnet ---------- */
+function extractGetnetErrorDetail(obj) {
+  const e = obj?.payment?.error || obj?.error || {}
+  const msg = e.message || obj?.status_details || obj?.message || ""
+  const desc = Array.isArray(e.details) && e.details[0]?.description ? e.details[0].description : ""
+  const code = e.status_code || e.code || ""
+  return [msg, desc, code].filter(Boolean).join(" | ")
+}
 
 // Handler para submissão do formulário de pagamento (ÚNICO FLUXO ATIVO)
 async function submitCardPayment(event) {
@@ -370,7 +404,7 @@ async function submitCardPayment(event) {
     const addrDistrict = document.getElementById("bill-district")?.value.trim() || ""
     const addrCity = document.getElementById("bill-city")?.value.trim() || ""
     const addrState = (document.getElementById("bill-state")?.value.trim() || "").toUpperCase()
-    const addrCountry = (document.getElementById("bill-country")?.value.trim() || "BR").toUpperCase()
+    const addrCountry = (document.getElementById("bill-country")?.value.trim() || "BR").toUpperCase() === "BRASIL" ? "BR" : (document.getElementById("bill-country")?.value.trim() || "BR").toUpperCase()
     const addrPostalRaw = document.getElementById("bill-postal")?.value.trim() || ""
 
     const cardholderName = document.getElementById("cardholder-name").value.trim().toUpperCase()
@@ -422,6 +456,7 @@ async function submitCardPayment(event) {
 
     // Normalização/validação de bandeira + CVV
     const brand = normalizeBrand(selectedBrand, cardNumber)
+    const brandLC = brand.toLowerCase()
     const isAmex = brand === "Amex"
     if ((isAmex && securityCode.length !== 4) || (!isAmex && securityCode.length !== 3)) {
       throw new Error(isAmex ? "CVV inválido (Amex exige 4 dígitos)." : "CVV inválido (3 dígitos).")
@@ -467,10 +502,7 @@ async function submitCardPayment(event) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${accessToken}`,
       },
-      body: JSON.stringify({
-        card_number: cardNumber,
-        customer_id: email,
-      }),
+      body: JSON.stringify({ card_number: cardNumber, customer_id: email }),
     })
     if (!tokenizationResp.ok) {
       const errMsg = await tokenizationResp.text().catch(() => tokenizationResp.status)
@@ -494,7 +526,7 @@ async function submitCardPayment(event) {
           },
           body: JSON.stringify({
             number_token: numberToken,
-            brand: (brand || "Visa").toLowerCase(),
+            brand: brandLC,
             cardholder_name: chName,
             expiration_month: expMonth,
             expiration_year: expYear2,
@@ -529,7 +561,7 @@ async function submitCardPayment(event) {
         district: addrDistrict,
         city: addrCity,
         state: addrState,
-        country: addrCountry,
+        country: addrCountry, // deve ser "BR"
         postal_code: postal,
       },
     }
@@ -543,9 +575,28 @@ async function submitCardPayment(event) {
       },
       body: JSON.stringify(customerPayload),
     })
+
     if (!customerResp.ok) {
-      const errMsg = await customerResp.text().catch(() => customerResp.status)
-      throw new Error(`Erro ao cadastrar cliente: ${errMsg}`)
+      // fallback para atualizar cliente já existente (409 etc.)
+      const txt = await customerResp.text().catch(() => "")
+      if (customerResp.status === 409 || /already exists|duplicate/i.test(txt)) {
+        try {
+          const putResp = await fetch(`${baseURL}/v1/customers/${encodeURIComponent(email)}`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+              seller_id: sellerId,
+            },
+            body: JSON.stringify(customerPayload),
+          })
+          if (!putResp.ok) throw new Error(await putResp.text())
+        } catch (ee) {
+          throw new Error(`Erro ao cadastrar cliente: ${txt || ee?.message || customerResp.status}`)
+        }
+      } else {
+        throw new Error(`Erro ao cadastrar cliente: ${txt || customerResp.status}`)
+      }
     }
     const customerJson = await customerResp.json().catch(() => ({}))
     const customerId = customerJson.customer_id || email
@@ -575,84 +626,88 @@ async function submitCardPayment(event) {
     const cardJson = await cardResp.json().catch(() => ({}))
     const cardId = cardJson.card_id || cardJson.number_token || numberToken
 
-    // 5) Cria plano de assinatura (mensal)
-    const amountCents = 1000  // R$ 10,00 (ajuste conforme desejado)
-    const planPayload = {
-      seller_id: sellerId,
-      name: "Plano Luna AI Professional",
-      description: "Assinatura mensal do Luna AI",
-      amount: amountCents,
-      currency: "BRL",
-      payment_types: ["credit_card"],
-      sales_tax: 0,
-      product_type: "service",
-      period: {
-        type: "monthly",
-        billing_cycle: 30,
-        specific_cycle_in_days: 0
-      }
-    }
-    const planResp = await fetch(`${baseURL}/v1/plans`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        seller_id: sellerId,
-      },
-      body: JSON.stringify(planPayload),
-    })
-    if (!planResp.ok) {
-      const errMsg = await planResp.text().catch(() => planResp.status)
-      throw new Error(`Erro ao criar plano: ${errMsg}`)
-    }
-    const planJson = await planResp.json().catch(() => ({}))
-    const planId = planJson.plan_id
+    // 5) Plano de assinatura
+    const amountCents = Number(window.__GETNET_AMOUNT_CENTS__ || 1000) // R$10,00 padrão
+    let planId = (window.__GETNET_PLAN_ID__ || "").trim()
     if (!planId) {
-      throw new Error("Plano de assinatura não retornou plan_id.")
+      const planPayload = {
+        seller_id: sellerId,
+        name: "Plano Luna AI Professional",
+        description: "Assinatura mensal do Luna AI",
+        amount: amountCents,
+        currency: "BRL",
+        payment_types: ["credit_card"],
+        sales_tax: 0,
+        product_type: "service",
+        period: { type: "monthly", billing_cycle: 30, specific_cycle_in_days: 0 }
+      }
+      const planResp = await fetch(`${baseURL}/v1/plans`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+          seller_id: sellerId,
+        },
+        body: JSON.stringify(planPayload),
+      })
+      if (!planResp.ok) {
+        const errMsg = await planResp.text().catch(() => planResp.status)
+        throw new Error(`Erro ao criar plano: ${errMsg}`)
+      }
+      const planJson = await planResp.json().catch(() => ({}))
+      planId = planJson.plan_id
+      if (!planId) throw new Error("Plano de assinatura não retornou plan_id.")
     }
 
     // 6) Cria assinatura
     const orderId = `order_${Date.now()}`
-    const deviceId = `web-${(jwtPayload()?.sub || '').toString().slice(0,12) || 'anon'}`
+    const softDescriptorRaw = (window.__GETNET_SOFT_DESCRIPTOR__ || "").trim()
+    const softDescriptor = softDescriptorRaw ? softDescriptorRaw.slice(0, 13) : null // alguns emissores limitam 13
+
+    const credit = {
+      transaction_type: "FULL",
+      number_installments: 1,
+      billing_address: {
+        street: addrStreet,
+        number: addrNumber,
+        complement: addrComplement,
+        district: addrDistrict,
+        city: addrCity,
+        state: addrState,
+        country: addrCountry,
+        postal_code: postal
+      },
+      card: {
+        card_id: cardId,
+        cardholder_name: chName,
+        security_code: securityCode,
+        brand: brandLC,
+        expiration_month: expMonth,
+        expiration_year: expYear2
+      }
+    }
+    if (softDescriptor) credit.soft_descriptor = softDescriptor
+
     const subscriptionPayload = {
       seller_id: sellerId,
       customer_id: customerId,
       plan_id: planId,
       order_id: orderId,
-      subscription: {
-        payment_type: {
-          credit: {
-            transaction_type: "FULL",
-            number_installments: 1,
-            soft_descriptor: "LunaAI",
-            billing_address: {
-              street: addrStreet,
-              number: addrNumber,
-              complement: addrComplement,
-              district: addrDistrict,
-              city: addrCity,
-              state: addrState,
-              country: addrCountry,
-              postal_code: postal
-            },
-            card: {
-              card_id: cardId,
-              number_token: numberToken,
-              cardholder_name: chName,
-              security_code: securityCode,
-              brand,
-              expiration_month: expMonth,
-              expiration_year: expYear2,
-              bin: cardNumber.slice(0, 6)
-            }
-          }
-        }
-      },
-      device: {
-        ip_address: "127.0.0.1",
-        device_id: deviceId
-      }
+      subscription: { payment_type: { credit } }
+      // device será adicionado abaixo apenas se houver IP público
     }
+
+    // ➜ Enviar device **apenas** se houver IP público real
+    try {
+      const ip = await resolveClientIP()
+      if (ip) {
+        subscriptionPayload.device = {
+          ip_address: ip,
+          device_id: `web-${randId(10)}`
+        }
+      }
+    } catch { /* se não conseguir IP, não envia device */ }
+
     const subscriptionResp = await fetch(`${baseURL}/v1/subscriptions`, {
       method: "POST",
       headers: {
@@ -662,23 +717,41 @@ async function submitCardPayment(event) {
       },
       body: JSON.stringify(subscriptionPayload),
     })
+    const subscriptionText = await subscriptionResp.text().catch(() => "")
+    let subscriptionJson = {}
+    try { subscriptionJson = subscriptionText ? JSON.parse(subscriptionText) : {} } catch {}
+
     if (!subscriptionResp.ok) {
-      const errMsg = await subscriptionResp.text().catch(() => subscriptionResp.status)
-      throw new Error(`Erro ao criar assinatura: ${errMsg}`)
+      const detail = extractGetnetErrorDetail(subscriptionJson) || subscriptionText || subscriptionResp.status
+      throw new Error(`Erro ao criar assinatura: ${detail}`)
     }
-    const subscriptionJson = await subscriptionResp.json().catch(() => ({}))
+
+    // Checagem de erro antifraude mesmo com 200
+    const overall = String(subscriptionJson.status || "").toLowerCase() // "failed" em casos 481
+    const paymentError = subscriptionJson?.payment?.error
+    if (overall === "failed" || paymentError) {
+      const detail = extractGetnetErrorDetail(subscriptionJson) || "Transação negada."
+      throw new Error(detail)
+    }
+
     const subStatus = String(subscriptionJson.status || "").toLowerCase()
 
-    hideCardModal()
     if (subStatus.includes("active")) {
+      hideCardModal()
       alert("Assinatura criada e ativa! Você será cobrado mensalmente.")
     } else {
+      // Em alguns fluxos, a assinatura fica 'pending' até captura/autorização.
+      hideCardModal()
       alert("Assinatura criada. Aguarde confirmação da Getnet.")
     }
   } catch (err) {
     console.error("[payments] Falha ao processar pagamento:", err)
     const errorEl = document.getElementById("card-error")
-    if (errorEl) errorEl.textContent = err?.message || "Erro desconhecido"
+    if (errorEl) {
+      errorEl.textContent = (err?.message || "Erro desconhecido")
+    } else {
+      alert(err?.message || "Erro desconhecido")
+    }
   } finally {
     const submitBtn = document.getElementById("btn-card-submit")
     if (submitBtn) {
