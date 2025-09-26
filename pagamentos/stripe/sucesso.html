@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pagamento concluído • Luna</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Arial, sans-serif;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      height: 100vh;
+      color: #222;
+      background: #fafafa;
+    }
+    .box {
+      padding: 24px;
+      border: 1px solid #eee;
+      border-radius: 12px;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+      max-width: 460px;
+      text-align: center;
+    }
+    h1 {
+      margin-bottom: 8px;
+    }
+    .hint {
+      opacity: 0.7;
+      font-size: 14px;
+      margin-top: 6px;
+    }
+    button {
+      margin-top: 16px;
+      padding: 10px 20px;
+      font-size: 14px;
+      border: none;
+      border-radius: 4px;
+      background-color: #ec1d24;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #c7191f;
+    }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1>Pagamento concluído!</h1>
+    <p>Obrigado por assinar o Luna AI.</p>
+    <p class="hint">Agora você pode voltar para a aplicação para acessar todas as funcionalidades.</p>
+    <button id="btn-return">Voltar para o painel</button>
+  </div>
+  <script>
+    (function() {
+      const btn = document.getElementById('btn-return');
+      const searchParams = new URLSearchParams(location.search);
+      const ref = searchParams.get('ref');
+      btn.addEventListener('click', function () {
+        const base = location.origin;
+        const path = ref ? `/?ref=${encodeURIComponent(ref)}` : '/';
+        window.location.href = base + path;
+      });
+    })();
+  </script>
+</body>
+</html>
