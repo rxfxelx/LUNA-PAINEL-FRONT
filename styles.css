@@ -203,7 +203,6 @@ body {
 }
 
 /* ========= LOGIN: registro/link ========= */
-/* Estiliza o contêiner "Não tem conta? Criar conta" para centralização e melhor apresentação */
 .login-form .login-register-container {
   display: flex;
   justify-content: center;
@@ -213,7 +212,6 @@ body {
   color: var(--text-muted);
   margin-top: -6px;
 }
-/* Estilo para o link de criação de conta */
 .login-form .login-register-container a {
   color: var(--primary);
   font-weight: 600;
@@ -955,12 +953,6 @@ body.mode-billing #billing-view {
 }
 
 /* ===== PAGAMENTOS: Lista de benefícios ===== */
-/*
- * A seção de benefícios torna o plano mais atrativo, mostrando
- * claramente o que o usuário receberá.  Utilizamos um cartão
- * dedicado com título e uma lista de itens marcados com check
- * icons, alinhando os estilos com o restante do painel.
- */
 .billing-features {
   margin: 24px 0;
   background: var(--card);
@@ -1179,13 +1171,26 @@ body.mode-billing #billing-view {
   .verification-text {
     flex-direction: column;
     gap: 4px;
-    align-items: flex-start;
   }
   .verification-label {
     font-size: 13px;
   }
   .verification-counter {
     font-size: 11px;
+  }
+
+  /* ===== FIX MOBILE BILLING =====
+     Em modo "pagamentos" no mobile, a coluna MAIN deve aparecer
+     mesmo se a classe is-mobile-list estiver setada.         */
+  body.mode-billing .main {
+    display: flex !important;
+  }
+  body.mode-billing .sidebar {
+    display: none !important;
+  }
+  body.mode-billing .chatbar,
+  body.mode-billing #messages {
+    display: none !important;
   }
 }
 
@@ -1325,11 +1330,6 @@ body.mode-billing .nav-rail .label {
 
 /*
  * ===== MODAL DE PAGAMENTO =====
- *
- * O modal de pagamento reutiliza as cores e a tipografia do painel
- * principal para manter a coerência visual.  É composto por um
- * backdrop semitransparente, um contêiner centralizado e campos de
- * formulário para capturar os dados do cliente e do cartão.
  */
 .payment-modal,
 .billing-modal {
@@ -1382,6 +1382,7 @@ body.mode-billing .nav-rail .label {
 .payment-modal .form-row {
   display: flex;
   gap: 12px;
+  flex-wrap: wrap; /* melhora no mobile */
 }
 .payment-modal .form-row .form-group {
   flex: 1;
