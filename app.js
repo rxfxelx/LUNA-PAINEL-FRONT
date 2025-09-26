@@ -45,6 +45,30 @@ function jwtPayload() {
   } catch { return {} }
 }
 
+/* >>> NOVO: helpers para obter email do usuário logado (conta/instância) */
+function decodeJwtPayload(token) {
+  try {
+    if (!token || token.indexOf(".") < 0) return {}
+    let b64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")
+    b64 += "=".repeat((4 - (b64.length % 4)) % 4)
+    return JSON.parse(atob(b64))
+  } catch { return {} }
+}
+function userEmail() {
+  try {
+    const acct = localStorage.getItem("luna_acct_jwt") || ""
+    const p1 = decodeJwtPayload(acct)
+    const e1 = (p1.email || p1.user_email || "").trim()
+    if (e1) return e1
+    const inst = localStorage.getItem("luna_jwt") || ""
+    const p2 = decodeJwtPayload(inst)
+    const e2 = (p2.email || p2.user_email || "").trim()
+    if (e2) return e2
+    return ""
+  } catch { return "" }
+}
+/* <<< FIM: helpers de email */
+
 function authHeaders() {
   const headers = { Authorization: "Bearer " + jwt() }
   const p = jwtPayload()
@@ -274,7 +298,9 @@ async function checkBillingStatus(opts = {}) {
     const st = res?.status ?? res
     window.__BILLING_KEY__ = (res && (res.billing_key || res.key || res.tenant_key)) || window.__BILLING_KEY__
     billingStatus = st;
-    window.__BILLING_KEY__ = (st && (st.key || st.billing_key || st.tenant_key)) || window.__BILLING_KEY__;
+    window.__BILLING_KEY__ = (st && (st.key || st.billing_key || st.tenant_key)) || window.__BILLING_KEY__
+    /* >>> NOVO: guardar o email do usuário para o checkout */
+    window.__USER_EMAIL__ = userEmail() || window.__USER_EMAIL__ || ""
 
     // Só mostra modal quando permitido e app visível
     const appVisible = !!document.getElementById("app-view") && !document.getElementById("app-view").classList.contains("hidden")
@@ -304,12 +330,39 @@ function updateBillingView() {
   if (paidUntil) paidUntil.textContent = billingStatus.paid_until ? new Date(billingStatus.paid_until).toLocaleString() : "N/A"
 }
 
+/* >>> NOVO: helper robusto de checkout (API -> Stripe) */
+async function goToStripeCheckout({ plan = "luna_base", tenant_key = "", email = "" } = {}) {
+  const params = new URLSearchParams({ plan })
+  if (tenant_key) params.set("tenant_key", tenant_key)
+  if (email) params.set("email", email)
+
+  // 1) Tenta criar a sessão diretamente na API e redirecionar para session.url
+  try {
+    const r = await fetch(BACKEND() + "/api/pay/stripe/checkout-url?" + params.toString(), {
+      method: "GET",
+      credentials: "include",
+      headers: { ...authHeaders() }
+    })
+    if (!r.ok) throw new Error(await r.text().catch(() => ""))
+    const data = await r.json().catch(() => ({}))
+    if (data && data.url) {
+      window.location.href = data.url
+      return
+    }
+    throw new Error("Resposta inválida da API de pagamentos.")
+  } catch (err) {
+    // 2) Fallback: manda para a página estática que chama a API
+    console.warn("[stripe] fallback para /pagamentos/stripe:", err)
+    window.location.href = "/pagamentos/stripe?" + params.toString()
+  }
+}
+
 async function createCheckoutLink() {
   try {
     const plan = "luna_base";
-    const tk = (window.__BILLING_KEY__ || "").toString();
-    const qs = new URLSearchParams({ plan, tenant_key: tk }).toString();
-    window.location.href = `/pagamentos/stripe?${qs}`;
+    const tk   = (window.__BILLING_KEY__ || "").toString();
+    const em   = (window.__USER_EMAIL__  || userEmail() || "").toString();
+    await goToStripeCheckout({ plan, tenant_key: tk, email: em })
   } catch (e) {
     console.error("[stripe] Failed to init checkout:", e);
     alert("Erro ao processar pagamento. Tente novamente.");
@@ -1912,9 +1965,13 @@ document.addEventListener("DOMContentLoaded", () => {
   // Billing system
   $("#btn-conversas") && ($("#btn-conversas").onclick = showConversasView)
   $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView)
-  // Pagamento com Stripe: redireciona diretamente para a página de pagamento.
-  $("#btn-pay-stripe") && ($("#btn-pay-stripe").onclick = () => {
-    const plan="luna_base"; const tk=(window.__BILLING_KEY__||"").toString(); const qs=new URLSearchParams({plan,tenant_key:tk}).toString(); window.location.href=`/pagamentos/stripe?${qs}`;
+
+  // Pagamento com Stripe (AGORA com email + fallback robusto)
+  $("#btn-pay-stripe") && ($("#btn-pay-stripe").onclick = async () => {
+    const plan = "luna_base";
+    const tk   = (window.__BILLING_KEY__ || "").toString();
+    const em   = (window.__USER_EMAIL__  || userEmail() || "").toString();
+    await goToStripeCheckout({ plan, tenant_key: tk, email: em })
   })
 
   // Navegação mobile (se existir no HTML)
@@ -1922,15 +1979,19 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-mobile-pagamentos") && ($("#btn-mobile-pagamentos").onclick = showBillingView)
 
   // 👉 handler do botão do modal
-  $("#btn-go-to-payments") && ($("#btn-go-to-payments").onclick = (e) => {
+  $("#btn-go-to-payments") && ($("#btn-go-to-payments").onclick = async (e) => {
     e.preventDefault();
     hideBillingModal();
-    showBillingView();              // abre a tela de pagamentos
-    setViewInURL("billing", true);  // garante a URL ?view=billing/#billing sem duplicar histórico
+    showBillingView();
+    setViewInURL("billing", true);
+    const plan = "luna_base";
+    const tk   = (window.__BILLING_KEY__ || "").toString();
+    const em   = (window.__USER_EMAIL__  || userEmail() || "").toString();
+    await goToStripeCheckout({ plan, tenant_key: tk, email: em })
   })
   $("#btn-logout-modal") && ($("#btn-logout-modal").onclick = () => { localStorage.clear(); location.reload() })
 
-  // Card payment modal
+  // Card payment modal (legado)
   $("#btn-card-cancel") && ($("#btn-card-cancel").onclick = hideCardModal)
   const cardModal = document.getElementById("card-modal")
   if (cardModal) { const overlay = cardModal.querySelector(".modal-overlay"); if (overlay) overlay.onclick = hideCardModal }
@@ -1945,14 +2006,13 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#btn-acct-register") && ($("#btn-acct-register").onclick = acctRegister)
   $("#reg-pass") && $("#reg-pass").addEventListener("keypress", (e) => { if (e.key === "Enter") { e.preventDefault(); acctRegister() } })
 
-  // Link "cadastrar"
-  // Ao clicar no link de cadastro (assinar), redirecionamos para a nova página de
-  // pagamento baseada no Stripe.  A página de checkout hospedada pelo
-  // Stripe será chamada via ``/api/pay/stripe/checkout-url`` a partir de
-  // ``/pagamentos/stripe/index.html``.
-  $("#link-cadastrar") && ($("#link-cadastrar").onclick = (e) => {
+  // Link "cadastrar" → mesmo fluxo do botão de pagar
+  $("#link-cadastrar") && ($("#link-cadastrar").onclick = async (e) => {
     e.preventDefault();
-    const plan="luna_base"; const tk=(window.__BILLING_KEY__||"").toString(); const qs=new URLSearchParams({plan,tenant_key:tk}).toString(); window.location.href=`/pagamentos/stripe?${qs}`;
+    const plan = "luna_base";
+    const tk   = (window.__BILLING_KEY__ || "").toString();
+    const em   = (window.__USER_EMAIL__  || userEmail() || "").toString();
+    await goToStripeCheckout({ plan, tenant_key: tk, email: em })
   })
 
   // Deep-link: abrir direto Pagamentos com ?view=billing ou #billing
