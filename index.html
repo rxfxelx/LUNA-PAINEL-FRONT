@@ -8,6 +8,12 @@
   <link rel="stylesheet" href="styles.css"/>
   <style>
     .hidden{display:none!important}
+
+    /* Garantia: quando estiver em Pagamentos, mostra o billing e esconde o chat,
+       mesmo que o CSS antigo tenha regras diferentes */
+    .mode-billing #billing-view{ display:block !important; }
+    .mode-billing .chatbar, .mode-billing #messages{ display:none !important; }
+
     /* ---- Navegação móvel (apenas no mobile) ---- */
     @media (max-width:1023px){
       .nav-rail{ display:none; }
@@ -433,7 +439,7 @@
 
   <noscript><div style="padding:16px;background:#111;color:#fff">Ative o JavaScript para usar a Luna.</div></noscript>
 
-  <!-- JS de UI: apenas ponte para o app.js (sem roteador próprio) -->
+  <!-- JS de UI: ponte com app.js + troca das classes do body -->
   <script>
   (function () {
     const body = document.body;
@@ -451,42 +457,52 @@
     const btnGoToPayments = document.getElementById('btn-go-to-payments');
     const btnPayGetnet = document.getElementById('btn-pay-getnet');
 
+    const elBilling = document.getElementById('billing-view');
+    const elChatbar = document.querySelector('.chatbar');
+    const elMessages = document.getElementById('messages');
+
+    const show = (el)=>{ if(el) el.classList.remove('hidden'); };
+    const hide = (el)=>{ if(el) el.classList.add('hidden'); };
+
+    function selectMenu(view){
+      document.querySelectorAll('.menu-item').forEach(i=>i.classList.remove('active'));
+      if (view==='billing') {
+        document.getElementById('btn-pagamentos')?.classList.add('active');
+        btnMobileConversas?.classList.remove('active');
+        btnMobilePagamentos?.classList.add('active');
+      } else {
+        document.getElementById('btn-conversas')?.classList.add('active');
+        btnMobileConversas?.classList.add('active');
+        btnMobilePagamentos?.classList.remove('active');
+      }
+    }
+
     function goConversas(e){
       if (e) e.preventDefault();
-      try { if (typeof window.showConversasView === 'function') window.showConversasView(); } catch {}
-      // marca ativo nas abas móveis
-      btnMobileConversas?.classList.add('active');
-      btnMobilePagamentos?.classList.remove('active');
+      body.classList.add('mode-chat'); body.classList.remove('mode-billing');
+      hide(elBilling); show(elChatbar); show(elMessages);
+      try { window.showConversasView?.(); } catch {}
+      try { window.setViewInURL?.('conversas', true); } catch {}
+      selectMenu('chat');
     }
+
     function goBilling(e){
       if (e) e.preventDefault();
-      try { if (typeof window.showBillingView === 'function') window.showBillingView(); } catch {}
-      btnMobileConversas?.classList.remove('active');
-      btnMobilePagamentos?.classList.add('active');
+      body.classList.add('mode-billing'); body.classList.remove('mode-chat');
+      show(elBilling); hide(elChatbar); hide(elMessages);
+      try { window.showBillingView?.(); } catch {}
+      try { window.setViewInURL?.('billing'); } catch {}
+      selectMenu('billing');
     }
 
-    // Clicks desktop
+    // Bindings
     btnConversas?.addEventListener('click', goConversas);
     btnPagamentos?.addEventListener('click', goBilling);
-
-    // Clicks mobile
     btnMobileConversas?.addEventListener('click', goConversas);
     btnMobilePagamentos?.addEventListener('click', goBilling);
 
-    // “Assinar agora”
-    btnPayGetnet?.addEventListener('click', (e) => {
-      e.preventDefault();
-      try { window.showCardModal?.(); } catch {}
-    });
-
-    // Botão do modal “Ir para Pagamentos”
-    btnGoToPayments?.addEventListener('click', (e) => {
-      e.preventDefault();
-      document.getElementById('billing-modal')?.classList.add('hidden');
-      goBilling();
-    });
-
-    // Sair do modal
+    btnPayGetnet?.addEventListener('click', (e)=>{e.preventDefault(); try{window.showCardModal?.();}catch{}});
+    btnGoToPayments?.addEventListener('click', (e)=>{ e.preventDefault(); document.getElementById('billing-modal')?.classList.add('hidden'); goBilling(); });
     document.getElementById('btn-logout-modal')?.addEventListener('click', () => {
       document.getElementById('billing-modal')?.classList.add('hidden');
     });
@@ -502,7 +518,7 @@
       } catch {}
     });
 
-    // Deep-link (#billing ou ?view=billing) -> delega ao app.js
+    // Deep-link (#billing ou ?view=billing)
     function syncFromURL() {
       const url = new URL(window.location.href);
       const view = (url.searchParams.get('view') || url.hash.replace(/^#/, '') || '').toLowerCase();
@@ -511,7 +527,7 @@
     }
     window.addEventListener('hashchange', syncFromURL);
     window.addEventListener('popstate', syncFromURL);
-    // primeira sincronização
+    // Primeira renderização
     syncFromURL();
   })();
   </script>
