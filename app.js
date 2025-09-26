@@ -158,6 +158,46 @@ function phoneDigitsBR(phone) {
   return d
 }
 
+// ===== Helpers extras (antifraude / validação) =====
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(email || "").trim())
+}
+function sanitizeSoftDescriptor(s) {
+  const up = String(s || "LUNAAI").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 13)
+  return up || "LUNAAI"
+}
+function namesEqualNormalized(a, b) {
+  return sanitizeCardholderName(a) === sanitizeCardholderName(b)
+}
+function isPublicIPv4(ip) {
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(ip || "")) return false
+  const [a, b] = ip.split('.').map(Number)
+  if (a === 10) return false                   // 10.0.0.0/8
+  if (a === 172 && b >= 16 && b <= 31) return false // 172.16.0.0/12
+  if (a === 192 && b === 168) return false     // 192.168.0.0/16
+  if (a === 127) return false                  // loopback
+  if (a === 0) return false                    // 0.0.0.0/8
+  if (a === 169 && b === 254) return false     // link-local
+  if (a === 100 && b >= 64 && b <= 127) return false // CGNAT 100.64.0.0/10
+  if (a >= 224) return false                   // multicast/reservado
+  return true
+}
+function hashUA() {
+  try {
+    const s = [
+      navigator.userAgent || "",
+      navigator.language || "",
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+      screen?.width || 0,
+      screen?.height || 0,
+      screen?.colorDepth || 0
+    ].join('|')
+    let h = 0
+    for (let i = 0; i < s.length; i++) { h = ((h << 5) - h) + s.charCodeAt(i); h |= 0 }
+    return Math.abs(h).toString(16)
+  } catch { return randId(8) }
+}
+
 // Bandeiras aceitas pela Getnet
 function detectBrand(cardNumber) {
   const n = digitsOnly(cardNumber)
@@ -392,7 +432,7 @@ async function submitCardPayment(event) {
 
   try {
     // Coleta dados do formulário
-    const name = document.getElementById("card-name").value.trim()
+    const nameRaw = document.getElementById("card-name").value.trim()
     const email = document.getElementById("card-email").value.trim()
     const documentNumberRaw = document.getElementById("card-document").value.trim()
     const phoneRaw = document.getElementById("card-phone").value.trim()
@@ -407,7 +447,8 @@ async function submitCardPayment(event) {
     const addrCountry = (document.getElementById("bill-country")?.value.trim() || "BR").toUpperCase() === "BRASIL" ? "BR" : (document.getElementById("bill-country")?.value.trim() || "BR").toUpperCase()
     const addrPostalRaw = document.getElementById("bill-postal")?.value.trim() || ""
 
-    const cardholderName = document.getElementById("cardholder-name").value.trim().toUpperCase()
+    const cardholderNameInput = document.getElementById("cardholder-name").value.trim()
+    const cardholderName = sanitizeCardholderName(cardholderNameInput)
     const cardNumberRaw = document.getElementById("card-number").value
     const expMonthRaw = document.getElementById("card-exp-month").value.trim()
     const expYearRaw = document.getElementById("card-exp-year").value.trim()
@@ -416,17 +457,20 @@ async function submitCardPayment(event) {
     const cardType = (document.getElementById("card-type")?.value || "credit").toLowerCase()
 
     // ===== Validações obrigatórias =====
-    if (!name || !email || !cardholderName || !cardNumberRaw || !expMonthRaw || !expYearRaw || !securityCodeRaw || !selectedBrand || !cardType) {
+    if (!nameRaw || !email || !cardholderName || !cardNumberRaw || !expMonthRaw || !expYearRaw || !securityCodeRaw || !selectedBrand || !cardType) {
       throw new Error("Preencha todos os campos obrigatórios.")
     }
+    if (!isValidEmail(email)) throw new Error("E-mail inválido.")
 
-    // CPF/CNPJ obrigatório (GetNet)
+    // CPF/CNPJ obrigatório (Getnet) + validação
     const documentNumber = digitsOnly(documentNumberRaw)
-    if (!documentNumber) throw new Error("Informe CPF/CNPJ.")
+    if (![11, 14].includes(documentNumber.length)) throw new Error("Informe um CPF (11) ou CNPJ (14) válido.")
+    if (documentNumber.length === 11 && !validCPF(documentNumber)) throw new Error("CPF inválido.")
+    if (documentNumber.length === 14 && !validCNPJ(documentNumber)) throw new Error("CNPJ inválido.")
 
-    // Telefone em dígitos (10–11). Obrigatório no débito.
+    // Telefone em dígitos (10–11). Recomendado para antifraude em crédito também.
     const phoneDigits = phoneDigitsBR(phoneRaw)
-    if (cardType === "debit" && (phoneDigits.length < 10 || phoneDigits.length > 11)) {
+    if (phoneDigits.length < 10 || phoneDigits.length > 11) {
       throw new Error("Telefone inválido. Informe DDD+telefone (10 a 11 dígitos).")
     }
 
@@ -443,13 +487,19 @@ async function submitCardPayment(event) {
     const securityCode = digitsOnly(securityCodeRaw)
 
     // Nome do titular: sanitiza e valida (máx. 26)
-    const chName = sanitizeCardholderName(cardholderName)
-    if (!chName || chName.split(" ").length < 2) {
+    if (!cardholderName || cardholderName.split(" ").length < 2) {
       throw new Error("Nome do titular inválido. Digite como impresso no cartão (apenas letras e espaços).")
     }
-    if (chName.length > 26) {
+    if (cardholderName.length > 26) {
       throw new Error("Nome do titular muito longo (máx. 26 caracteres). Use como impresso no cartão.")
     }
+
+    // Para CPF, alinhar customer.name com o nome impresso no cartão (antifraude)
+    const isCPF = documentNumber.length === 11
+    if (isCPF && !namesEqualNormalized(nameRaw, cardholderName)) {
+      throw new Error("Para CPF, o nome do assinante deve ser igual ao nome impresso no cartão.")
+    }
+    // Para CNPJ, permitimos diferença de nome; porém manteremos o cadastro com o nome informado no formulário.
 
     // Ano de expiração em 2 dígitos (YY) para /v1/cards
     const expYear2 = String(expYear).slice(-2)
@@ -527,7 +577,7 @@ async function submitCardPayment(event) {
           body: JSON.stringify({
             number_token: numberToken,
             brand: brandLC,
-            cardholder_name: chName,
+            cardholder_name: cardholderName,
             expiration_month: expMonth,
             expiration_year: expYear2,
             security_code: securityCode
@@ -543,17 +593,19 @@ async function submitCardPayment(event) {
     }
 
     // 3) Cria/atualiza cliente (assinante)
-    const { first_name, last_name } = splitName(name)
+    // Para CPF: usar exatamente o mesmo nome do cartão; para CNPJ: usar o nome informado
+    const customerName = isCPF ? cardholderName : nameRaw
+    const { first_name, last_name } = splitName(customerName)
     const customerPayload = {
       seller_id: sellerId,
       customer_id: email,
       first_name,
       last_name,
-      name,
+      name: customerName,
       email,
       document_type: documentNumber.length > 11 ? "CNPJ" : "CPF",
       document_number: documentNumber,
-      phone_number: phoneDigits || "",
+      phone_number: phoneDigits,
       billing_address: {
         street: addrStreet,
         number: addrNumber,
@@ -561,7 +613,7 @@ async function submitCardPayment(event) {
         district: addrDistrict,
         city: addrCity,
         state: addrState,
-        country: addrCountry, // deve ser "BR"
+        country: addrCountry, // "BR"
         postal_code: postal,
       },
     }
@@ -607,7 +659,7 @@ async function submitCardPayment(event) {
       expiration_month: expMonth,
       expiration_year: expYear2,  // YY
       customer_id: customerId,
-      cardholder_name: chName,
+      cardholder_name: cardholderName,
       cardholder_identification: documentNumber
     }
     const cardResp = await fetch(`${baseURL}/v1/cards`, {
@@ -661,8 +713,7 @@ async function submitCardPayment(event) {
 
     // 6) Cria assinatura
     const orderId = `order_${Date.now()}`
-    const softDescriptorRaw = (window.__GETNET_SOFT_DESCRIPTOR__ || "").trim()
-    const softDescriptor = softDescriptorRaw ? softDescriptorRaw.slice(0, 13) : null // alguns emissores limitam 13
+    const softDescriptor = sanitizeSoftDescriptor((window.__GETNET_SOFT_DESCRIPTOR__ || "").trim())
 
     const credit = {
       transaction_type: "FULL",
@@ -679,14 +730,14 @@ async function submitCardPayment(event) {
       },
       card: {
         card_id: cardId,
-        cardholder_name: chName,
+        cardholder_name: cardholderName,
         security_code: securityCode,
         brand: brandLC,
         expiration_month: expMonth,
         expiration_year: expYear2
-      }
+      },
+      soft_descriptor: softDescriptor
     }
-    if (softDescriptor) credit.soft_descriptor = softDescriptor
 
     const subscriptionPayload = {
       seller_id: sellerId,
@@ -694,19 +745,23 @@ async function submitCardPayment(event) {
       plan_id: planId,
       order_id: orderId,
       subscription: { payment_type: { credit } }
-      // device será adicionado abaixo apenas se houver IP público
+      // device será adicionado abaixo apenas se houver IP público real
     }
 
     // ➜ Enviar device **apenas** se houver IP público real
     try {
       const ip = await resolveClientIP()
-      if (ip) {
+      if (ip && isPublicIPv4(ip)) {
         subscriptionPayload.device = {
           ip_address: ip,
-          device_id: `web-${randId(10)}`
+          device_id: `web-${hashUA()}-${randId(6)}`
         }
+      } else {
+        console.warn("[getnet] IP não público detectado; campo device não será enviado.")
       }
-    } catch { /* se não conseguir IP, não envia device */ }
+    } catch {
+      console.warn("[getnet] Falha ao obter IP; campo device não será enviado.")
+    }
 
     const subscriptionResp = await fetch(`${baseURL}/v1/subscriptions`, {
       method: "POST",
@@ -723,6 +778,10 @@ async function submitCardPayment(event) {
 
     if (!subscriptionResp.ok) {
       const detail = extractGetnetErrorDetail(subscriptionJson) || subscriptionText || subscriptionResp.status
+      // Mensagem amigável para 481/DENY
+      if (/481|deny/i.test(String(detail))) {
+        throw new Error("Transação negada (481 – DENY). Confira se o nome do assinante é igual ao do cartão, CPF/CNPJ válido, endereço completo, telefone com DDD e tente novamente.")
+      }
       throw new Error(`Erro ao criar assinatura: ${detail}`)
     }
 
@@ -731,6 +790,9 @@ async function submitCardPayment(event) {
     const paymentError = subscriptionJson?.payment?.error
     if (overall === "failed" || paymentError) {
       const detail = extractGetnetErrorDetail(subscriptionJson) || "Transação negada."
+      if (/481|deny/i.test(String(detail))) {
+        throw new Error("Transação negada (481 – DENY). Confira se o nome do assinante é igual ao do cartão, CPF/CNPJ válido, endereço completo, telefone com DDD e tente novamente.")
+      }
       throw new Error(detail)
     }
 
@@ -1921,7 +1983,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Billing system
   $("#btn-conversas") && ($("#btn-conversas").onclick = showConversasView)
-  $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView)
+  $("#btn-pagamentos") && ($("#btn-pagamentos").onclick = showBillingView))
   $("#btn-pay-getnet") && ($("#btn-pay-getnet").onclick = showCardModal)
 
   // Navegação mobile (se existir no HTML)
