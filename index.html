@@ -6,7 +6,32 @@
   <title>Luna – Supervisor WhatsApp</title>
 
   <link rel="stylesheet" href="styles.css"/>
-  <style>.hidden{display:none!important}</style>
+  <style>
+    .hidden{display:none!important}
+    /* ---- Navegação móvel (apenas no mobile) ---- */
+    @media (max-width:1023px){
+      .nav-rail{ display:none; }
+      .mobile-nav{
+        position: sticky; top: 0; z-index: 30;
+        display:flex; gap:8px; padding:8px 12px;
+        background: var(--bg, #0b0f15);
+        border-bottom: 1px solid var(--border, #1f2633);
+      }
+      .mobile-nav .menu-item{
+        flex:1; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+        padding:10px 12px; border-radius:10px; cursor:pointer;
+        background: var(--bg2, #121826);
+        border: 1px solid var(--border, #222a3a);
+        color: var(--text, #e7eaf1);
+      }
+      .mobile-nav .menu-item.active{
+        border-color: var(--accent,#6C5CE7);
+        box-shadow: inset 0 0 0 1px var(--accent,#6C5CE7);
+      }
+      .mobile-nav .menu-item svg{ pointer-events:none }
+    }
+    @media (min-width:1024px){ .mobile-nav{ display:none } }
+  </style>
 
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -133,8 +158,24 @@
       </div>
     </header>
 
+    <!-- MENU MOBILE (tabs) -->
+    <div class="mobile-nav">
+      <button id="btn-mobile-conversas" class="menu-item active" data-view="conversas" aria-label="Conversas">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <span class="label">Conversas</span>
+      </button>
+      <button id="btn-mobile-pagamentos" class="menu-item" data-view="pagamentos" aria-label="Pagamentos">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/>
+        </svg>
+        <span class="label">Pagamentos</span>
+      </button>
+    </div>
+
     <div class="shell">
-      <!-- MENU LATERAL -->
+      <!-- MENU LATERAL (desktop) -->
       <nav class="nav-rail" aria-label="Menu principal">
         <button id="btn-rail-toggle" class="rail-toggle" aria-label="Recolher/Expandir menu">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -392,69 +433,89 @@
 
   <noscript><div style="padding:16px;background:#111;color:#fff">Ative o JavaScript para usar a Luna.</div></noscript>
 
-  <!-- JS de UI (rotas e layout) -->
+  <!-- JS de UI: apenas ponte para o app.js (sem roteador próprio) -->
   <script>
   (function () {
     const body = document.body;
     const railToggle = document.getElementById('btn-rail-toggle');
+
+    // Desktop
     const btnConversas = document.getElementById('btn-conversas');
     const btnPagamentos = document.getElementById('btn-pagamentos');
+
+    // Mobile
+    const btnMobileConversas = document.getElementById('btn-mobile-conversas');
+    const btnMobilePagamentos = document.getElementById('btn-mobile-pagamentos');
+
+    // Modal / ações
+    const btnGoToPayments = document.getElementById('btn-go-to-payments');
     const btnPayGetnet = document.getElementById('btn-pay-getnet');
-    const billingView = document.getElementById('billing-view');
 
-    function setMode(mode) {
-      body.classList.toggle('mode-chat', mode === 'chat');
-      body.classList.toggle('mode-billing', mode === 'billing');
-      btnConversas.classList.toggle('active', mode === 'chat');
-      btnPagamentos.classList.toggle('active', mode === 'billing');
-      if (mode === 'billing') billingView?.focus();
+    function goConversas(e){
+      if (e) e.preventDefault();
+      try { if (typeof window.showConversasView === 'function') window.showConversasView(); } catch {}
+      // marca ativo nas abas móveis
+      btnMobileConversas?.classList.add('active');
+      btnMobilePagamentos?.classList.remove('active');
+    }
+    function goBilling(e){
+      if (e) e.preventDefault();
+      try { if (typeof window.showBillingView === 'function') window.showBillingView(); } catch {}
+      btnMobileConversas?.classList.remove('active');
+      btnMobilePagamentos?.classList.add('active');
     }
 
-    function handleRoute(pathname) {
-      const path = pathname || location.pathname;
-      if (path === '/' || path === '') {
-        setMode('chat');
-      } else if (path === '/pagamentos' || path === '/pagamentos/getnet') {
-        setMode('billing');
-      } else {
-        setMode('chat');
-      }
-    }
+    // Clicks desktop
+    btnConversas?.addEventListener('click', goConversas);
+    btnPagamentos?.addEventListener('click', goBilling);
 
-    function navTo(path, evt) {
-      if (evt) evt.preventDefault();
-      if (location.pathname !== path) history.pushState({}, '', path);
-      handleRoute(path);
-    }
+    // Clicks mobile
+    btnMobileConversas?.addEventListener('click', goConversas);
+    btnMobilePagamentos?.addEventListener('click', goBilling);
 
-    btnConversas?.addEventListener('click', (e) => navTo('/', e));
-    btnPagamentos?.addEventListener('click', (e) => navTo('/pagamentos', e));
+    // “Assinar agora”
     btnPayGetnet?.addEventListener('click', (e) => {
       e.preventDefault();
-      try { if (typeof window.showCardModal === 'function') window.showCardModal(); } catch {}
+      try { window.showCardModal?.(); } catch {}
     });
 
-    document.getElementById('btn-go-to-payments')?.addEventListener('click', () => {
+    // Botão do modal “Ir para Pagamentos”
+    btnGoToPayments?.addEventListener('click', (e) => {
+      e.preventDefault();
       document.getElementById('billing-modal')?.classList.add('hidden');
-      navTo('/pagamentos');
+      goBilling();
     });
+
+    // Sair do modal
     document.getElementById('btn-logout-modal')?.addEventListener('click', () => {
       document.getElementById('billing-modal')?.classList.add('hidden');
     });
 
+    // Toggle do rail (desktop)
     railToggle?.addEventListener('click', () => {
       body.classList.toggle('rail-collapsed');
-      railToggle.querySelector('svg').style.transform =
-        body.classList.contains('rail-collapsed') ? 'rotate(180deg)' : 'rotate(0deg)';
-      railToggle.querySelector('.label').textContent =
-        body.classList.contains('rail-collapsed') ? 'Expandir' : 'Recolher';
+      try {
+        const svg = railToggle.querySelector('svg');
+        const lbl = railToggle.querySelector('.label');
+        if (svg) svg.style.transform = body.classList.contains('rail-collapsed') ? 'rotate(180deg)' : 'rotate(0deg)';
+        if (lbl) lbl.textContent = body.classList.contains('rail-collapsed') ? 'Expandir' : 'Recolher';
+      } catch {}
     });
 
-    window.addEventListener('popstate', () => handleRoute());
-    handleRoute();
+    // Deep-link (#billing ou ?view=billing) -> delega ao app.js
+    function syncFromURL() {
+      const url = new URL(window.location.href);
+      const view = (url.searchParams.get('view') || url.hash.replace(/^#/, '') || '').toLowerCase();
+      if (view === 'billing' || view === 'pagamentos') goBilling();
+      else goConversas();
+    }
+    window.addEventListener('hashchange', syncFromURL);
+    window.addEventListener('popstate', syncFromURL);
+    // primeira sincronização
+    syncFromURL();
   })();
   </script>
 
-  <!-- Interceptor de pagamento antigo removido: integração com GetNet ocorre no app.js -->
+  <!-- Integração com GetNet é feita no app.js -->
 </body>
 </html>
