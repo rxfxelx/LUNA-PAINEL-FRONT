@@ -998,14 +998,14 @@ body.mode-billing #billing-view {
   padding: 16px 20px;
   border-top: 1px solid var(--border);
 }
-#btn-pay-getnet {
+#btn-pay-stripe {
   min-width: 220px;
   background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%);
   border-color: var(--primary);
   color: #fff;
   box-shadow: 0 2px 6px rgba(21, 128, 61, 0.25);
 }
-#btn-pay-getnet:hover {
+#btn-pay-stripe:hover {
   transform: translateY(-1px);
   background: linear-gradient(135deg, var(--primary-light) 0%, var(--accent) 100%);
 }
