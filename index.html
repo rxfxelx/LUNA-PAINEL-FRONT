@@ -507,12 +507,20 @@
     btnMobilePagamentos?.addEventListener('click', goBilling);
 
     // Quando o usuário clicar em "Assinar agora" dentro da tela de billing,
-    // redirecionamos diretamente para a página de pagamento Stripe.  A
-    // implementação anterior abria um modal para coletar dados do cartão
-    // para GetNet; com a migração para Stripe isso não é necessário.
-    btnPayGetnet?.addEventListener('click', (e) => {
+    // delegamos para a função global `createCheckoutLink` definida em app.js.
+    // Esta função cria uma sessão de Checkout no Stripe e redireciona o
+    // usuário para a página hospedada do Stripe.  O listener antigo
+    // redirecionava para uma página estática em /pagamentos/stripe, que foi
+    // removida.
+    btnPayGetnet?.addEventListener('click', async (e) => {
       e.preventDefault();
-      window.location.href = "/pagamentos/stripe";
+      try {
+        if (window.createCheckoutLink) {
+          await window.createCheckoutLink();
+        }
+      } catch (ex) {
+        console.error(ex);
+      }
     });
     btnGoToPayments?.addEventListener('click', (e)=>{ e.preventDefault(); document.getElementById('billing-modal')?.classList.add('hidden'); goBilling(); });
 
