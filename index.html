@@ -9,14 +9,18 @@
   <style>
     .hidden{display:none!important}
 
-    /* Garantia: quando estiver em Pagamentos, mostra o billing e esconde o chat,
-       mesmo que o CSS antigo tenha regras diferentes */
+    /* Garantia: quando estiver em Pagamentos, mostra o billing e esconde chat */
     .mode-billing #billing-view{ display:block !important; }
     .mode-billing .chatbar, .mode-billing #messages{ display:none !important; }
 
-    /* ---- Navegação móvel (apenas no mobile) ---- */
+    /* No mobile, Pagamentos ocupa a tela toda (sem sidebar) */
     @media (max-width:1023px){
       .nav-rail{ display:none; }
+      .mode-billing .sidebar{ display:none !important; }
+      .mode-billing .main{ width:100% !important; max-width:100% !important; flex:1 1 auto; }
+      .mode-billing .shell{ grid-template-columns: 1fr !important; }
+
+      /* Navegação mobile (tabs) */
       .mobile-nav{
         position: sticky; top: 0; z-index: 30;
         display:flex; gap:8px; padding:8px 12px;
@@ -443,7 +447,6 @@
   <script>
   (function () {
     const body = document.body;
-    const railToggle = document.getElementById('btn-rail-toggle');
 
     // Desktop
     const btnConversas = document.getElementById('btn-conversas');
@@ -460,6 +463,7 @@
     const elBilling = document.getElementById('billing-view');
     const elChatbar = document.querySelector('.chatbar');
     const elMessages = document.getElementById('messages');
+    const elSidebar  = document.querySelector('.sidebar');
 
     const show = (el)=>{ if(el) el.classList.remove('hidden'); };
     const hide = (el)=>{ if(el) el.classList.add('hidden'); };
@@ -480,7 +484,7 @@
     function goConversas(e){
       if (e) e.preventDefault();
       body.classList.add('mode-chat'); body.classList.remove('mode-billing');
-      hide(elBilling); show(elChatbar); show(elMessages);
+      hide(elBilling); show(elChatbar); show(elMessages); show(elSidebar);
       try { window.showConversasView?.(); } catch {}
       try { window.setViewInURL?.('conversas', true); } catch {}
       selectMenu('chat');
@@ -489,10 +493,11 @@
     function goBilling(e){
       if (e) e.preventDefault();
       body.classList.add('mode-billing'); body.classList.remove('mode-chat');
-      show(elBilling); hide(elChatbar); hide(elMessages);
+      show(elBilling); hide(elChatbar); hide(elMessages); hide(elSidebar); // <- mobile: sem sidebar
       try { window.showBillingView?.(); } catch {}
       try { window.setViewInURL?.('billing'); } catch {}
       selectMenu('billing');
+      elBilling?.focus();
     }
 
     // Bindings
@@ -503,20 +508,6 @@
 
     btnPayGetnet?.addEventListener('click', (e)=>{e.preventDefault(); try{window.showCardModal?.();}catch{}});
     btnGoToPayments?.addEventListener('click', (e)=>{ e.preventDefault(); document.getElementById('billing-modal')?.classList.add('hidden'); goBilling(); });
-    document.getElementById('btn-logout-modal')?.addEventListener('click', () => {
-      document.getElementById('billing-modal')?.classList.add('hidden');
-    });
-
-    // Toggle do rail (desktop)
-    railToggle?.addEventListener('click', () => {
-      body.classList.toggle('rail-collapsed');
-      try {
-        const svg = railToggle.querySelector('svg');
-        const lbl = railToggle.querySelector('.label');
-        if (svg) svg.style.transform = body.classList.contains('rail-collapsed') ? 'rotate(180deg)' : 'rotate(0deg)';
-        if (lbl) lbl.textContent = body.classList.contains('rail-collapsed') ? 'Expandir' : 'Recolher';
-      } catch {}
-    });
 
     // Deep-link (#billing ou ?view=billing)
     function syncFromURL() {
