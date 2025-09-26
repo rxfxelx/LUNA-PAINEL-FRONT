@@ -851,6 +851,9 @@ function markActiveMenus(view) {
 }
 
 function showConversasView() {
+  // **FIX MOBILE:** Conversas devem abrir a LISTA no mobile
+  setMobileMode("list")
+
   // Classes no body para CSS responsivo
   document.body.classList.add("mode-chat")
   document.body.classList.remove("mode-billing")
@@ -867,6 +870,9 @@ function showConversasView() {
 }
 
 function showBillingView() {
+  // **FIX MOBILE:** Forçar o MAIN visível no mobile (onde fica #billing-view)
+  setMobileMode("chat")
+
   // Classes no body para CSS responsivo
   document.body.classList.add("mode-billing")
   document.body.classList.remove("mode-chat")
@@ -1668,7 +1674,7 @@ function renderInteractive(container, m) {
         opt.style.border = "1px solid var(--muted,#eee)"
         opt.style.borderRadius = "6px"
         opt.style.marginBottom = "6px"
-        opt.textContent = row.title || row.id || "(opção)"  // <- FIX: faltava opt.
+        opt.textContent = row.title || row.id || "(opção)"
         card.appendChild(opt)
       })
     })
