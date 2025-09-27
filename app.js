@@ -1,3 +1,4 @@
+// app.js
 /* =========================================
  * 1) CONFIG / HELPERS BÁSICOS
  * ======================================= */
@@ -5,6 +6,16 @@ const BACKEND = () => (window.__BACKEND_URL__ || "").replace(/\/+$/, "")
 const $ = (s) => document.querySelector(s)
 const show = (sel) => { const el = $(sel); if (el) el.classList.remove("hidden") }
 const hide = (sel) => { const el = $(sel); if (el) el.classList.add("hidden") }
+
+// Polyfill simples para CSS.escape (compat com navegadores antigos)
+;(() => {
+  try {
+    if (!window.CSS) window.CSS = {}
+    if (!CSS.escape) {
+      CSS.escape = (v) => String(v).replace(/[^\w-]/g, (c) => '\\' + c.charCodeAt(0).toString(16) + ' ')
+    }
+  } catch {}
+})()
 
 // Idle callback
 const rIC = (cb) => (window.requestIdleCallback ? window.requestIdleCallback(cb, { timeout: 200 }) : setTimeout(cb, 0))
