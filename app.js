@@ -140,33 +140,69 @@ function unwrapMessage(msg) {
 async function fetchInstanceNameCandidate() {
   try {
     const data = await api('/api/meta/instance/status', { method: 'GET' })
-    // The response shape from the upstream API is not strictly
-    // documented. Look for a few sensible fields in a tolerant way.
+    /*
+     * The instance status endpoint may expose the instance details under a
+     * variety of property names. According to the Uazapi GO documentation
+     * (see docs.uazapi.com), a typical response looks like:
+     *
+     * {
+     *   "instance": {
+     *     "id": "...",
+     *     "name": "Instância Principal",
+     *     "profileName": "Loja ABC",
+     *     "owner": "user@example.com",
+     *     ...
+     *   },
+     *   "status": { ... }
+     * }
+     *
+     * To be tolerant of different implementations and older versions, we
+     * search for a set of likely fields in multiple locations.  We check
+     * both the top‑level response and nested objects like `instance`,
+     * `clientStatus` or `client`, as well as nested `user` objects.  The
+     * order of fields defines the preference when multiple names are
+     * available: a more descriptive name (e.g. profileName) will be chosen
+     * before a generic name (e.g. name), and only non‑empty strings are
+     * considered.
+     */
     const candidates = []
     if (data) {
-      // Some implementations wrap details under a top‑level `client` or `clientStatus` key
-      const root = data.clientStatus || data.client || data || {}
-      // Common fields storing a display name
+      // Construct a list of potential roots in order of preference.  Newer
+      // APIs expose details under `instance`, but older versions might use
+      // `clientStatus` or `client` or even return the details at the
+      // top level.
+      const potentialRoots = []
+      if (data.instance && typeof data.instance === 'object') potentialRoots.push(data.instance)
+      if (data.clientStatus && typeof data.clientStatus === 'object') potentialRoots.push(data.clientStatus)
+      if (data.client && typeof data.client === 'object') potentialRoots.push(data.client)
+      // Finally consider the top level itself
+      potentialRoots.push(data)
+      // Fields to probe on each root.  `profileName` and its variants
+      // represent the push/display name configured in WhatsApp; `name`
+      // usually refers to the instance nickname.  Additional aliases are
+      // included for backwards compatibility.
       const fields = [
-        'instanceName', 'pushname', 'pushName', 'push_name',
-        'widName', 'name', 'user', 'userName', 'phoneName',
-        'displayName'
+        'profileName', 'profile_name', 'instanceName', 'pushname', 'pushName', 'push_name',
+        'widName', 'name', 'userName', 'phoneName', 'displayName', 'owner'
       ]
-      for (const f of fields) {
-        const val = root[f]
-        if (typeof val === 'string' && val.trim()) {
-          candidates.push(val.trim())
-        }
-      }
-      // Some APIs may return nested objects like { clientStatus: { name: '...' } }
-      if (root.user && typeof root.user === 'object') {
-        const u = root.user
+      for (const root of potentialRoots) {
         for (const f of fields) {
-          const val = u[f]
-          if (typeof val === 'string' && val.trim()) candidates.push(val.trim())
+          const val = root && root[f]
+          if (typeof val === 'string' && val.trim()) {
+            candidates.push(val.trim())
+          }
+        }
+        // Look into nested `user` objects if present
+        if (root && typeof root.user === 'object') {
+          const u = root.user
+          for (const f of fields) {
+            const val = u[f]
+            if (typeof val === 'string' && val.trim()) candidates.push(val.trim())
+          }
         }
       }
     }
+    // Return the first candidate found, if any
     if (candidates.length > 0) return candidates[0]
   } catch (e) {
     console.error('Failed to fetch instance name:', e)
@@ -1723,9 +1759,32 @@ function appendChatSkeleton(list, ch) {
   top.appendChild(nm); top.appendChild(tm)
   const bottom = document.createElement("div"); bottom.className = "row2"
   const preview = document.createElement("div"); preview.className = "preview"
-  const pv = (ch.wa_lastMessageText || "").replace(/\s+/g, " ").trim()
-  preview.textContent = pv ? truncatePreview(pv, 90) : "Carregando..."; preview.title = pv || "Carregando..."
-  setTimeout(() => { if (preview && preview.textContent === 'Carregando...') { preview.textContent = 'Sem mensagens'; preview.title = 'Sem mensagens' } }, 5000)
+  // Determine the preview text.  Prefer a cached last message if we
+  // already fetched it earlier (e.g. when loading the general tab).
+  const cachedPv = state.lastMsg.get(el.dataset.chatid)
+  const cachedFromMe = state.lastMsgFromMe.get(el.dataset.chatid)
+  const pvRaw = (ch.wa_lastMessageText || "").replace(/\s+/g, " ").trim()
+  if (typeof cachedPv === 'string' && cachedPv.trim()) {
+    // Use cached preview with optional "Você: " prefix
+    const truncated = truncatePreview(cachedPv, 90)
+    preview.textContent = cachedFromMe ? `Você: ${truncated}` : truncated
+    preview.title = cachedFromMe ? `Você: ${cachedPv}` : cachedPv
+  } else if (pvRaw) {
+    // Fallback to the last message text from the chat object
+    preview.textContent = truncatePreview(pvRaw, 90)
+    preview.title = pvRaw
+  } else {
+    // No preview yet; show a loading indicator that will change to
+    // "Sem mensagens" after a delay if still unresolved.
+    preview.textContent = 'Carregando...'
+    preview.title = 'Carregando...'
+    setTimeout(() => {
+      if (preview && preview.textContent === 'Carregando...') {
+        preview.textContent = 'Sem mensagens'
+        preview.title = 'Sem mensagens'
+      }
+    }, 5000)
+  }
   const unread = document.createElement("span"); unread.className = "badge"
   const count = state.unread.get(el.dataset.chatid) || ch.wa_unreadCount || 0
   if (count > 0) unread.textContent = count; else unread.style.display = "none"
@@ -1767,7 +1826,15 @@ async function prefetchCards(items) {
       if (!state.nameCache.has(chatid)) {
         try { const resp = await fetchNameImage(chatid); state.nameCache.set(chatid, resp); hydrateChatCard(ch) } catch {}
       }
-      if (!state.lastMsg.has(chatid) && !ch.wa_lastMessageText) {
+      // Always fetch the last message preview if we haven't cached it yet.  The
+      // previous implementation skipped the fetch when the conversation
+      // contained a `wa_lastMessageText` property.  However, this caused
+      // classification tabs to display stale or missing previews because
+      // these tabs filter the chat list by stage and may include chats
+      // whose last messages are not yet in the cache.  By removing the
+      // `ch.wa_lastMessageText` check we ensure every chat has its preview
+      // populated once.
+      if (!state.lastMsg.has(chatid)) {
         try {
           const pvKey = `pv:${chatid}`; const pvHit = LStore.get(pvKey)
           if (pvHit) {
