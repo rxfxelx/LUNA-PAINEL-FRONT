@@ -929,9 +929,7 @@ function markActiveMenus(view) {
 }
 
 async function showConversasView() {
-  // Antes de exibir as conversas, checamos o status de billing. Se o usuário
-  // estiver com trial expirado ou assinatura inativa, exibimos a tela de
-  // pagamentos e não permitimos acesso às conversas.
+  // Antes de exibir as conversas, checamos o status de billing.
   try {
     const ok = await checkBillingStatus({ allowModal: false })
     if (!ok) {
@@ -1493,7 +1491,11 @@ async function loadChats() {
     }
     await flushStageLookup()
     if (state.activeTab !== "geral") await loadStageTab(state.activeTab)
-    try { await api("/api/crm/sync", { method: "POST", body: JSON.stringify({ limit: 1000 }) }); refreshCRMCounters() } catch {}
+
+    // >>> CORREÇÃO: sem /api/crm/sync; apenas atualiza contadores
+    try { await refreshCRMCounters() } catch {}
+    // <<<
+
   } catch (e) {
     console.error(e)
     const list2 = $("#chat-list")
