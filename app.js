@@ -692,8 +692,8 @@ async function submitCardPayment(event) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        seller_id: sellerId,
+        "Authorization": `Bearer ${accessToken}`,
+        "seller_id": sellerId,
       },
       body: JSON.stringify(cardPayload),
     })
@@ -723,8 +723,8 @@ async function submitCardPayment(event) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
-          seller_id: sellerId,
+          "Authorization": `Bearer ${accessToken}`,
+          "seller_id": sellerId,
         },
         body: JSON.stringify(planPayload),
       })
@@ -790,8 +790,8 @@ async function submitCardPayment(event) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        seller_id: sellerId,
+        "Authorization": `Bearer ${accessToken}`,
+        "seller_id": sellerId,
       },
       body: JSON.stringify(subscriptionPayload),
     })
@@ -1121,17 +1121,72 @@ async function flushStageLookup() {
  * ======================================= */
 const CRM_STAGES = ["novo", "sem_resposta", "interessado", "em_negociacao", "fechou", "descartado"]
 
-// >>> ÚNICA MUDANÇA: POST com fallback para GET
+// >>> CORRIGIDO: tenta várias rotas/métodos + fallback local se nada responder
 async function apiCRMViews() {
-  try {
-    return await api("/api/crm/views", { method: "POST", body: "{}" })
-  } catch (e1) {
-    try {
-      return await api("/api/crm/views")
-    } catch (e2) {
-      console.warn("[crm] falha em /api/crm/views (POST e GET):", e1?.message || e1, e2?.message || e2)
-      return { counts: {} }
+  // Normaliza possíveis formatos de resposta em { counts: {...} }
+  const toCounts = (data) => {
+    if (!data || typeof data !== "object") return null
+    if (data.counts && typeof data.counts === "object") return data.counts
+    if (data.data && data.data.counts && typeof data.data.counts === "object") return data.data.counts
+
+    const fromArray = (arr) => {
+      if (!Array.isArray(arr)) return null
+      const out = {}
+      for (const it of arr) {
+        const key = String(it?.stage ?? it?.status ?? it?.name ?? it?.key ?? "")
+          .toLowerCase()
+          .replace(/\s+/g, "_")
+          .trim()
+        const val = Number(it?.count ?? it?.total ?? it?.value ?? it?.qty ?? 0)
+        if (key) out[key] = (out[key] || 0) + (isFinite(val) ? val : 0)
+      }
+      return Object.keys(out).length ? out : null
     }
+
+    return (
+      toCounts(data.result) ||
+      toCounts(data.summary) ||
+      fromArray(data.items) ||
+      fromArray(data.data) ||
+      null
+    )
+  }
+
+  // Tenta endpoints comuns (com e sem /api, com/sem barra final) e GET/POST
+  const endpoints = [
+    ["/api/crm/views", "POST"], ["/api/crm/views", "GET"],
+    ["/api/crm/views/", "POST"], ["/api/crm/views/", "GET"],
+    ["/api/crm/counters", "GET"], ["/api/crm/counters", "POST"],
+    ["/api/crm/overview", "GET"], ["/api/crm/overview/", "GET"],
+    ["/api/crm/summary", "GET"], ["/api/crm/summary/", "GET"],
+    ["/api/crm", "GET"], ["/api/crm/", "GET"],
+    ["/crm/views", "GET"], ["/crm/views/", "GET"],
+    ["/crm/counters", "GET"], ["/crm/counters/", "GET"],
+  ]
+
+  for (const [path, method] of endpoints) {
+    try {
+      const opts = method === "POST" ? { method, body: "{}" } : { method }
+      const data = await api(path, { ...opts, headers: { Accept: "application/json" } })
+      const counts = toCounts(data)
+      if (counts) return { counts }
+    } catch {}
+  }
+
+  // Fallback local: estima contadores a partir dos estágios já carregados no front
+  try {
+    const counts = { novo: 0, sem_resposta: 0, interessado: 0, em_negociacao: 0, fechou: 0, descartado: 0 }
+    for (const [, rec] of (state?.stages || new Map()).entries()) {
+      const st = (rec?.stage || "").toLowerCase()
+      if (st === "contatos") counts.novo++
+      else if (st === "lead") counts.interessado++
+      else if (st === "lead_quente") counts.em_negociacao++
+    }
+    console.warn("[crm] counters via fallback local (nenhum endpoint compatível encontrado).")
+    return { counts }
+  } catch (e) {
+    console.warn("[crm] falha ao obter counters (sem endpoint compatível):", e?.message || e)
+    return { counts: {} }
   }
 }
 // <<<
