@@ -158,6 +158,37 @@ function findNested(obj, keys, depth = 4) {
 }
 
 /*
+ * Recursively search a nested object for the first string value whose key
+ * matches any of the provided keys. This helper is used to locate a
+ * descriptive display name for the instance across arbitrarily nested
+ * structures returned by the Uazapi `/instance/status` endpoint.  It
+ * searches breadth‑first up to a configurable depth and returns the
+ * first non‑empty string it encounters.  If nothing is found it
+ * returns null.
+ *
+ * @param {object} obj The object to search
+ * @param {string[]} keys List of keys to look for
+ * @param {number} depth Maximum depth to search
+ * @returns {string|null} The found value or null
+ */
+function findFirstValue(obj, keys, depth = 4) {
+  if (!obj || typeof obj !== 'object' || depth < 0) return null
+  for (const k of keys) {
+    const val = obj[k]
+    if (typeof val === 'string' && val.trim()) return val
+  }
+  for (const key in obj) {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue
+    const val = obj[key]
+    if (val && typeof val === 'object') {
+      const found = findFirstValue(val, keys, depth - 1)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/*
  * Attempt to obtain a human‑friendly name for the currently connected
  * instance. When a user connects an instance via token, the backend
  * proxy (/api/meta/instance/status) will forward the UAZAPI status
@@ -171,69 +202,30 @@ async function fetchInstanceNameCandidate() {
   try {
     const data = await api('/api/meta/instance/status', { method: 'GET' })
     /*
-     * The instance status endpoint may expose the instance details under a
-     * variety of property names. According to the Uazapi GO documentation
-     * (see docs.uazapi.com), a typical response looks like:
-     *
-     * {
-     *   "instance": {
-     *     "id": "...",
-     *     "name": "Instância Principal",
-     *     "profileName": "Loja ABC",
-     *     "owner": "user@example.com",
-     *     ...
-     *   },
-     *   "status": { ... }
-     * }
-     *
-     * To be tolerant of different implementations and older versions, we
-     * search for a set of likely fields in multiple locations.  We check
-     * both the top‑level response and nested objects like `instance`,
-     * `clientStatus` or `client`, as well as nested `user` objects.  The
-     * order of fields defines the preference when multiple names are
-     * available: a more descriptive name (e.g. profileName) will be chosen
-     * before a generic name (e.g. name), and only non‑empty strings are
-     * considered.
+     * Search for descriptive instance name fields across the entire
+     * response.  The Uazapi documentation suggests that fields such as
+     * `profileName` or `name` may appear on objects like `instance`,
+     * `clientStatus` or `client`.  However, implementations vary and
+     * sometimes nest these values deeper.  To remain robust, we
+     * traverse the returned JSON looking for the first occurrence of
+     * any of a list of candidate keys.  We then filter out values
+     * containing an '@' symbol (likely an email) before returning.
      */
-    const candidates = []
-    if (data) {
-      // Construct a list of potential roots in order of preference.  Newer
-      // APIs expose details under `instance`, but older versions might use
-      // `clientStatus` or `client` or even return the details at the
-      // top level.
-      const potentialRoots = []
-      if (data.instance && typeof data.instance === 'object') potentialRoots.push(data.instance)
-      if (data.clientStatus && typeof data.clientStatus === 'object') potentialRoots.push(data.clientStatus)
-      if (data.client && typeof data.client === 'object') potentialRoots.push(data.client)
-      // Finally consider the top level itself
-      potentialRoots.push(data)
-      // Fields to probe on each root.  `profileName` and its variants
-      // represent the push/display name configured in WhatsApp; `name`
-      // usually refers to the instance nickname.  Additional aliases are
-      // included for backwards compatibility.
+    if (data && typeof data === 'object') {
       const fields = [
         'profileName', 'profile_name', 'instanceName', 'pushname', 'pushName', 'push_name',
-        'widName', 'name', 'userName', 'phoneName', 'displayName', 'owner'
+        'widName', 'name', 'userName', 'phoneName', 'displayName', 'owner',
+        'ownerName', 'instanceDisplayName', 'title', 'nickName'
       ]
-      for (const root of potentialRoots) {
-        for (const f of fields) {
-          const val = root && root[f]
-          if (typeof val === 'string' && val.trim()) {
-            candidates.push(val.trim())
-          }
-        }
-        // Look into nested `user` objects if present
-        if (root && typeof root.user === 'object') {
-          const u = root.user
-          for (const f of fields) {
-            const val = u[f]
-            if (typeof val === 'string' && val.trim()) candidates.push(val.trim())
-          }
+      let candidate = findFirstValue(data, fields, 6)
+      if (candidate && typeof candidate === 'string') {
+        candidate = candidate.trim()
+        // Skip values that look like an email address
+        if (candidate && !/@/.test(candidate)) {
+          return candidate
         }
       }
     }
-    // Return the first candidate found, if any
-    if (candidates.length > 0) return candidates[0]
   } catch (e) {
     console.error('Failed to fetch instance name:', e)
   }
@@ -2078,6 +2070,66 @@ function pickMediaInfo(m) {
     caption: String(caption || ''),
   }
 }
+
+/*
+ * Extract a preview string from a quoted message.  Quoted messages can
+ * contain a variety of structures—simple text, captions on media,
+ * interactive message titles, etc.  This helper attempts to locate
+ * meaningful text within the nested quoted message by checking a
+ * number of common fields.  If none of the probe fields contain
+ * content, an empty string is returned and the UI falls back to
+ * showing a placeholder.  The search depth is limited to avoid
+ * traversing excessively deep objects.
+ *
+ * @param {object} q The quoted message object
+ * @returns {string} A short preview text or empty string
+ */
+function extractQuotedPreview(q) {
+  try {
+    const base = unwrapMessage(q) || q
+    // Candidate keys in order of preference.  Many interactive
+    // structures embed the text under nested properties (e.g.
+    // hydratedContentText), so we attempt to locate them via findNested.
+    const candidateKeys = [
+      'extendedTextMessage.text',
+      'text',
+      'conversation',
+      'caption',
+      'title',
+      'description',
+      'body',
+      'contentText',
+      'hydratedContentText',
+      'matchedText'
+    ]
+    // Helper to access dotted paths
+    const getByPath = (obj, path) => {
+      const parts = path.split('.')
+      let cur = obj
+      for (const p of parts) {
+        if (!cur || typeof cur !== 'object') return null
+        cur = cur[p]
+      }
+      return cur
+    }
+    for (const path of candidateKeys) {
+      // Try direct dotted path
+      const direct = getByPath(base, path)
+      if (typeof direct === 'string' && direct.trim()) return direct
+      // Then attempt via findNested on the leaf key
+      const key = path.split('.').pop()
+      const val = findNested(base, [key], 3)
+      if (typeof val === 'string' && val.trim()) return val
+    }
+    // As a final fallback, check specific media caption fields
+    if (base?.imageMessage?.caption) return base.imageMessage.caption
+    if (base?.videoMessage?.caption) return base.videoMessage.caption
+    if (base?.documentMessage?.caption) return base.documentMessage.caption
+    return ''
+  } catch {
+    return ''
+  }
+}
 async function fetchMediaBlobViaProxy(rawUrl) {
   const q = encodeURIComponent(String(rawUrl || ""))
   const r = await fetch(BACKEND() + "/api/media/proxy?u=" + q, { method: "GET", headers: { ...authHeaders() } })
@@ -2085,25 +2137,20 @@ async function fetchMediaBlobViaProxy(rawUrl) {
   return await r.blob()
 }
 function renderReplyPreview(container, m) {
-  // Walk into nested containers to locate context information.  Use
-  // findNested to search for contextInfo anywhere within the message.
+  // Walk into nested containers to locate context information.
   const base = unwrapMessage(m)
-  let ctx = null
-  // Prefer direct contextInfo on the message if available
-  if (base?.contextInfo) ctx = base.contextInfo
-  if (!ctx) ctx = findNested(base, ['contextInfo'], 4) || {}
-  const qm = (ctx && (ctx.quotedMessage || ctx.quotedMsg || ctx.quoted_message)) || base?.quotedMsg || base?.quoted_message || null
+  // Find the contextInfo object either on the base message or nested within
+  let ctx = base?.contextInfo || findNested(base, ['contextInfo'], 4) || {}
+  // Locate the quoted message inside contextInfo
+  let qm = ctx?.quotedMessage || ctx?.quotedMsg || ctx?.quoted_message || null
+  if (!qm) {
+    qm = findNested(ctx, ['quotedMessage', 'quotedMsg', 'quoted_message'], 4)
+  }
+  // If still nothing found, bail
   if (!qm) return
-  // Unwrap quoted message as well
+  // Unwrap the quoted message (may be nested in containers)
   const q = unwrapMessage(qm)
-  const qt =
-    q?.extendedTextMessage?.text ||
-    q?.conversation ||
-    q?.imageMessage?.caption ||
-    q?.videoMessage?.caption ||
-    q?.documentMessage?.caption ||
-    q?.text ||
-    ''
+  // Prepare a container for the quoted content
   const box = document.createElement('div')
   box.className = 'bubble-quote'
   box.style.borderLeft = '3px solid var(--muted, #ccc)'
@@ -2111,19 +2158,45 @@ function renderReplyPreview(container, m) {
   box.style.marginBottom = '6px'
   box.style.opacity = '.8'
   box.style.fontSize = '12px'
-  box.textContent = qt || '(mensagem citada)'
+  // Render any interactive components from the quoted message inside the box
+  let hadInteractive = false
+  try {
+    hadInteractive = renderInteractive(box, q) || false
+  } catch {}
+  // Extract plain text preview from the quoted message
+  const preview = extractQuotedPreview(q)
+  if (preview) {
+    // If there were interactive elements, separate the preview below
+    if (hadInteractive) {
+      const sep = document.createElement('div')
+      sep.style.marginTop = '4px'
+      sep.style.fontSize = '12px'
+      sep.style.opacity = '.8'
+      sep.textContent = preview
+      box.appendChild(sep)
+    } else {
+      box.textContent = preview
+    }
+  } else if (!hadInteractive) {
+    // No content found — show placeholder
+    box.textContent = '(mensagem citada)'
+  }
   container.appendChild(box)
 }
 function renderInteractive(container, m) {
   // Unwrap nested structures to expose interactive message types
   const base = unwrapMessage(m)
-  const msg = base.message || base
-  // List and button messages may be nested inside templateMessage or other
-  // wrappers.  Use findNested to locate them if not directly present.
-  const listMsg = msg?.listMessage || findNested(msg, ['listMessage'], 3)
-  const btnsMsg = msg?.buttonsMessage || msg?.templateMessage?.hydratedTemplate || findNested(msg, ['buttonsMessage','hydratedTemplate'], 3)
-  const listResp = msg?.listResponseMessage || findNested(msg, ['listResponseMessage','listResponse'], 3)
-  const btnResp = msg?.buttonsResponseMessage || findNested(msg, ['buttonsResponseMessage','buttonsResponse'], 3)
+  // Root message container.  Some message types wrap the actual content
+  // inside `interactiveMessage`, so prefer that if present.
+  const msg = (base?.message || base) || {}
+  const root = msg?.interactiveMessage || msg
+  // List and button messages may be nested inside templateMessage,
+  // hydratedTemplate or other wrappers.  Use findNested to locate
+  // them if not directly present on the root.
+  const listMsg = root?.listMessage || findNested(root, ['listMessage'], 3)
+  const btnsMsg = root?.buttonsMessage || root?.templateMessage?.hydratedTemplate || findNested(root, ['buttonsMessage','hydratedTemplate'], 3)
+  const listResp = root?.listResponseMessage || findNested(root, ['listResponseMessage','listResponse'], 3)
+  const btnResp = root?.buttonsResponseMessage || findNested(root, ['buttonsResponseMessage','buttonsResponse'], 3)
 
   if (listMsg) {
     const card = document.createElement('div'); card.className = 'bubble-actions'
@@ -2189,6 +2262,109 @@ function appendMessageBubble(pane, m) {
   const { mime, url, dataUrl, caption } = pickMediaInfo(m)
   const plainText = m.text || m.message?.text || m?.message?.extendedTextMessage?.text || m?.message?.conversation || m?.caption || m?.body || ""
   const who = m.senderName || m.pushName || ""; const ts = m.messageTimestamp || m.timestamp || m.t || ""
+
+  // If we detected a possible media message but there is no URL or dataUrl yet,
+  // attempt to resolve the media via backend.  This covers scenarios where
+  // Uazapi provides only a media key and the actual download URL must be
+  // retrieved via the /media/resolve endpoint.  Once resolved, we
+  // re-invoke rendering logic with the obtained URL.
+  const hasMediaIndicator = !!(
+    mime && /^(image|video|audio|application)\//i.test(mime) ||
+    findNested(m, ['imageMessage','videoMessage','documentMessage','audioMessage','stickerMessage'], 3)
+  )
+  if (!url && !dataUrl && hasMediaIndicator) {
+    // Show a placeholder while resolving
+    const placeholder = document.createElement('div'); placeholder.className = 'msg-placeholder'; placeholder.textContent = '(carregando mídia…)';
+    pane.appendChild(placeholder); pane.scrollTop = pane.scrollHeight
+    // Attempt to resolve via API
+    api('/api/media/resolve', { method: 'POST', body: JSON.stringify(m) }).then((res) => {
+      try {
+        const resolvedUrl = res && (res.url || res.downloadUrl || res.dataUrl)
+        const resolvedMime = res && (res.mime || res.mimetype || mime)
+        const resolvedData = res && res.dataUrl
+        // Remove placeholder
+        if (placeholder.parentNode) placeholder.parentNode.removeChild(placeholder)
+        // If we got a URL or data, update local variables and fall back to standard rendering
+        if (resolvedUrl || resolvedData) {
+          const mm = { mime: resolvedMime || '', url: resolvedUrl || '', dataUrl: resolvedData || '', caption: caption }
+          // Compose a minimal message wrapper to reuse existing rendering
+          // Use closures to capture current variables
+          // Determine type and render accordingly (image/video/audio/document)
+          const { mime: _mime, url: _url, dataUrl: _dataUrl, caption: _cap } = mm
+          // Sticker
+          if (_mime && /^image\/webp$/i.test(_mime) && (_url || _dataUrl)) {
+            const img = document.createElement('img'); img.alt = 'figurinha'; img.style.maxWidth = '160px'; img.style.borderRadius = '8px'
+            if (top.childNodes.length) el.appendChild(top); el.appendChild(img)
+            const meta = document.createElement('small'); meta.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`; meta.style.display = 'block'; meta.style.marginTop = '6px'; meta.style.opacity = '.75'; el.appendChild(meta)
+            pane.appendChild(el); const after = () => { pane.scrollTop = pane.scrollHeight }
+            if (_dataUrl) { img.onload = after; img.src = _dataUrl }
+            else { fetchMediaBlobViaProxy(_url).then((b) => { img.onload = after; img.src = URL.createObjectURL(b) }).catch(() => { img.alt = '(Falha ao carregar figurinha)'; after() }) }
+            return
+          }
+          // Image
+          if ((_mime && _mime.startsWith('image/')) || (!_mime && _url && /\.(png|jpe?g|gif|webp)(\?|$)/i.test(_url))) {
+            const figure = document.createElement('figure'); figure.style.maxWidth = '280px'; figure.style.margin = '0'
+            const img2 = document.createElement('img'); img2.alt = 'imagem'; img2.style.maxWidth = '100%'; img2.style.borderRadius = '8px'; img2.style.display = 'block'
+            const cap2 = document.createElement('figcaption'); cap2.style.fontSize = '12px'; cap2.style.opacity = '.8'; cap2.style.marginTop = '6px'; cap2.textContent = _cap || plainText || ''
+            if (top.childNodes.length) el.appendChild(top); figure.appendChild(img2); if (cap2.textContent) figure.appendChild(cap2); el.appendChild(figure)
+            const meta2 = document.createElement('small'); meta2.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`; meta2.style.display = 'block'; meta2.style.marginTop = '6px'; meta2.style.opacity = '.75'; el.appendChild(meta2)
+            pane.appendChild(el); const after2 = () => { pane.scrollTop = pane.scrollHeight }
+            if (_dataUrl) { img2.onload = after2; img2.src = _dataUrl }
+            else { fetchMediaBlobViaProxy(_url).then((b) => { img2.onload = after2; img2.src = URL.createObjectURL(b) }).catch(() => { img2.alt = '(Falha ao carregar imagem)'; after2() }) }
+            return
+          }
+          // Video
+          if ((_mime && _mime.startsWith('video/')) || (!_mime && _url && /\.(mp4|webm|mov|m4v)(\?|$)/i.test(_url))) {
+            const video2 = document.createElement('video'); video2.controls = true; video2.style.maxWidth = '320px'; video2.style.borderRadius = '8px'; video2.preload = 'metadata'
+            if (top.childNodes.length) el.appendChild(top); el.appendChild(video2)
+            const cap2 = document.createElement('div'); cap2.style.fontSize = '12px'; cap2.style.opacity = '.8'; cap2.style.marginTop = '6px'; cap2.textContent = _cap || ''
+            if (cap2.textContent) el.appendChild(cap2)
+            const meta2 = document.createElement('small'); meta2.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`; meta2.style.display = 'block'; meta2.style.marginTop = '6px'; meta2.style.opacity = '.75'; el.appendChild(meta2)
+            pane.appendChild(el); const after2 = () => { pane.scrollTop = pane.scrollHeight }
+            if (_dataUrl) { video2.onloadeddata = after2; video2.src = _dataUrl }
+            else { fetchMediaBlobViaProxy(_url).then((b) => { video2.onloadeddata = after2; video2.src = URL.createObjectURL(b) }).catch(() => { const err = document.createElement('div'); err.style.fontSize = '12px'; err.style.opacity = '.8'; err.textContent = '(Falha ao carregar vídeo)'; el.insertBefore(err, meta2); after2() }) }
+            return
+          }
+          // Audio
+          if ((_mime && _mime.startsWith('audio/')) || (!_mime && _url && /\.(mp3|ogg|m4a|wav)(\?|$)/i.test(_url))) {
+            const audio2 = document.createElement('audio'); audio2.controls = true; audio2.preload = 'metadata'
+            if (top.childNodes.length) el.appendChild(top); el.appendChild(audio2)
+            const meta2 = document.createElement('small'); meta2.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`; meta2.style.display = 'block'; meta2.style.marginTop = '6px'; meta2.style.opacity = '.75'; el.appendChild(meta2)
+            pane.appendChild(el); const after2 = () => { pane.scrollTop = pane.scrollHeight }
+            if (_dataUrl) { audio2.onloadeddata = after2; audio2.src = _dataUrl }
+            else { fetchMediaBlobViaProxy(_url).then((b) => { audio2.onloadeddata = after2; audio2.src = URL.createObjectURL(b) }).catch(() => { const err = document.createElement('div'); err.style.fontSize = '12px'; err.style.opacity = '.8'; err.textContent = '(Falha ao carregar áudio)'; el.insertBefore(err, meta2); after2() }) }
+            return
+          }
+          // Document
+          if ((_mime && /^application\//.test(_mime)) || (!_mime && _url && /\.(pdf|docx?|xlsx?|pptx?)$/i.test(_url))) {
+            if (top.childNodes.length) el.appendChild(top)
+            const link = document.createElement('a'); link.textContent = _cap || plainText || 'Documento'; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.href = 'javascript:void(0)'
+            link.onclick = async () => {
+              try { const b2 = await fetchMediaBlobViaProxy(_url); const blobUrl = URL.createObjectURL(b2); window.open(blobUrl, '_blank') }
+              catch { alert('Falha ao baixar documento') }
+            }
+            el.appendChild(link)
+            const meta2 = document.createElement('small'); meta2.textContent = `${escapeHtml(who)} • ${formatTime(ts)}`; meta2.style.display = 'block'; meta2.style.marginTop = '6px'; meta2.style.opacity = '.75'; el.appendChild(meta2)
+            pane.appendChild(el); pane.scrollTop = pane.scrollHeight; return
+          }
+          // If still no media type match, fall back to text below
+        }
+        // If resolution failed, remove placeholder and fall back to default text
+        if (!resolvedUrl && !resolvedData) {
+          if (placeholder.parentNode) placeholder.parentNode.removeChild(placeholder)
+          // Continue to fallback textual rendering after this block
+        }
+      } catch (err) {
+        if (placeholder.parentNode) placeholder.parentNode.removeChild(placeholder)
+        console.error('media resolve failed', err)
+      }
+    }).catch(() => {
+      if (placeholder.parentNode) placeholder.parentNode.removeChild(placeholder)
+    })
+    // We return here because the rest of the rendering will occur in the
+    // resolution callback or fallback after removal of placeholder
+    return
+  }
 
   // Sticker
   if (mime && /^image\/webp$/i.test(mime) && (url || dataUrl)) {
