@@ -88,6 +88,108 @@ function authHeaders() {
   return headers
 }
 
+/*
+ * Unwraps nested WhatsApp message containers. Some message
+ * types (for example, viewOnceMessage or ephemerals) wrap the actual
+ * payload in an additional object. This helper will drill down
+ * through these wrappers so that downstream renderers can detect
+ * media, interactive components and quoted previews correctly.
+ * It will return the innermost message object it can find.
+ */
+function unwrapMessage(msg) {
+  try {
+    let m = msg
+    // Some APIs nest the message content under a `.message` property
+    // repeatedly. Walk down as long as there is only one nested message.
+    while (m && m.message && typeof m.message === 'object' && !Array.isArray(m.message)) {
+      // Handle wrappers introduced by WhatsApp/baileys: viewOnceMessage and
+      // ephemerals contain a `.message` field with the actual content.
+      if (m.message.viewOnceMessage && m.message.viewOnceMessage.message) {
+        m = m.message.viewOnceMessage.message
+        continue
+      }
+      if (m.message.ephemeralMessage && m.message.ephemeralMessage.message) {
+        m = m.message.ephemeralMessage.message
+        continue
+      }
+      // Fallback: if the sole property under `.message` is itself a message
+      // container (e.g. { message: { imageMessage: {...} } }), unwrap it
+      const keys = Object.keys(m.message)
+      if (keys.length === 1 && keys[0].endsWith('Message')) {
+        m = m.message
+        continue
+      }
+      break
+    }
+    return m
+  } catch {
+    return msg
+  }
+}
+
+/*
+ * Attempt to obtain a human‑friendly name for the currently connected
+ * instance. When a user connects an instance via token, the backend
+ * proxy (/api/meta/instance/status) will forward the UAZAPI status
+ * response. As the format of this response can vary between
+ * deployments, this helper searches through a number of commonly
+ * used fields to locate a displayable instance name. If none are
+ * found, it falls back to the logged in account email address or
+ * returns null. The actual DOM update happens in `updateProfileName`.
+ */
+async function fetchInstanceNameCandidate() {
+  try {
+    const data = await api('/api/meta/instance/status', { method: 'GET' })
+    // The response shape from the upstream API is not strictly
+    // documented. Look for a few sensible fields in a tolerant way.
+    const candidates = []
+    if (data) {
+      // Some implementations wrap details under a top‑level `client` or `clientStatus` key
+      const root = data.clientStatus || data.client || data || {}
+      // Common fields storing a display name
+      const fields = [
+        'instanceName', 'pushname', 'pushName', 'push_name',
+        'widName', 'name', 'user', 'userName', 'phoneName',
+        'displayName'
+      ]
+      for (const f of fields) {
+        const val = root[f]
+        if (typeof val === 'string' && val.trim()) {
+          candidates.push(val.trim())
+        }
+      }
+      // Some APIs may return nested objects like { clientStatus: { name: '...' } }
+      if (root.user && typeof root.user === 'object') {
+        const u = root.user
+        for (const f of fields) {
+          const val = u[f]
+          if (typeof val === 'string' && val.trim()) candidates.push(val.trim())
+        }
+      }
+    }
+    if (candidates.length > 0) return candidates[0]
+  } catch (e) {
+    console.error('Failed to fetch instance name:', e)
+  }
+  // Fall back to user email if available
+  const email = (typeof userEmail === 'function' ? userEmail() : '')
+  return email || null
+}
+
+/*
+ * Update the small profile label in the top bar. Called after
+ * successfully connecting an instance or when switching into the
+ * application. Does nothing if the DOM element is not found.
+ */
+async function updateProfileName() {
+  const el = document.getElementById('profile')
+  if (!el) return
+  const name = await fetchInstanceNameCandidate()
+  if (name && typeof name === 'string' && name.trim()) {
+    el.textContent = name.trim()
+  }
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(BACKEND() + path, {
     headers: { "Content-Type": "application/json", ...authHeaders(), ...(opts.headers || {}) },
@@ -1365,6 +1467,9 @@ async function switchToApp() {
     return
   }
 
+  // Atualiza o nome da instância assim que entrarmos no app
+  try { await updateProfileName() } catch (e) { console.error('updateProfileName failed', e) }
+
   // Agora sim, conversa
   showConversasView()
   await loadChats()
@@ -1808,12 +1913,54 @@ async function progressiveRenderMessages(msgs) {
  * 15) MÍDIA / INTERATIVOS / REPLIES
  * ======================================= */
 function pickMediaInfo(m) {
-  const mm = m.message || m
-  const mime = m.mimetype || m.mime || mm?.imageMessage?.mimetype || mm?.videoMessage?.mimetype || mm?.documentMessage?.mimetype || mm?.audioMessage?.mimetype || (mm?.stickerMessage ? "image/webp" : "") || ""
-  const url = m.mediaUrl || m.url || m.fileUrl || m.downloadUrl || m.image || m.video || mm?.imageMessage?.url || mm?.videoMessage?.url || mm?.documentMessage?.url || mm?.stickerMessage?.url || mm?.audioMessage?.url || ""
-  const dataUrl = m.dataUrl || mm?.imageMessage?.dataUrl || mm?.videoMessage?.dataUrl || mm?.documentMessage?.dataUrl || mm?.stickerMessage?.dataUrl || mm?.audioMessage?.dataUrl || ""
-  const caption = m.caption || mm?.imageMessage?.caption || mm?.videoMessage?.caption || mm?.documentMessage?.caption || mm?.documentMessage?.fileName || m.text || mm?.conversation || m.body || ""
-  return { mime: String(mime || ""), url: String(url || ""), dataUrl: String(dataUrl || ""), caption: String(caption || "") }
+  // Unwrap nested message structures to find the actual payload
+  const base = unwrapMessage(m)
+  const mm = base.message || base
+  // Determine mimetype. Sticker messages may not have a mimetype, so
+  // supply one manually for webp stickers.
+  const mime = base.mimetype || base.mime ||
+    mm?.imageMessage?.mimetype ||
+    mm?.videoMessage?.mimetype ||
+    mm?.documentMessage?.mimetype ||
+    mm?.audioMessage?.mimetype ||
+    (mm?.stickerMessage ? 'image/webp' : '') || ''
+  // Determine URL for media. Check a variety of possible fields to
+  // maximise compatibility with upstream message formats.
+  const url = base.mediaUrl || base.url || base.fileUrl || base.downloadUrl || base.image || base.video ||
+    mm?.imageMessage?.url ||
+    mm?.videoMessage?.url ||
+    mm?.documentMessage?.url ||
+    mm?.stickerMessage?.url ||
+    mm?.audioMessage?.url ||
+    mm?.imageMessage?.fileUrl ||
+    mm?.videoMessage?.fileUrl ||
+    mm?.documentMessage?.fileUrl ||
+    mm?.audioMessage?.fileUrl ||
+    ''
+  // Embedded base64 data URL
+  const dataUrl = base.dataUrl ||
+    mm?.imageMessage?.dataUrl ||
+    mm?.videoMessage?.dataUrl ||
+    mm?.documentMessage?.dataUrl ||
+    mm?.stickerMessage?.dataUrl ||
+    mm?.audioMessage?.dataUrl ||
+    ''
+  // Caption or file name
+  const caption = base.caption ||
+    mm?.imageMessage?.caption ||
+    mm?.videoMessage?.caption ||
+    mm?.documentMessage?.caption ||
+    mm?.documentMessage?.fileName ||
+    base.text ||
+    mm?.conversation ||
+    base.body ||
+    ''
+  return {
+    mime: String(mime || ''),
+    url: String(url || ''),
+    dataUrl: String(dataUrl || ''),
+    caption: String(caption || ''),
+  }
 }
 async function fetchMediaBlobViaProxy(rawUrl) {
   const q = encodeURIComponent(String(rawUrl || ""))
@@ -1822,67 +1969,86 @@ async function fetchMediaBlobViaProxy(rawUrl) {
   return await r.blob()
 }
 function renderReplyPreview(container, m) {
+  // Walk into nested containers to locate context information
+  const base = unwrapMessage(m)
   const ctx =
-    m?.message?.extendedTextMessage?.contextInfo ||
-    m?.message?.imageMessage?.contextInfo ||
-    m?.message?.videoMessage?.contextInfo ||
-    m?.message?.stickerMessage?.contextInfo ||
-    m?.message?.documentMessage?.contextInfo ||
-    m?.message?.audioMessage?.contextInfo ||
-    m?.contextInfo || {}
-  const qm = ctx.quotedMessage || m?.quotedMsg || m?.quoted_message || null
+    base?.message?.extendedTextMessage?.contextInfo ||
+    base?.message?.imageMessage?.contextInfo ||
+    base?.message?.videoMessage?.contextInfo ||
+    base?.message?.stickerMessage?.contextInfo ||
+    base?.message?.documentMessage?.contextInfo ||
+    base?.message?.audioMessage?.contextInfo ||
+    base?.contextInfo || {}
+  const qm = ctx.quotedMessage || base?.quotedMsg || base?.quoted_message || null
   if (!qm) return
-  const qt = qm?.extendedTextMessage?.text || qm?.conversation || qm?.imageMessage?.caption || qm?.videoMessage?.caption || qm?.documentMessage?.caption || qm?.text || ""
-  const box = document.createElement("div")
-  box.className = "bubble-quote"; box.style.borderLeft = "3px solid var(--muted, #ccc)"
-  box.style.padding = "6px 8px"; box.style.marginBottom = "6px"; box.style.opacity = ".8"; box.style.fontSize = "12px"
-  box.textContent = qt || "(mensagem citada)"; container.appendChild(box)
+  // Unwrap quoted message as well
+  const q = unwrapMessage(qm)
+  const qt =
+    q?.extendedTextMessage?.text ||
+    q?.conversation ||
+    q?.imageMessage?.caption ||
+    q?.videoMessage?.caption ||
+    q?.documentMessage?.caption ||
+    q?.text ||
+    ''
+  const box = document.createElement('div')
+  box.className = 'bubble-quote'
+  box.style.borderLeft = '3px solid var(--muted, #ccc)'
+  box.style.padding = '6px 8px'
+  box.style.marginBottom = '6px'
+  box.style.opacity = '.8'
+  box.style.fontSize = '12px'
+  box.textContent = qt || '(mensagem citada)'
+  container.appendChild(box)
 }
 function renderInteractive(container, m) {
-  const listMsg = m?.message?.listMessage
-  const btnsMsg = m?.message?.buttonsMessage || m?.message?.templateMessage?.hydratedTemplate
-  const listResp = m?.message?.listResponseMessage
-  const btnResp = m?.message?.buttonsResponseMessage
+  // Unwrap nested structures to expose interactive message types
+  const base = unwrapMessage(m)
+  const msg = base.message || base
+  const listMsg = msg?.listMessage
+  const btnsMsg = msg?.buttonsMessage || msg?.templateMessage?.hydratedTemplate
+  const listResp = msg?.listResponseMessage
+  const btnResp = msg?.buttonsResponseMessage
 
   if (listMsg) {
-    const card = document.createElement("div"); card.className = "bubble-actions"
-    card.style.border = "1px solid var(--muted,#ddd)"; card.style.borderRadius = "8px"; card.style.padding = "8px"; card.style.maxWidth = "320px"
-    if (listMsg.title) { const h = document.createElement("div"); h.style.fontWeight = "600"; h.style.marginBottom = "6px"; h.textContent = listMsg.title; card.appendChild(h) }
-    if (listMsg.description) { const d = document.createElement("div"); d.style.fontSize = "12px"; d.style.opacity = ".85"; d.style.marginBottom = "6px"; d.textContent = listMsg.description; card.appendChild(d) }
+    const card = document.createElement('div'); card.className = 'bubble-actions'
+    card.style.border = '1px solid var(--muted,#ddd)'; card.style.borderRadius = '8px'; card.style.padding = '8px'; card.style.maxWidth = '320px'
+    if (listMsg.title) { const h = document.createElement('div'); h.style.fontWeight = '600'; h.style.marginBottom = '6px'; h.textContent = listMsg.title; card.appendChild(h) }
+    if (listMsg.description) { const d = document.createElement('div'); d.style.fontSize = '12px'; d.style.opacity = '.85'; d.style.marginBottom = '6px'; d.textContent = listMsg.description; card.appendChild(d) }
     ;(listMsg.sections || []).forEach((sec) => {
-      if (sec.title) { const st = document.createElement("div"); st.style.margin = "6px 0 4px"; st.style.fontSize = "12px"; st.style.opacity = ".8"; st.textContent = sec.title; card.appendChild(st) }
+      if (sec.title) { const st = document.createElement('div'); st.style.margin = '6px 0 4px'; st.style.fontSize = '12px'; st.style.opacity = '.8'; st.textContent = sec.title; card.appendChild(st) }
       ;(sec.rows || []).forEach((row) => {
-        const opt = document.createElement("div")
-        opt.style.padding = "6px 8px"
-        opt.style.border = "1px solid var(--muted,#eee)"
-        opt.style.borderRadius = "6px"
-        opt.style.marginBottom = "6px"
-        opt.textContent = row.title || row.id || "(opção)"
+        const opt = document.createElement('div')
+        opt.style.padding = '6px 8px'
+        opt.style.border = '1px solid var(--muted,#eee)'
+        opt.style.borderRadius = '6px'
+        opt.style.marginBottom = '6px'
+        opt.textContent = row.title || row.id || '(opção)'
         card.appendChild(opt)
       })
     })
     container.appendChild(card); return true
   }
   if (btnsMsg) {
-    const card = document.createElement("div"); card.className = "bubble-actions"
-    card.style.border = "1px solid var(--muted,#ddd)"; card.style.borderRadius = "8px"; card.style.padding = "8px"; card.style.maxWidth = "320px"
+    const card = document.createElement('div'); card.className = 'bubble-actions'
+    card.style.border = '1px solid var(--muted,#ddd)'; card.style.borderRadius = '8px'; card.style.padding = '8px'; card.style.maxWidth = '320px'
     const title = btnsMsg.title || btnsMsg.hydratedTitle; const text = btnsMsg.text || btnsMsg.hydratedContentText
-    if (title) { const h = document.createElement("div"); h.style.fontWeight = "600"; h.style.marginBottom = "6px"; h.textContent = title; card.appendChild(h) }
-    if (text) { const d = document.createElement("div"); d.style.fontSize = "12px"; d.style.opacity = ".85"; d.style.marginBottom = "6px"; d.textContent = text; card.appendChild(d) }
+    if (title) { const h = document.createElement('div'); h.style.fontWeight = '600'; h.style.marginBottom = '6px'; h.textContent = title; card.appendChild(h) }
+    if (text) { const d = document.createElement('div'); d.style.fontSize = '12px'; d.style.opacity = '.85'; d.style.marginBottom = '6px'; d.textContent = text; card.appendChild(d) }
     const buttons = btnsMsg.buttons || btnsMsg.hydratedButtons || []
     buttons.forEach((b) => {
-      const lbl = b?.quickReplyButton?.displayText || b?.urlButton?.displayText || b?.callButton?.displayText || b?.displayText || "Opção"
-      const btn = document.createElement("div"); btn.textContent = lbl; btn.style.display = "inline-block"; btn.style.padding = "6px 10px"; btn.style.border = "1px solid var(--muted,#eee)"; btn.style.borderRadius = "999px"; btn.style.margin = "4px 6px 0 0"; btn.style.fontSize = "12px"; btn.style.opacity = ".9"; card.appendChild(btn)
+      const lbl = b?.quickReplyButton?.displayText || b?.urlButton?.displayText || b?.callButton?.displayText || b?.displayText || 'Opção'
+      const btn = document.createElement('div'); btn.textContent = lbl; btn.style.display = 'inline-block'; btn.style.padding = '6px 10px'; btn.style.border = '1px solid var(--muted,#eee)'; btn.style.borderRadius = '999px'; btn.style.margin = '4px 6px 0 0'; btn.style.fontSize = '12px'; btn.style.opacity = '.9'; card.appendChild(btn)
     })
     container.appendChild(card); return true
   }
   if (listResp) {
-    const picked = listResp?.singleSelectReply?.selectedRowId || listResp?.title || "(resposta de lista)"
-    const tag = document.createElement("div"); tag.style.display = "inline-block"; tag.style.padding = "6px 10px"; tag.style.border = "1px solid var(--muted,#ddd)"; tag.style.borderRadius = "6px"; tag.style.fontSize = "12px"; tag.textContent = picked; container.appendChild(tag); return true
+    const picked = listResp?.singleSelectReply?.selectedRowId || listResp?.title || '(resposta de lista)'
+    const tag = document.createElement('div'); tag.style.display = 'inline-block'; tag.style.padding = '6px 10px'; tag.style.border = '1px solid var(--muted,#ddd)'; tag.style.borderRadius = '6px'; tag.style.fontSize = '12px'; tag.textContent = picked; container.appendChild(tag); return true
   }
   if (btnResp) {
-    const picked = btnResp?.selectedDisplayText || btnResp?.selectedButtonId || "(resposta)"
-    const tag = document.createElement("div"); tag.style.display = "inline-block"; tag.style.padding = "6px 10px"; tag.style.border = "1px solid var(--muted,#ddd)"; tag.style.borderRadius = "6px"; tag.style.fontSize = "12px"; tag.textContent = picked; container.appendChild(tag); return true
+    const picked = btnResp?.selectedDisplayText || btnResp?.selectedButtonId || '(resposta)'
+    const tag = document.createElement('div'); tag.style.display = 'inline-block'; tag.style.padding = '6px 10px'; tag.style.border = '1px solid var(--muted,#ddd)'; tag.style.borderRadius = '6px'; tag.style.fontSize = '12px'; tag.textContent = picked; container.appendChild(tag); return true
   }
   return false
 }
