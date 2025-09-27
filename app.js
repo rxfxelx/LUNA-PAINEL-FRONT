@@ -273,6 +273,7 @@ async function acctApi(path, opts = {}) {
 }
 
 // ==== Billing System ====
+// ⚠️ Alterado: registrar trial para CONTA e INSTÂNCIA sempre (idempotente)
 let billingStatus = null
 async function registerTrialUser() {
   try { await acctApi("/api/billing/register-trial", { method: "POST" }); console.log("[v1] Trial user registered") }
@@ -280,41 +281,73 @@ async function registerTrialUser() {
 }
 async function registerTrial() {
   try {
-    if (acctJwt()) { await acctApi("/api/billing/register-trial", { method: "POST" }); console.log("[v1] Trial OK (user)") }
-    else { await api("/api/billing/register-trial", { method: "POST" }); console.log("[v0] Trial OK (instance)") }
-  } catch (e) { console.error("[v1] Failed to register trial:", e) }
+    // Conta
+    if (acctJwt()) {
+      await acctApi("/api/billing/register-trial", { method: "POST" })
+      console.log("[trial] conta OK")
+    }
+  } catch (e) { console.warn("[trial] conta falhou (ignorado):", e) }
+  try {
+    // Instância
+    if (jwt()) {
+      await api("/api/billing/register-trial", { method: "POST" })
+      console.log("[trial] instância OK")
+    }
+  } catch (e) { console.warn("[trial] instância falhou (ignorado):", e) }
 }
 
-/** 
- * Verifica status de billing. 
- * @param {{allowModal?: boolean}} opts - quando allowModal=false, nunca abre o modal.
+/**
+ * Verifica status de billing (prioriza a INSTÂNCIA).
+ * Quando allowModal=false, nunca abre o modal.
  */
 async function checkBillingStatus(opts = {}) {
   const { allowModal = true } = opts
-  try {
-    let res
-    if (acctJwt()) res = await acctApi("/api/billing/status")
-    else res = await api("/api/billing/status")
-    const st = res?.status ?? res
-    window.__BILLING_KEY__ = (res && (res.billing_key || res.key || res.tenant_key)) || window.__BILLING_KEY__
-    billingStatus = st;
-    window.__BILLING_KEY__ = (st && (st.key || st.billing_key || st.tenant_key)) || window.__BILLING_KEY__
-    /* >>> NOVO: guardar o email do usuário para o checkout */
-    window.__USER_EMAIL__ = userEmail() || window.__USER_EMAIL__ || ""
+  let ok = true
+  let st = null
+  let key = window.__BILLING_KEY__ || ""
 
-    // Só mostra modal quando permitido e app visível
-    const appVisible = !!document.getElementById("app-view") && !document.getElementById("app-view").classList.contains("hidden")
-    if (billingStatus?.require_payment === true) {
-      if (allowModal && appVisible) { showBillingModal() }
-      updateBillingView()
-      return false
+  try {
+    // 1) Prioriza status da INSTÂNCIA (é o que guarda as conversas)
+    const r = await fetch(BACKEND() + "/api/billing/status", { headers: { ...authHeaders() } })
+    if (r.ok) {
+      const data = await r.json().catch(() => ({}))
+      st = data?.status ?? data
+      key = data?.billing_key || data?.key || data?.tenant_key || key
+      ok = !(st?.require_payment === true) && (st?.active !== false)
+    } else if (r.status === 402) {
+      const txt = await r.text().catch(() => "")
+      let j = {}
+      try { j = JSON.parse(txt) } catch {}
+      const det = j?.detail || j || {}
+      st = { ...det, require_payment: true }
+      ok = false
+    } else if (r.status === 401 || r.status === 403) {
+      // Não autenticado na instância -> bloquear conversas
+      ok = false
+      st = { require_payment: true }
+    } else {
+      // Falha transitória: não bloquear
+      ok = true
     }
-    updateBillingView()
-    return true
   } catch (e) {
-    console.error("[v1] Failed to check billing status:", e)
-    return true
+    console.error("[billing] erro ao consultar status da instância:", e)
+    ok = true // não bloquear por falha temporária
   }
+
+  // 2) Atualiza variáveis globais/visuais
+  window.__BILLING_KEY__ = key || window.__BILLING_KEY__
+  billingStatus = st
+  window.__USER_EMAIL__ = userEmail() || window.__USER_EMAIL__ || ""
+
+  // Mostrar/ocultar modal conforme necessário
+  try {
+    const appVisible = !!document.getElementById("app-view") && !document.getElementById("app-view").classList.contains("hidden")
+    const billingVisible = !!document.getElementById("billing-view") && !document.getElementById("billing-view").classList.contains("hidden")
+    if (!ok && allowModal && appVisible && !billingVisible) showBillingModal()
+  } catch {}
+
+  updateBillingView()
+  return ok
 }
 function showBillingModal() { $("#billing-modal")?.classList.remove("hidden") }
 function hideBillingModal() { $("#billing-modal")?.classList.add("hidden") }
@@ -336,10 +369,6 @@ async function goToStripeCheckout({ plan = "luna_base", tenant_key = "", email =
   if (tenant_key) params.set("tenant_key", tenant_key)
   if (email) params.set("email", email)
 
-  // Este helper invoca o endpoint GET /api/pay/stripe/checkout-url e
-  // redireciona o usuário para a URL retornada pelo Stripe.  Caso ocorra
-  // qualquer falha no fetch ou a resposta não contenha a propriedade `url`,
-  // exibimos um alerta em vez de tentar redirecionar para uma página estática.
   try {
     const r = await fetch(BACKEND() + "/api/pay/stripe/checkout-url?" + params.toString(), {
       method: "GET",
@@ -416,8 +445,6 @@ function showCardModal() {
 window.showCardModal = showCardModal
 
 // Exponha helpers de checkout para que o HTML (index.html) possa chamá‑los diretamente.
-// Isto permite que os manipuladores de clique definidos em index.html usem a mesma
-// lógica de app.js sem hard‑codar URLs.
 window.goToStripeCheckout = goToStripeCheckout;
 window.createCheckoutLink = createCheckoutLink;
 
@@ -906,7 +933,7 @@ async function showConversasView() {
   // estiver com trial expirado ou assinatura inativa, exibimos a tela de
   // pagamentos e não permitimos acesso às conversas.
   try {
-    const ok = await checkBillingStatus()
+    const ok = await checkBillingStatus({ allowModal: false })
     if (!ok) {
       showBillingView()
       return
@@ -1223,10 +1250,12 @@ async function doLogin() {
     })
     if (!r.ok) throw new Error(await r.text())
     const data = await r.json(); localStorage.setItem("luna_jwt", data.jwt)
+
+    // Abre trial para conta e instância (idempotente)
     try { await registerTrial() } catch {}
 
     // -> entra no app primeiro; billing só depois
-    switchToApp()
+    await switchToApp()
     try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
   } catch (e) {
     console.error(e); if (msgEl) msgEl.textContent = "Token inválido. Verifique e tente novamente."
@@ -1246,29 +1275,24 @@ function ensureTopbar() {
     const host = $("#app-view") || document.body; host.prepend(tb)
   }
 }
-function switchToApp() {
+async function switchToApp() {
   hide("#login-view"); show("#app-view"); setMobileMode("list"); ensureTopbar(); ensureCRMBar(); ensureStageTabs(); createSplash()
   ensureMobilePayFAB()
-  showConversasView()
-  loadChats().finally(() => {})
 
-  // 🔒 Verificação de billing *apenas depois* que o app está visível.
-  // Se o trial estiver expirado ou a assinatura inativa, direcionamos o
-  // usuário imediatamente para a tela de pagamentos, bloqueando o acesso às conversas.
-  setTimeout(async () => {
-    try {
-      const ok = await checkBillingStatus()
-      if (!ok) {
-        showBillingView()
-      }
-    } catch (e) {
-      console.error(e)
-    }
-  }, 0)
+  // 🔒 Verificação de billing ANTES de tentar carregar conversas
+  const ok = await checkBillingStatus()
+  if (!ok) {
+    showBillingView()
+    return
+  }
+
+  // Agora sim, conversa
+  showConversasView()
+  await loadChats()
 }
 
 // >>> conta primeiro, instância depois
-function ensureRoute() {
+async function ensureRoute() {
   const hasAcct = !!acctJwt()
   const hasInst = !!jwt()
 
@@ -1279,7 +1303,7 @@ function ensureRoute() {
   if (!hasInst) { showStepInstance(); return }
 
   // Com conta e instância → app
-  switchToApp()
+  await switchToApp()
   try { if (typeof handleRoute === 'function') handleRoute() } catch(e) {}
 }
 // <<< fim da correção
@@ -1799,7 +1823,7 @@ function appendMessageBubble(pane, m) {
   const top = document.createElement("div"); renderReplyPreview(top, m)
   const hadInteractive = renderInteractive(top, m)
   const { mime, url, dataUrl, caption } = pickMediaInfo(m)
-  const plainText = m.text || m.message?.text || m?.message?.extendedTextMessage?.text || m?.message?.conversation || m.caption || m.body || ""
+  const plainText = m.text || m.message?.text || m?.message?.extendedTextMessage?.text || m?.message?.conversation || m?.caption || m?.body || ""
   const who = m.senderName || m.pushName || ""; const ts = m.messageTimestamp || m.timestamp || m.t || ""
 
   // Sticker
