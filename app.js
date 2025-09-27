@@ -1120,7 +1120,22 @@ async function flushStageLookup() {
  * 5) CRM
  * ======================================= */
 const CRM_STAGES = ["novo", "sem_resposta", "interessado", "em_negociacao", "fechou", "descartado"]
-async function apiCRMViews() { return api("/api/crm/views") }
+
+// >>> ÚNICA MUDANÇA: POST com fallback para GET
+async function apiCRMViews() {
+  try {
+    return await api("/api/crm/views", { method: "POST", body: "{}" })
+  } catch (e1) {
+    try {
+      return await api("/api/crm/views")
+    } catch (e2) {
+      console.warn("[crm] falha em /api/crm/views (POST e GET):", e1?.message || e1, e2?.message || e2)
+      return { counts: {} }
+    }
+  }
+}
+// <<<
+
 async function apiCRMList(stage, limit = 100, offset = 0) {
   const qs = new URLSearchParams({ stage, limit, offset }).toString()
   return api("/api/crm/list?" + qs)
