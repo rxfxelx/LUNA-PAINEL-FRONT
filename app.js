@@ -97,28 +97,38 @@ function authHeaders() {
  * It will return the innermost message object it can find.
  */
 function unwrapMessage(msg) {
+  /*
+   * Many APIs, including Uazapi, wrap the actual WhatsApp payload under
+   * either a `.message` or `.content` property.  Additionally, view‑once
+   * and ephemerals add another `.message` layer.  This helper walks
+   * through these wrappers, preferring `.message` or `.content` when
+   * present.  It stops when no further unwrapping is possible or when
+   * the container has multiple keys (indicating a fully populated
+   * structure).
+   */
   try {
     let m = msg
-    // Some APIs nest the message content under a `.message` property
-    // repeatedly. Walk down as long as there is only one nested message.
-    while (m && m.message && typeof m.message === 'object' && !Array.isArray(m.message)) {
-      // Handle wrappers introduced by WhatsApp/baileys: viewOnceMessage and
-      // ephemerals contain a `.message` field with the actual content.
-      if (m.message.viewOnceMessage && m.message.viewOnceMessage.message) {
-        m = m.message.viewOnceMessage.message
+    while (m) {
+      // Determine the immediate container: .message or .content
+      const container = (m && (m.message || m.content)) || null
+      if (!container || typeof container !== 'object' || Array.isArray(container)) break
+      // Handle viewOnce wrappers
+      if (container.viewOnceMessage && container.viewOnceMessage.message) {
+        m = container.viewOnceMessage.message
         continue
       }
-      if (m.message.ephemeralMessage && m.message.ephemeralMessage.message) {
-        m = m.message.ephemeralMessage.message
+      // Handle ephemerals
+      if (container.ephemeralMessage && container.ephemeralMessage.message) {
+        m = container.ephemeralMessage.message
         continue
       }
-      // Fallback: if the sole property under `.message` is itself a message
-      // container (e.g. { message: { imageMessage: {...} } }), unwrap it
-      const keys = Object.keys(m.message)
+      // If the container contains exactly one key ending in 'Message', unwrap it
+      const keys = Object.keys(container)
       if (keys.length === 1 && keys[0].endsWith('Message')) {
-        m = m.message
+        m = container
         continue
       }
+      // Otherwise stop unwrapping
       break
     }
     return m
@@ -1900,7 +1910,19 @@ async function prefetchCards(items) {
             const data = await api("/api/messages", { method: "POST", body: JSON.stringify({ chatid, limit: 1, sort: "-messageTimestamp" }) })
             const last = Array.isArray(data?.items) ? data.items[0] : null
             if (last) {
-              const pv = (last.text || last.caption || last?.message?.text || last?.message?.conversation || last?.body || "").replace(/\s+/g, " ").trim()
+              // Derive a preview from the last message.  Consider both top‑level
+              // fields and nested `.message`/`.content` containers.  This
+              // accommodates different response formats from Uazapi.
+              const lmsg = (last && (last.message || last.content)) || {}
+              let pv = (typeof last.text === 'string' && last.text) ||
+                (typeof last.caption === 'string' && last.caption) ||
+                (typeof lmsg.text === 'string' && lmsg.text) ||
+                (typeof lmsg.conversation === 'string' && lmsg.conversation) ||
+                (lmsg.extendedTextMessage && lmsg.extendedTextMessage.text) ||
+                (typeof lmsg.caption === 'string' && lmsg.caption) ||
+                (typeof last.body === 'string' && last.body) ||
+                ''
+              pv = String(pv || '').replace(/\s+/g, ' ').trim()
               state.lastMsg.set(chatid, pv); const fromMe = isFromMe(last); state.lastMsgFromMe.set(chatid, fromMe)
               LStore.set(pvKey, { text: pv || "", fromMe }, TTL.PREVIEW)
               const card = document.querySelector(`.chat-item[data-chatid="${CSS.escape(chatid)}"] .preview`)
@@ -2030,24 +2052,27 @@ async function progressiveRenderMessages(msgs) {
  * 15) MÍDIA / INTERATIVOS / REPLIES
  * ======================================= */
 function pickMediaInfo(m) {
-  // Unwrap nested message structures to find the actual payload
+  // Unwrap nested message structures to find the actual payload.  The
+  // underlying payload might live under `.message` or `.content`, so
+  // consider both when drilling down.
   const base = unwrapMessage(m)
-  const mm = base.message || base
+  // Top‑level message container (may be undefined)
+  const mm = (base && (base.message || base.content)) || base
   // Determine mimetype. Sticker messages may not have a mimetype, so
   // supply one manually for webp stickers.
   // Determine mimetype. Start with explicit fields on the unwrapped
   // message. If not found, search nested structures for a media
   // message type and extract the mimetype from there.  Stickers
   // default to image/webp when no mimetype is present.
-  let mime = base.mimetype || base.mime ||
-    mm?.imageMessage?.mimetype ||
-    mm?.videoMessage?.mimetype ||
-    mm?.documentMessage?.mimetype ||
-    mm?.audioMessage?.mimetype ||
-    (mm?.stickerMessage ? 'image/webp' : '') || ''
-  let url = base.mediaUrl || base.url || base.fileUrl || base.downloadUrl || base.image || base.video || ''
-  let dataUrl = base.dataUrl || ''
-  let caption = base.caption || base.text || base.body || ''
+  let mime = base?.mimetype || base?.mime ||
+    (mm && mm.imageMessage ? mm.imageMessage.mimetype : undefined) ||
+    (mm && mm.videoMessage ? mm.videoMessage.mimetype : undefined) ||
+    (mm && mm.documentMessage ? mm.documentMessage.mimetype : undefined) ||
+    (mm && mm.audioMessage ? mm.audioMessage.mimetype : undefined) ||
+    (mm && mm.stickerMessage ? 'image/webp' : '') || ''
+  let url = base?.mediaUrl || base?.url || base?.fileUrl || base?.downloadUrl || base?.image || base?.video || ''
+  let dataUrl = base?.dataUrl || ''
+  let caption = base?.caption || base?.text || base?.body || ''
   // If we haven't found a URL or mimetype yet, search within nested
   // message structures for media messages.  This covers cases where
   // the media is embedded inside templateMessage.hydratedTemplate or
@@ -2113,12 +2138,26 @@ function extractQuotedPreview(q) {
       return cur
     }
     for (const path of candidateKeys) {
-      // Try direct dotted path
-      const direct = getByPath(base, path)
+      // Try direct dotted path on the unwrapped base
+      let direct = getByPath(base, path)
+      // If not found, also check on `.message` and `.content` containers
+      if (direct == null && base && typeof base === 'object') {
+        const container = base.message || base.content
+        if (container) {
+          direct = getByPath(container, path)
+        }
+      }
       if (typeof direct === 'string' && direct.trim()) return direct
       // Then attempt via findNested on the leaf key
       const key = path.split('.').pop()
-      const val = findNested(base, [key], 3)
+      let val = findNested(base, [key], 3)
+      // Search inside `.message`/`.content` as well if not found
+      if (!val && base && typeof base === 'object') {
+        const container2 = base.message || base.content
+        if (container2) {
+          val = findNested(container2, [key], 3)
+        }
+      }
       if (typeof val === 'string' && val.trim()) return val
     }
     // As a final fallback, check specific media caption fields
@@ -2139,10 +2178,23 @@ async function fetchMediaBlobViaProxy(rawUrl) {
 function renderReplyPreview(container, m) {
   // Walk into nested containers to locate context information.
   const base = unwrapMessage(m)
-  // Find the contextInfo object either on the base message or nested within
-  let ctx = base?.contextInfo || findNested(base, ['contextInfo'], 4) || {}
+  // Find the contextInfo object either on the unwrapped message, its
+  // `.message`/`.content` container, or nested within.  Uazapi may nest
+  // `contextInfo` under `.message`/`.content` instead of on the root.
+  let ctx = null
+  if (base && typeof base === 'object') {
+    ctx = base.contextInfo || ((base.message || base.content || {}).contextInfo)
+  }
+  if (!ctx) ctx = findNested(base, ['contextInfo'], 4) || {}
   // Locate the quoted message inside contextInfo
   let qm = ctx?.quotedMessage || ctx?.quotedMsg || ctx?.quoted_message || null
+  // Some Uazapi responses include the quoted object under a generic
+  // `quoted` property.  Treat it as a message only if it is an
+  // object (string values are just IDs).
+  if (!qm && ctx && typeof ctx === 'object') {
+    const q = ctx.quoted
+    if (q && typeof q === 'object') qm = q
+  }
   if (!qm) {
     qm = findNested(ctx, ['quotedMessage', 'quotedMsg', 'quoted_message'], 4)
   }
@@ -2184,11 +2236,13 @@ function renderReplyPreview(container, m) {
   container.appendChild(box)
 }
 function renderInteractive(container, m) {
-  // Unwrap nested structures to expose interactive message types
+  // Unwrap nested structures to expose interactive message types.  The
+  // underlying payload may reside under `.message` or `.content`, so
+  // consider both when determining the root.
   const base = unwrapMessage(m)
-  // Root message container.  Some message types wrap the actual content
-  // inside `interactiveMessage`, so prefer that if present.
-  const msg = (base?.message || base) || {}
+  const msg = (base && (base.message || base.content)) || base || {}
+  // Some message types wrap the actual content inside
+  // `interactiveMessage`, so prefer that if present.
   const root = msg?.interactiveMessage || msg
   // List and button messages may be nested inside templateMessage,
   // hydratedTemplate or other wrappers.  Use findNested to locate
@@ -2260,7 +2314,23 @@ function appendMessageBubble(pane, m) {
   const top = document.createElement("div"); renderReplyPreview(top, m)
   const hadInteractive = renderInteractive(top, m)
   const { mime, url, dataUrl, caption } = pickMediaInfo(m)
-  const plainText = m.text || m.message?.text || m?.message?.extendedTextMessage?.text || m?.message?.conversation || m?.caption || m?.body || ""
+  // Determine plain text by checking both the top-level and nested containers.
+  // Compute a plain text preview.  Unwrap nested structures to locate
+  // text or caption fields.  Fall back to top‑level fields as well.
+  const mUnwrapped = unwrapMessage(m) || {}
+  const container = (m && (m.message || m.content)) || {}
+  const plainText =
+    (typeof m.text === 'string' && m.text) ||
+    (typeof m.caption === 'string' && m.caption) ||
+    (typeof container.text === 'string' && container.text) ||
+    (typeof container.conversation === 'string' && container.conversation) ||
+    (container.extendedTextMessage && container.extendedTextMessage.text) ||
+    (typeof mUnwrapped.text === 'string' && mUnwrapped.text) ||
+    (typeof mUnwrapped.conversation === 'string' && mUnwrapped.conversation) ||
+    (mUnwrapped.extendedTextMessage && mUnwrapped.extendedTextMessage.text) ||
+    (typeof mUnwrapped.caption === 'string' && mUnwrapped.caption) ||
+    (typeof m.body === 'string' && m.body) ||
+    ''
   const who = m.senderName || m.pushName || ""; const ts = m.messageTimestamp || m.timestamp || m.t || ""
 
   // If we detected a possible media message but there is no URL or dataUrl yet,
@@ -2268,9 +2338,11 @@ function appendMessageBubble(pane, m) {
   // Uazapi provides only a media key and the actual download URL must be
   // retrieved via the /media/resolve endpoint.  Once resolved, we
   // re-invoke rendering logic with the obtained URL.
+  // Unwrap once for media detection
+  const baseMedia = unwrapMessage(m)
   const hasMediaIndicator = !!(
-    mime && /^(image|video|audio|application)\//i.test(mime) ||
-    findNested(m, ['imageMessage','videoMessage','documentMessage','audioMessage','stickerMessage'], 3)
+    (mime && /^(image|video|audio|application)\//i.test(mime)) ||
+    findNested(baseMedia, ['imageMessage','videoMessage','documentMessage','audioMessage','stickerMessage'], 3)
   )
   if (!url && !dataUrl && hasMediaIndicator) {
     // Show a placeholder while resolving
