@@ -128,6 +128,36 @@ function unwrapMessage(msg) {
 }
 
 /*
+ * Recursively search a nested object for the first property whose key
+ * appears in `keys`.  This is useful for locating media message
+ * structures (e.g. imageMessage, videoMessage, documentMessage) or
+ * interactive response structures (e.g. listResponseMessage,
+ * buttonsResponseMessage) that might be wrapped in multiple layers
+ * (templateMessage, hydratedTemplate, interactiveMessage, etc.).  The
+ * search depth is limited to prevent excessive traversal.
+ *
+ * @param {object} obj The object to search
+ * @param {string[]} keys A list of keys to look for
+ * @param {number} depth Maximum depth to search
+ * @returns {object|null} The found nested object or null if none
+ */
+function findNested(obj, keys, depth = 4) {
+  if (!obj || typeof obj !== 'object' || depth < 0) return null
+  for (const k of keys) {
+    if (obj[k] && typeof obj[k] === 'object') return obj[k]
+  }
+  for (const key in obj) {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue
+    const val = obj[key]
+    if (val && typeof val === 'object') {
+      const found = findNested(val, keys, depth - 1)
+      if (found) return found
+    }
+  }
+  return null
+}
+
+/*
  * Attempt to obtain a human‑friendly name for the currently connected
  * instance. When a user connects an instance via token, the backend
  * proxy (/api/meta/instance/status) will forward the UAZAPI status
@@ -217,12 +247,40 @@ async function fetchInstanceNameCandidate() {
  * successfully connecting an instance or when switching into the
  * application. Does nothing if the DOM element is not found.
  */
-async function updateProfileName() {
+/**
+ * Atualiza o label de perfil com o nome da instância.  Este método tenta
+ * obter um nome legível via `fetchInstanceNameCandidate()`.  Em alguns
+ * cenários, o backend pode retornar apenas o e‑mail do operador até que
+ * a instância esteja completamente conectada.  Para lidar com isso, se
+ * o valor retornado contiver um "@" (sugerindo um e‑mail) ou estiver
+ * vazio, uma nova tentativa será agendada após alguns segundos.  O
+ * número de tentativas é limitado para evitar chamadas infinitas.
+ *
+ * @param {number} retryCount Número de tentativas já realizadas.
+ */
+async function updateProfileName(retryCount = 0) {
   const el = document.getElementById('profile')
   if (!el) return
-  const name = await fetchInstanceNameCandidate()
-  if (name && typeof name === 'string' && name.trim()) {
-    el.textContent = name.trim()
+  try {
+    const name = await fetchInstanceNameCandidate()
+    const isEmail = typeof name === 'string' && /@/.test(name)
+    // Only update if we have a non‑empty name that does not look like an e‑mail
+    if (name && typeof name === 'string' && name.trim() && !isEmail) {
+      el.textContent = name.trim()
+      return
+    }
+    // If the candidate looks like an e‑mail or is falsy, and we have
+    // remaining retries, schedule another attempt.  This helps when the
+    // instance is connecting and the profile name becomes available
+    // shortly thereafter.
+    if (retryCount < 5) {
+      setTimeout(() => updateProfileName(retryCount + 1), 4000)
+    } else if (name && typeof name === 'string') {
+      // After exhausting retries, fall back to whatever we have
+      el.textContent = name.trim()
+    }
+  } catch (e) {
+    console.error('updateProfileName failed', e)
   }
 }
 
@@ -1985,43 +2043,34 @@ function pickMediaInfo(m) {
   const mm = base.message || base
   // Determine mimetype. Sticker messages may not have a mimetype, so
   // supply one manually for webp stickers.
-  const mime = base.mimetype || base.mime ||
+  // Determine mimetype. Start with explicit fields on the unwrapped
+  // message. If not found, search nested structures for a media
+  // message type and extract the mimetype from there.  Stickers
+  // default to image/webp when no mimetype is present.
+  let mime = base.mimetype || base.mime ||
     mm?.imageMessage?.mimetype ||
     mm?.videoMessage?.mimetype ||
     mm?.documentMessage?.mimetype ||
     mm?.audioMessage?.mimetype ||
     (mm?.stickerMessage ? 'image/webp' : '') || ''
-  // Determine URL for media. Check a variety of possible fields to
-  // maximise compatibility with upstream message formats.
-  const url = base.mediaUrl || base.url || base.fileUrl || base.downloadUrl || base.image || base.video ||
-    mm?.imageMessage?.url ||
-    mm?.videoMessage?.url ||
-    mm?.documentMessage?.url ||
-    mm?.stickerMessage?.url ||
-    mm?.audioMessage?.url ||
-    mm?.imageMessage?.fileUrl ||
-    mm?.videoMessage?.fileUrl ||
-    mm?.documentMessage?.fileUrl ||
-    mm?.audioMessage?.fileUrl ||
-    ''
-  // Embedded base64 data URL
-  const dataUrl = base.dataUrl ||
-    mm?.imageMessage?.dataUrl ||
-    mm?.videoMessage?.dataUrl ||
-    mm?.documentMessage?.dataUrl ||
-    mm?.stickerMessage?.dataUrl ||
-    mm?.audioMessage?.dataUrl ||
-    ''
-  // Caption or file name
-  const caption = base.caption ||
-    mm?.imageMessage?.caption ||
-    mm?.videoMessage?.caption ||
-    mm?.documentMessage?.caption ||
-    mm?.documentMessage?.fileName ||
-    base.text ||
-    mm?.conversation ||
-    base.body ||
-    ''
+  let url = base.mediaUrl || base.url || base.fileUrl || base.downloadUrl || base.image || base.video || ''
+  let dataUrl = base.dataUrl || ''
+  let caption = base.caption || base.text || base.body || ''
+  // If we haven't found a URL or mimetype yet, search within nested
+  // message structures for media messages.  This covers cases where
+  // the media is embedded inside templateMessage.hydratedTemplate or
+  // other wrappers not unwrapped by unwrapMessage().
+  const nestedMedia = findNested(mm, ['imageMessage','videoMessage','documentMessage','audioMessage','stickerMessage'], 4)
+  if (nestedMedia) {
+    mime = mime || nestedMedia.mimetype || (nestedMedia.stickerMessage ? 'image/webp' : '') || ''
+    url = url || nestedMedia.url || nestedMedia.fileUrl || nestedMedia.downloadUrl || ''
+    dataUrl = dataUrl || nestedMedia.dataUrl || ''
+    caption = caption || nestedMedia.caption || nestedMedia.fileName || nestedMedia.filename || ''
+  } else {
+    // Also try to locate nested url fields directly
+    const nestedUrlObj = findNested(mm, ['url','fileUrl','downloadUrl','image','video'], 3)
+    if (nestedUrlObj && typeof nestedUrlObj === 'string') url = url || nestedUrlObj
+  }
   return {
     mime: String(mime || ''),
     url: String(url || ''),
@@ -2036,17 +2085,14 @@ async function fetchMediaBlobViaProxy(rawUrl) {
   return await r.blob()
 }
 function renderReplyPreview(container, m) {
-  // Walk into nested containers to locate context information
+  // Walk into nested containers to locate context information.  Use
+  // findNested to search for contextInfo anywhere within the message.
   const base = unwrapMessage(m)
-  const ctx =
-    base?.message?.extendedTextMessage?.contextInfo ||
-    base?.message?.imageMessage?.contextInfo ||
-    base?.message?.videoMessage?.contextInfo ||
-    base?.message?.stickerMessage?.contextInfo ||
-    base?.message?.documentMessage?.contextInfo ||
-    base?.message?.audioMessage?.contextInfo ||
-    base?.contextInfo || {}
-  const qm = ctx.quotedMessage || base?.quotedMsg || base?.quoted_message || null
+  let ctx = null
+  // Prefer direct contextInfo on the message if available
+  if (base?.contextInfo) ctx = base.contextInfo
+  if (!ctx) ctx = findNested(base, ['contextInfo'], 4) || {}
+  const qm = (ctx && (ctx.quotedMessage || ctx.quotedMsg || ctx.quoted_message)) || base?.quotedMsg || base?.quoted_message || null
   if (!qm) return
   // Unwrap quoted message as well
   const q = unwrapMessage(qm)
@@ -2072,10 +2118,12 @@ function renderInteractive(container, m) {
   // Unwrap nested structures to expose interactive message types
   const base = unwrapMessage(m)
   const msg = base.message || base
-  const listMsg = msg?.listMessage
-  const btnsMsg = msg?.buttonsMessage || msg?.templateMessage?.hydratedTemplate
-  const listResp = msg?.listResponseMessage
-  const btnResp = msg?.buttonsResponseMessage
+  // List and button messages may be nested inside templateMessage or other
+  // wrappers.  Use findNested to locate them if not directly present.
+  const listMsg = msg?.listMessage || findNested(msg, ['listMessage'], 3)
+  const btnsMsg = msg?.buttonsMessage || msg?.templateMessage?.hydratedTemplate || findNested(msg, ['buttonsMessage','hydratedTemplate'], 3)
+  const listResp = msg?.listResponseMessage || findNested(msg, ['listResponseMessage','listResponse'], 3)
+  const btnResp = msg?.buttonsResponseMessage || findNested(msg, ['buttonsResponseMessage','buttonsResponse'], 3)
 
   if (listMsg) {
     const card = document.createElement('div'); card.className = 'bubble-actions'
