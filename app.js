@@ -599,6 +599,8 @@ async function goToStripeCheckout({ plan = "luna_base", tenant_key = "", email =
 
 async function createCheckoutLink() {
   try {
+    // Garante que o billing_key está carregado
+    try { await checkBillingStatus({ allowModal: false }) } catch (e) { console.warn(e) }
     const plan = "luna_base";
     const tk   = (window.__BILLING_KEY__ || "").toString();
     const em   = (window.__USER_EMAIL__  || userEmail() || "").toString();
@@ -2637,6 +2639,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Pagamento com Stripe (AGORA com email + fallback robusto)
   $("#btn-pay-stripe") && ($("#btn-pay-stripe").onclick = async () => {
+    // Antes de iniciar o checkout, garantimos que existe um billing_key atualizado.
+    try {
+      await checkBillingStatus({ allowModal: false })
+    } catch (e) {
+      // Falhas transitórias ao verificar o billing não devem impedir a cobrança
+      console.warn("[billing] erro ao atualizar status antes de pagar:", e)
+    }
     const plan = "luna_base";
     const tk   = (window.__BILLING_KEY__ || "").toString();
     const em   = (window.__USER_EMAIL__  || userEmail() || "").toString();
@@ -2653,6 +2662,8 @@ document.addEventListener("DOMContentLoaded", () => {
     hideBillingModal();
     showBillingView();
     setViewInURL("billing", true);
+    // Garante que o billing_key está carregado antes do checkout
+    try { await checkBillingStatus({ allowModal: false }) } catch (e2) { console.warn(e2) }
     const plan = "luna_base";
     const tk   = (window.__BILLING_KEY__ || "").toString();
     const em   = (window.__USER_EMAIL__  || userEmail() || "").toString();
@@ -2678,6 +2689,8 @@ document.addEventListener("DOMContentLoaded", () => {
   // Link "cadastrar" → mesmo fluxo do botão de pagar
   $("#link-cadastrar") && ($("#link-cadastrar").onclick = async (e) => {
     e.preventDefault();
+    // Verifica/atualiza status para carregar o billing_key
+    try { await checkBillingStatus({ allowModal: false }) } catch (e3) { console.warn(e3) }
     const plan = "luna_base";
     const tk   = (window.__BILLING_KEY__ || "").toString();
     const em   = (window.__USER_EMAIL__  || userEmail() || "").toString();
