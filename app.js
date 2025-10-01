@@ -572,16 +572,16 @@ function updateBillingView() {
                 ((billingStatus.last_payment_status||'').toLowerCase()==='paid' && !billingStatus.paid_until)
 
   if (vital) {
-    if (currentPlan) currentPlan.textContent = "Vitalício"
-    if (daysRemaining) daysRemaining.textContent = "∞"
-    if (trialUntil) trialUntil.textContent = "N/A"
-    if (paidUntil) paidUntil.textContent = "Vitalício"
+    if (currentPlan) currentPlan.textContent = billingStatus.plan || "Plano pago"
+    if (daysRemaining) daysRemaining.textContent = ""   // não mostra nada
+    if (trialUntil) trialUntil.textContent = ""         // não mostra nada
+    if (paidUntil) paidUntil.textContent = ""           // não mostra nada
     // desabilita botão de assinar
     const btn = $("#btn-pay-stripe")
     if (btn) { 
       btn.disabled = true
       btn.classList.add("disabled")
-      btn.textContent = "Plano ativo (vitalício)"
+      btn.textContent = "Plano ativo"
     }
     return
   }
@@ -592,6 +592,7 @@ function updateBillingView() {
   if (trialUntil) trialUntil.textContent = billingStatus.trial_ends_at ? new Date(billingStatus.trial_ends_at).toLocaleString() : "N/A"
   if (paidUntil) paidUntil.textContent = billingStatus.paid_until ? new Date(billingStatus.paid_until).toLocaleString() : "N/A"
 }
+
 
 /* >>> NOVO: helper robusto de checkout (API -> Stripe) */
 async function goToStripeCheckout({ plan = "luna_base", tenant_key = "", email = "" } = {}) {
