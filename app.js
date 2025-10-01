@@ -566,6 +566,27 @@ function updateBillingView() {
   const daysRemaining = $("#days-remaining")
   const trialUntil = $("#trial-until")
   const paidUntil = $("#paid-until")
+
+  // 👉 Detecta vitalício
+  const vital = !!billingStatus.vitalicio ||
+                ((billingStatus.last_payment_status||'').toLowerCase()==='paid' && !billingStatus.paid_until)
+
+  if (vital) {
+    if (currentPlan) currentPlan.textContent = "Vitalício"
+    if (daysRemaining) daysRemaining.textContent = "∞"
+    if (trialUntil) trialUntil.textContent = "N/A"
+    if (paidUntil) paidUntil.textContent = "Vitalício"
+    // desabilita botão de assinar
+    const btn = $("#btn-pay-stripe")
+    if (btn) { 
+      btn.disabled = true
+      btn.classList.add("disabled")
+      btn.textContent = "Plano ativo (vitalício)"
+    }
+    return
+  }
+
+  // Default (trial/pago com data)
   if (currentPlan) currentPlan.textContent = billingStatus.plan || "Trial"
   if (daysRemaining) daysRemaining.textContent = String(billingStatus.days_left ?? "0")
   if (trialUntil) trialUntil.textContent = billingStatus.trial_ends_at ? new Date(billingStatus.trial_ends_at).toLocaleString() : "N/A"
