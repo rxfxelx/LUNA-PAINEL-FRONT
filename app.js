@@ -572,7 +572,10 @@ function updateBillingView() {
                 ((billingStatus.last_payment_status||'').toLowerCase()==='paid' && !billingStatus.paid_until)
 
   if (vital) {
-    if (currentPlan) currentPlan.textContent = billingStatus.plan || "Plano pago"
+    if (currentPlan) {
+      const planName = (billingStatus.plan || "").toLowerCase()
+      currentPlan.textContent = planName === "vitalicio" ? "Assinatura ativa" : billingStatus.plan || "Plano pago"
+    }
     if (daysRemaining) daysRemaining.textContent = ""   // não mostra nada
     if (trialUntil) trialUntil.textContent = ""         // não mostra nada
     if (paidUntil) paidUntil.textContent = ""           // não mostra nada
