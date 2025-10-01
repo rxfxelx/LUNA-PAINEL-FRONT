@@ -560,6 +560,9 @@ async function checkBillingStatus(opts = {}) {
 }
 function showBillingModal() { $("#billing-modal")?.classList.remove("hidden") }
 function hideBillingModal() { $("#billing-modal")?.classList.add("hidden") }
+function showBillingModal() { $("#billing-modal")?.classList.remove("hidden") }
+function hideBillingModal() { $("#billing-modal")?.classList.add("hidden") }
+
 function updateBillingView() {
   if (!billingStatus) return
   const currentPlan = $("#current-plan")
@@ -567,18 +570,21 @@ function updateBillingView() {
   const trialUntil = $("#trial-until")
   const paidUntil = $("#paid-until")
 
-  // 👉 Detecta vitalício
+  // 👉 Detecta vitalício (plano pago sem expiração)
   const vital = !!billingStatus.vitalicio ||
                 ((billingStatus.last_payment_status||'').toLowerCase()==='paid' && !billingStatus.paid_until)
 
   if (vital) {
     if (currentPlan) {
       const planName = (billingStatus.plan || "").toLowerCase()
-      currentPlan.textContent = planName === "vitalicio" ? "Assinatura ativa" : billingStatus.plan || "Plano pago"
+      currentPlan.textContent = planName === "vitalicio" ? "Luna IA Professional" : billingStatus.plan || "Plano ativo"
     }
-    if (daysRemaining) daysRemaining.textContent = ""   // não mostra nada
-    if (trialUntil) trialUntil.textContent = ""         // não mostra nada
-    if (paidUntil) paidUntil.textContent = ""           // não mostra nada
+
+    // 🔥 Esconde completamente as linhas
+    if (daysRemaining) daysRemaining.parentElement.style.display = "none"
+    if (trialUntil) trialUntil.parentElement.style.display = "none"
+    if (paidUntil) paidUntil.parentElement.style.display = "none"
+
     // desabilita botão de assinar
     const btn = $("#btn-pay-stripe")
     if (btn) { 
@@ -589,12 +595,23 @@ function updateBillingView() {
     return
   }
 
-  // Default (trial/pago com data)
+  // Default (trial/pago com data de expiração)
   if (currentPlan) currentPlan.textContent = billingStatus.plan || "Trial"
-  if (daysRemaining) daysRemaining.textContent = String(billingStatus.days_left ?? "0")
-  if (trialUntil) trialUntil.textContent = billingStatus.trial_ends_at ? new Date(billingStatus.trial_ends_at).toLocaleString() : "N/A"
-  if (paidUntil) paidUntil.textContent = billingStatus.paid_until ? new Date(billingStatus.paid_until).toLocaleString() : "N/A"
+
+  if (daysRemaining) {
+    daysRemaining.parentElement.style.display = ""
+    daysRemaining.textContent = String(billingStatus.days_left ?? "0")
+  }
+  if (trialUntil) {
+    trialUntil.parentElement.style.display = ""
+    trialUntil.textContent = billingStatus.trial_ends_at ? new Date(billingStatus.trial_ends_at).toLocaleString() : "N/A"
+  }
+  if (paidUntil) {
+    paidUntil.parentElement.style.display = ""
+    paidUntil.textContent = billingStatus.paid_until ? new Date(billingStatus.paid_until).toLocaleString() : "N/A"
+  }
 }
+
 
 
 /* >>> NOVO: helper robusto de checkout (API -> Stripe) */
